@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <title>vrm verify</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; }
+      #hud { position: fixed; top: 8px; left: 8px; font: 12px monospace; color: #333; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <script type="module">
+      // 驗證頁:與 overlay 共用同一份 viewer.ts,唯一差別是背景不透明(方便看膚色)。
+      // 拖任何 .vrm 進來即時替換 —— 跟 app 內行為同一條程式路徑。
+      import { createViewer } from './viewer.ts';
+      const hud = document.getElementById('hud');
+      const viewer = createViewer({ transparent: false, background: 0xf0f0f0 });
+      window.__viewer = viewer; // 驗證頁專用:讓自動化測試能呼叫替換路徑
+      viewer.loadFromUrl('/AvatarSample_A.vrm').then(
+        () => (hud.textContent = 'default VRM loaded — drop another .vrm to swap'),
+        (e) => (hud.textContent = 'ERR ' + e)
+      );
+      addEventListener('dragover', (e) => e.preventDefault());
+      addEventListener('drop', async (e) => {
+        e.preventDefault();
+        const f = e.dataTransfer?.files?.[0];
+        if (!f || !f.name.endsWith('.vrm')) return;
+        hud.textContent = 'loading ' + f.name + '…';
+        try { await viewer.loadFromBuffer(await f.arrayBuffer()); hud.textContent = f.name + ' loaded'; }
+        catch (err) { hud.textContent = 'ERR ' + err; }
+      });
+    </script>
+  </body>
+</html>

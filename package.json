@@ -1,0 +1,24 @@
+{
+  "name": "vrm-pet",
+  "version": "0.1.0",
+  "description": "Desktop VRM pet — rendering follows pixiv/three-vrm official examples verbatim",
+  "main": "out/main/index.js",
+  "scripts": {
+    "predev": "pkill -9 -f '3D-pet/node_modules/electron/dist' || true",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "electron": "^33.4.11",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "@types/three": "^0.169.0",
+    "three": "^0.169.0"
+  }
+}
