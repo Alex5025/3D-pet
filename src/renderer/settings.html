@@ -38,6 +38,24 @@
       }
       .pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
       .pad::after { top: 50%; left: 0; right: 0; height: 1px; }
+      /* 座標軸顏色(3D 慣例):X 紅、Y 綠、Z 藍。::after = 橫線、::before = 直線 */
+      .pad.hx::after { background: rgba(255, 99, 99, 0.55); }
+      .pad.hz::after { background: rgba(96, 148, 255, 0.55); }
+      .pad.vy::before { background: rgba(88, 214, 128, 0.55); }
+      .pad.vz::before { background: rgba(96, 148, 255, 0.55); }
+      .ax-x { color: #ff6363; }
+      .ax-y { color: #58d680; }
+      .ax-z { color: #6094ff; }
+      /* 原點(0,0,0)= 角色 */
+      .origin {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 15px;
+        pointer-events: none;
+        filter: grayscale(0.2);
+      }
       .dot {
         position: absolute;
         width: 12px;
@@ -81,24 +99,24 @@
       <h3>光源位置(相對角色)</h3>
       <div class="pads">
         <div class="pad-box">
-          <div class="cap"><span>XZ(俯視,下=朝你)</span><span class="val" id="lxz-val"></span></div>
-          <div class="pad" id="light-xz"><div class="dot"></div></div>
+          <div class="cap"><span><b class="ax-x">X</b><b class="ax-z">Z</b>(俯視,下=朝你)</span><span class="val" id="lxz-val"></span></div>
+          <div class="pad hx vz" id="light-xz"><span class="origin">🧍</span><div class="dot"></div></div>
         </div>
         <div class="pad-box">
-          <div class="cap"><span>YZ(側視,右=朝你)</span><span class="val" id="lyz-val"></span></div>
-          <div class="pad" id="light-yz"><div class="dot"></div></div>
+          <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b>(側視,右=朝你)</span><span class="val" id="lyz-val"></span></div>
+          <div class="pad hz vy" id="light-yz"><span class="origin">🧍</span><div class="dot"></div></div>
         </div>
       </div>
 
       <h3>角色位置</h3>
       <div class="pads">
         <div class="pad-box">
-          <div class="cap"><span>XY(正面)</span><span class="val" id="pxy-val"></span></div>
-          <div class="pad" id="pet-xy"><div class="dot"></div></div>
+          <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b>(正面)</span><span class="val" id="pxy-val"></span></div>
+          <div class="pad hx vy" id="pet-xy"><div class="dot"></div></div>
         </div>
         <div class="pad-box">
-          <div class="cap"><span>ZY(側面)</span><span class="val" id="pzy-val"></span></div>
-          <div class="pad" id="pet-zy"><div class="dot"></div></div>
+          <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b>(側面)</span><span class="val" id="pzy-val"></span></div>
+          <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
         </div>
       </div>
 
