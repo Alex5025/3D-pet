@@ -134,10 +134,25 @@ function screenToWorld(px: number, py: number): { x: number; y: number } {
   };
 }
 
-/* 主行程輪詢的游標座標:視線跟隨永遠有效;沒在拖曳時順便做 hover 判定 */
+/* 主行程輪詢的游標座標:視線跟隨永遠有效;沒在拖曳時順便做 hover 判定。
+ *
+ * ⚠️ 看門狗:dragging/rotating 只靠 mouseup 清除,而 macOS 上 focusable:false 的
+ * panel 視窗可能漏接 mouseup(原生選單時序等)。旗標卡住 → 這裡永遠不更新穿透
+ * 狀態 → 全螢幕疊層吃掉桌面所有點擊(實際發生過)。
+ * 真拖曳中視窗是可互動的,DOM mousemove 連續進來;超過 1.2 秒沒有任何 DOM 指標
+ * 事件 = mouseup 已漏接 → 強制解除,恢復正常 hover 判定。 */
 window.pet.onCursor(({ x, y }) => {
   viewer.setLookAt(x, y);
-  if (!dragging && !rotating) setInteractive(overPet(x, y));
+  if (dragging || rotating) {
+    if (performance.now() - lastPointerAt > 1200) {
+      console.log('[hit] watchdog cleared stuck drag');
+      clearDragFlags();
+      scheduleSave();
+    } else {
+      return;
+    }
+  }
+  setInteractive(overPet(x, y));
 });
 
 /* ------------------------------------------------------------------ *
@@ -149,8 +164,19 @@ let rotating = false;
 let grab = { x: 0, y: 0 }; // 世界座標:按下點與角色原點的差
 let downAt = { x: 0, y: 0 }; // 螢幕像素:判斷右鍵是「點」還是「拖」
 let rotStart = 0;
+let lastPointerAt = 0; // 最後一次 DOM 指標事件的時間,看門狗用
+
+function clearDragFlags(): void {
+  dragging = false;
+  rotating = false;
+}
+
+/* 保險絲:視窗失焦 / 頁面隱藏時,拖曳狀態一律解除 */
+addEventListener('blur', clearDragFlags);
+document.addEventListener('visibilitychange', clearDragFlags);
 
 addEventListener('mousedown', (e) => {
+  lastPointerAt = performance.now();
   if (!overPet(e.clientX, e.clientY)) return;
   if (e.button === 0) {
     dragging = true;
@@ -164,6 +190,7 @@ addEventListener('mousedown', (e) => {
 });
 
 addEventListener('mousemove', (e) => {
+  lastPointerAt = performance.now();
   viewer.setLookAt(e.clientX, e.clientY);
   if (dragging) {
     const w = screenToWorld(e.clientX, e.clientY);
@@ -179,6 +206,7 @@ addEventListener('mousemove', (e) => {
 });
 
 addEventListener('mouseup', (e) => {
+  lastPointerAt = performance.now();
   if (e.button === 0 && dragging) {
     dragging = false;
     scheduleSave();
@@ -188,6 +216,7 @@ addEventListener('mouseup', (e) => {
     if (moved) scheduleSave();
     else window.pet.showMenu(); // 右鍵點一下(沒拖)= 開選單
   }
+  setInteractive(overPet(e.clientX, e.clientY)); // 放開後立即重算,不殘留互動狀態
 });
 
 addEventListener('contextmenu', (e) => e.preventDefault());
@@ -197,6 +226,7 @@ addEventListener('contextmenu', (e) => e.preventDefault());
  * 保持 (錨點 - 光軸中心) / 相機距離 不變 → 錨點' = 中心 + (錨點 - 中心) × (z'/z)。
  * 光軸中心 = 相機 x/y = (0, 1)(viewer 的官方設定,固定不動)。 */
 addEventListener('wheel', (e) => {
+  lastPointerAt = performance.now();
   if (!interactive) return;
   const newZ = Math.min(12, Math.max(1.2, state.camZ + e.deltaY * 0.005));
   const r = newZ / state.camZ;
