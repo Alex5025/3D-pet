@@ -23,6 +23,16 @@ interface PetState {
 const DEFAULT_STATE: PetState = { x: 0, y: 0, rotY: 0, camZ: 5 };
 let state: PetState = { ...DEFAULT_STATE };
 
+/** 角色半身高(公尺):縮放錨點 = 模型中心,每次載入後量測更新 */
+let anchorH = 0.8;
+
+function measureAnchor(): void {
+  const vrm = viewer.currentVrm();
+  if (!vrm) return;
+  const box = new THREE.Box3().setFromObject(vrm.scene);
+  anchorH = (box.max.y + box.min.y) / 2 - vrm.scene.position.y;
+}
+
 function applyState(): void {
   const vrm = viewer.currentVrm();
   if (vrm) {
@@ -43,7 +53,10 @@ function scheduleSave(): void {
  * ------------------------------------------------------------------ */
 viewer
   .loadFromUrl('/AvatarSample_A.vrm')
-  .then(applyState)
+  .then(() => {
+    measureAnchor();
+    applyState();
+  })
   .catch((e) => console.log('[overlay] default load failed', e));
 
 window.pet.getState().then((s) => {
@@ -59,6 +72,7 @@ window.pet.onState((s) => {
 window.pet.onVrm(async (buf) => {
   try {
     await viewer.loadFromBuffer(buf);
+    measureAnchor();
     applyState(); // 新模型套回同一組位置/角度
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
@@ -73,6 +87,7 @@ addEventListener('drop', async (e) => {
   if (!f || !f.name.endsWith('.vrm')) return;
   try {
     await viewer.loadFromBuffer(await f.arrayBuffer());
+    measureAnchor();
     applyState();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
@@ -170,9 +185,19 @@ addEventListener('mouseup', (e) => {
 
 addEventListener('contextmenu', (e) => e.preventDefault());
 
+/* 縮放 = 相機遠近。透視下離軸的物體會朝光軸中心滑動,
+ * 所以同步補償角色位置,讓「角色中心」在螢幕上釘住不動:
+ * 保持 (錨點 - 光軸中心) / 相機距離 不變 → 錨點' = 中心 + (錨點 - 中心) × (z'/z)。
+ * 光軸中心 = 相機 x/y = (0, 1)(viewer 的官方設定,固定不動)。 */
 addEventListener('wheel', (e) => {
   if (!interactive) return;
-  state.camZ = Math.min(12, Math.max(1.2, state.camZ + e.deltaY * 0.005));
+  const newZ = Math.min(12, Math.max(1.2, state.camZ + e.deltaY * 0.005));
+  const r = newZ / state.camZ;
+  if (r === 1) return;
+  const ay = state.y + anchorH; // 錨點 = 模型中心
+  state.x = state.x * r; // 光軸 x=0
+  state.y = 1 + (ay - 1) * r - anchorH; // 光軸 y=1
+  state.camZ = newZ;
   applyState();
   scheduleSave();
 });
