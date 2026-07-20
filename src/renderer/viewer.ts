@@ -39,14 +39,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const scene = new THREE.Scene();
   if (!opts.transparent && opts.background != null) scene.background = new THREE.Color(opts.background);
 
-  // light —— 「任何旋轉角度朝向使用者的面都不出現暗塊」:
-  //  - 方向光從觀看者方向(+Z)打,官方的固定世界方向會讓旋轉後的臉進陰影
-  //  - 側面(法線與光垂直)單靠方向光仍會掉進 MToon 陰影色 → 補環境光抬起來
-  //  - 0.6π + 0.6π 是在驗證頁實測的組合:側面臉乾淨、正面不過曝
-  const light = new THREE.DirectionalLight(0xffffff, Math.PI * 0.6);
-  light.position.set(0.0, 0.0, 1.0).normalize();
-  scene.add(light);
-  scene.add(new THREE.AmbientLight(0xffffff, Math.PI * 0.6));
+  // light —— 純環境光(強度 π,對齊官方範例的總量):
+  // 需求是「整隻角色含衣服配飾,任何旋轉角度都像被螢幕均勻打亮、零方向性陰影」。
+  // 任何方向光都做不到這點(側面法線與光垂直必然進 MToon 陰影色),
+  // 環境光對所有表面等量、與法線無關 → 完全均勻。已在驗證頁實測正/側面。
+  scene.add(new THREE.AmbientLight(0xffffff, Math.PI));
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
   const root = new THREE.Group();
