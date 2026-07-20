@@ -36,9 +36,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const scene = new THREE.Scene();
   if (!opts.transparent && opts.background != null) scene.background = new THREE.Color(opts.background);
 
-  // light —— official basic.html(一盞,不多加)
+  // light —— 強度照 official basic.html(一盞,Math.PI),但方向改成「從觀看者打過去」:
+  // 官方的 (1,1,1) 是固定世界方向,使用者旋轉角色時受光面會跟著轉走、臉會進陰影。
+  // 改成 +Z(螢幕→場景)後,朝著使用者的那一面永遠受光,旋轉不影響。
   const light = new THREE.DirectionalLight(0xffffff, Math.PI);
-  light.position.set(1.0, 1.0, 1.0).normalize();
+  light.position.set(0.0, 0.0, 1.0).normalize();
   scene.add(light);
 
   // lookat —— official lookat.html:注視目標掛在 camera 底下
