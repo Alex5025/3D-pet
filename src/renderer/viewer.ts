@@ -39,11 +39,15 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const scene = new THREE.Scene();
   if (!opts.transparent && opts.background != null) scene.background = new THREE.Color(opts.background);
 
-  // light —— 純環境光(強度 π,對齊官方範例的總量):
-  // 需求是「整隻角色含衣服配飾,任何旋轉角度都像被螢幕均勻打亮、零方向性陰影」。
-  // 任何方向光都做不到這點(側面法線與光垂直必然進 MToon 陰影色),
-  // 環境光對所有表面等量、與法線無關 → 完全均勻。已在驗證頁實測正/側面。
-  scene.add(new THREE.AmbientLight(0xffffff, Math.PI));
+  // light —— 「強環境光墊底 + 螢幕方向光給動態」(驗證頁實測 0.8π / 0.5π):
+  //  - 環境光把所有表面(含衣服配飾)墊到不會出現暗面 → 任何旋轉角度都亮
+  //  - 方向光從觀看者方向(+Z)打,讓明暗漸層/光澤隨旋轉流動,角色不會死板
+  //  - 純環境光試過:均勻但光澤完全靜止;純方向光試過:側面必進 MToon 陰影色
+  // 注意:VRoid 髮絲的天使環高光有一部分畫死在貼圖上,那部分不隨旋轉移動。
+  scene.add(new THREE.AmbientLight(0xffffff, Math.PI * 0.8));
+  const light = new THREE.DirectionalLight(0xffffff, Math.PI * 0.5);
+  light.position.set(0.0, 0.0, 1.0).normalize();
+  scene.add(light);
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
   const root = new THREE.Group();
