@@ -68,14 +68,16 @@ function makePad(spec: PadSpec): void {
 const el = (id: string): HTMLElement => document.getElementById(id)!;
 
 makePad({
-  el: el('light-xy'),
-  hRange: [-3, 3], vRange: [-3, 3],
-  getH: () => lighting.x, getV: () => lighting.y,
-  set: (h, v) => { lighting.x = h; lighting.y = v; pushLighting(); }
+  el: el('light-xz'),
+  // 俯視:橫 = X(右+);縱 = Z,「下 = 朝你(+Z)、上 = 角色背後(-Z)」→ 反向範圍
+  hRange: [-3, 3], vRange: [3, -3],
+  getH: () => lighting.x, getV: () => lighting.z,
+  set: (h, v) => { lighting.x = h; lighting.z = v; pushLighting(); }
 });
 makePad({
-  el: el('light-zy'),
-  hRange: [-3, 3], vRange: [-3, 3], // 水平 = Z(右 = 靠螢幕)
+  el: el('light-yz'),
+  // 側視:橫 = Z(右 = 朝你);縱 = Y(上+)
+  hRange: [-3, 3], vRange: [-3, 3],
   getH: () => lighting.z, getV: () => lighting.y,
   set: (h, v) => { lighting.z = h; lighting.y = v; pushLighting(); }
 });
@@ -113,8 +115,8 @@ function render(): void {
     dot.style.left = `${Math.min(100, Math.max(0, fh * 100))}%`;
     dot.style.top = `${Math.min(100, Math.max(0, fv * 100))}%`;
   }
-  el('lxy-val').textContent = `${lighting.x.toFixed(1)}, ${lighting.y.toFixed(1)}`;
-  el('lzy-val').textContent = `${lighting.z.toFixed(1)}, ${lighting.y.toFixed(1)}`;
+  el('lxz-val').textContent = `${lighting.x.toFixed(1)}, ${lighting.z.toFixed(1)}`;
+  el('lyz-val').textContent = `${lighting.y.toFixed(1)}, ${lighting.z.toFixed(1)}`;
   el('pxy-val').textContent = `${pet.x.toFixed(1)}, ${pet.y.toFixed(1)}`;
   el('pzy-val').textContent = `${pet.z.toFixed(1)}, ${pet.y.toFixed(1)}`;
 }
