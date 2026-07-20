@@ -107,10 +107,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     Object.assign(lighting, l);
     ambientLight.intensity = lighting.ambient;
     dirLight.intensity = lighting.directional;
-    // DirectionalLight 只看方向:position → target(原點)。位置由面板的平面墊直接拖。
-    dirLight.position.set(lighting.x, lighting.y, lighting.z);
-    if (dirLight.position.lengthSq() < 1e-6) dirLight.position.set(0, 0, 1); // 位置=原點時方向未定義
     applyShade();
+    // 光源「位置」不在這裡設:燈的座標系以角色為原點(見 animate 內的錨定),
+    // 拖動角色時光與角色的相對關係不變。
   }
   setLighting({});
 
@@ -166,10 +165,21 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return new Promise((res, rej) => loader.parse(buf, '', (g) => res(onLoaded(g)), rej));
   }
 
-  // animate —— official basic.html
+  // animate —— official basic.html + 燈光錨定
   const clock = new THREE.Clock();
   function animate(): void {
     requestAnimationFrame(animate);
+
+    // 方向光以「角色」為參考座標系:位置 = 角色位置 + 面板偏移,方向恆指向角色。
+    // 拖動角色 → 光跟著走,打光完全不變;旋轉角色 → 受光面照樣流動(燈不隨旋轉)。
+    dirLight.position.set(
+      root.position.x + lighting.x,
+      root.position.y + lighting.y,
+      root.position.z + lighting.z
+    );
+    if (lighting.x === 0 && lighting.y === 0 && lighting.z === 0) dirLight.position.z += 1; // 偏移=0 時方向未定義
+    dirLight.target.position.copy(root.position);
+
     if (vrm) vrm.update(clock.getDelta());
     renderer.render(scene, camera);
   }
