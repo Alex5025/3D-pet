@@ -67,6 +67,15 @@ window.pet.onState((s) => {
   applyState();
 });
 
+/* 燈光:開機讀存檔值,設定面板拖動時即時套用 */
+window.pet.getLighting().then((l) => {
+  if (l) {
+    viewer.setLighting(l);
+    console.log('[overlay] lighting applied ' + JSON.stringify(l));
+  }
+});
+window.pet.onLighting((l) => viewer.setLighting(l));
+
 window.pet.onVrm(async (buf) => {
   try {
     await viewer.loadFromBuffer(buf);

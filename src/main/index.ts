@@ -13,6 +13,7 @@ const configPath = (): string => join(app.getPath('userData'), 'config.json');
 interface Config {
   vrmPath?: string;
   state?: { x: number; y: number; rotY: number; camZ: number };
+  lighting?: { ambient: number; directional: number; dirX: number; dirY: number };
 }
 
 function readConfig(): Config {
@@ -60,10 +61,42 @@ function resetState(): void {
 function petMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: '選擇 VRM 檔…', click: () => void chooseVrm() },
+    { label: '調整燈光…', click: openSettings },
     { label: '重置位置與大小', click: resetState },
     { type: 'separator' },
     { label: '結束', click: () => app.exit(0) }
   ]);
+}
+
+/* 燈光設定面板:一般可聚焦的小視窗(疊層 focusable:false 塞不了操作 UI),單例 */
+let settingsWin: BrowserWindow | null = null;
+
+function openSettings(): void {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show();
+    settingsWin.focus();
+    return;
+  }
+  settingsWin = new BrowserWindow({
+    width: 340,
+    height: 320,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    title: '燈光設定',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  settingsWin.on('closed', () => (settingsWin = null));
+  const dev = process.env['ELECTRON_RENDERER_URL'];
+  if (dev) settingsWin.loadURL(`${dev}/settings.html`);
+  else settingsWin.loadFile(join(__dirname, '../renderer/settings.html'));
+  app.focus({ steal: true }); // 背景 app 開的視窗會被壓在底下
 }
 
 function createOverlay(): BrowserWindow {
@@ -123,6 +156,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-state', () => readConfig().state ?? null);
   ipcMain.on('save-state', (_e, s: Config['state']) => writeConfig({ state: s }));
+
+  ipcMain.handle('get-lighting', () => readConfig().lighting ?? null);
+  ipcMain.on('set-lighting', (_e, l: Config['lighting']) => {
+    writeConfig({ lighting: l });
+    win?.webContents.send('apply-lighting', l); // 疊層即時套用
+  });
   ipcMain.on('show-menu', () => {
     if (win) petMenu().popup({ window: win });
   });

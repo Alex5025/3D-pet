@@ -20,7 +20,23 @@ export interface Viewer {
   loadFromBuffer: (buf: ArrayBuffer) => Promise<VRM>;
   /** 視線跟隨:把注視點設到某個螢幕像素(官方 lookat.html 的公式) */
   setLookAt: (px: number, py: number) => void;
+  /** 即時調整燈光(設定面板用);缺的欄位維持現值 */
+  setLighting: (l: Partial<Lighting>) => void;
 }
+
+export interface Lighting {
+  ambient: number; // 環境光強度
+  directional: number; // 方向光強度
+  dirX: number; // 方向光方向 X(-1..1),Z 固定 1 = 從螢幕打
+  dirY: number;
+}
+
+export const DEFAULT_LIGHTING: Lighting = {
+  ambient: Math.PI * 0.8,
+  directional: Math.PI * 0.5,
+  dirX: 0,
+  dirY: 0
+};
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
   // renderer —— official basic.html(僅加透明背景參數,桌面疊層需要)
@@ -39,15 +55,25 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const scene = new THREE.Scene();
   if (!opts.transparent && opts.background != null) scene.background = new THREE.Color(opts.background);
 
-  // light —— 「強環境光墊底 + 螢幕方向光給動態」(驗證頁實測 0.8π / 0.5π):
+  // light —— 「強環境光墊底 + 螢幕方向光給動態」(驗證頁實測的預設 0.8π / 0.5π):
   //  - 環境光把所有表面(含衣服配飾)墊到不會出現暗面 → 任何旋轉角度都亮
   //  - 方向光從觀看者方向(+Z)打,讓明暗漸層/光澤隨旋轉流動,角色不會死板
   //  - 純環境光試過:均勻但光澤完全靜止;純方向光試過:側面必進 MToon 陰影色
   // 注意:VRoid 髮絲的天使環高光有一部分畫死在貼圖上,那部分不隨旋轉移動。
-  scene.add(new THREE.AmbientLight(0xffffff, Math.PI * 0.8));
-  const light = new THREE.DirectionalLight(0xffffff, Math.PI * 0.5);
-  light.position.set(0.0, 0.0, 1.0).normalize();
-  scene.add(light);
+  // 數值可由設定面板即時調整(setLighting),預設 = DEFAULT_LIGHTING。
+  const ambientLight = new THREE.AmbientLight(0xffffff, DEFAULT_LIGHTING.ambient);
+  scene.add(ambientLight);
+  const dirLight = new THREE.DirectionalLight(0xffffff, DEFAULT_LIGHTING.directional);
+  dirLight.position.set(DEFAULT_LIGHTING.dirX, DEFAULT_LIGHTING.dirY, 1.0).normalize();
+  scene.add(dirLight);
+
+  const lighting: Lighting = { ...DEFAULT_LIGHTING };
+  function setLighting(l: Partial<Lighting>): void {
+    Object.assign(lighting, l);
+    ambientLight.intensity = lighting.ambient;
+    dirLight.intensity = lighting.directional;
+    dirLight.position.set(lighting.dirX, lighting.dirY, 1.0).normalize();
+  }
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
   const root = new THREE.Group();
@@ -116,5 +142,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting };
 }
