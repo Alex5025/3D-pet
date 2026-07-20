@@ -13,6 +13,9 @@ export interface Viewer {
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
   currentVrm: () => VRM | null;
+  /** 使用者位移/旋轉要套在這個容器上 —— vrm.scene 的 transform 屬於 loader
+   *  (rotateVRM0 的轉正寫在那上面),直接覆寫會讓 VRM0 模型背對鏡頭。 */
+  root: THREE.Group;
   loadFromUrl: (url: string) => Promise<VRM>;
   loadFromBuffer: (buf: ArrayBuffer) => Promise<VRM>;
   /** 視線跟隨:把注視點設到某個螢幕像素(官方 lookat.html 的公式) */
@@ -36,12 +39,18 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const scene = new THREE.Scene();
   if (!opts.transparent && opts.background != null) scene.background = new THREE.Color(opts.background);
 
-  // light —— 強度照 official basic.html(一盞,Math.PI),但方向改成「從觀看者打過去」:
-  // 官方的 (1,1,1) 是固定世界方向,使用者旋轉角色時受光面會跟著轉走、臉會進陰影。
-  // 改成 +Z(螢幕→場景)後,朝著使用者的那一面永遠受光,旋轉不影響。
-  const light = new THREE.DirectionalLight(0xffffff, Math.PI);
+  // light —— 「任何旋轉角度朝向使用者的面都不出現暗塊」:
+  //  - 方向光從觀看者方向(+Z)打,官方的固定世界方向會讓旋轉後的臉進陰影
+  //  - 側面(法線與光垂直)單靠方向光仍會掉進 MToon 陰影色 → 補環境光抬起來
+  //  - 0.6π + 0.6π 是在驗證頁實測的組合:側面臉乾淨、正面不過曝
+  const light = new THREE.DirectionalLight(0xffffff, Math.PI * 0.6);
   light.position.set(0.0, 0.0, 1.0).normalize();
   scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, Math.PI * 0.6));
+
+  // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
+  const root = new THREE.Group();
+  scene.add(root);
 
   // lookat —— official lookat.html:注視目標掛在 camera 底下
   const lookAtTarget = new THREE.Object3D();
@@ -70,11 +79,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
 
     // 官方 dnd.html:換模型前把舊的整個 dispose
     if (vrm) {
-      scene.remove(vrm.scene);
+      root.remove(vrm.scene);
       VRMUtils.deepDispose(vrm.scene);
     }
     vrm = next;
-    scene.add(vrm.scene); // 原尺寸,不縮放、不動任何材質
+    root.add(vrm.scene); // 原尺寸,不縮放、不動任何材質;掛在 root 下,使用者 transform 動 root
     if (vrm.lookAt) vrm.lookAt.target = lookAtTarget; // official lookat.html
     console.log('[viewer] vrm loaded');
     return vrm;
@@ -106,5 +115,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { scene, camera, renderer, currentVrm: () => vrm, loadFromUrl, loadFromBuffer, setLookAt };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt };
 }

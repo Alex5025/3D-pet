@@ -30,15 +30,13 @@ function measureAnchor(): void {
   const vrm = viewer.currentVrm();
   if (!vrm) return;
   const box = new THREE.Box3().setFromObject(vrm.scene);
-  anchorH = (box.max.y + box.min.y) / 2 - vrm.scene.position.y;
+  anchorH = (box.max.y + box.min.y) / 2 - viewer.root.position.y;
 }
 
 function applyState(): void {
-  const vrm = viewer.currentVrm();
-  if (vrm) {
-    vrm.scene.position.set(state.x, state.y, 0);
-    vrm.scene.rotation.y = state.rotY;
-  }
+  // transform 套在 viewer.root(容器),不碰 vrm.scene —— 那上面有 rotateVRM0 的轉正
+  viewer.root.position.set(state.x, state.y, 0);
+  viewer.root.rotation.y = state.rotY;
   viewer.camera.position.z = state.camZ;
 }
 

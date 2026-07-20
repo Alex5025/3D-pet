@@ -13,7 +13,9 @@
     <script type="module">
       // 驗證頁:與 overlay 共用同一份 viewer.ts,唯一差別是背景不透明(方便看膚色)。
       // 拖任何 .vrm 進來即時替換 —— 跟 app 內行為同一條程式路徑。
+      import * as THREE from 'three';
       import { createViewer } from './viewer.ts';
+      window.THREE = THREE; // 驗證頁專用:讓自動化測試能現場調燈
       const hud = document.getElementById('hud');
       const viewer = createViewer({ transparent: false, background: 0xf0f0f0 });
       window.__viewer = viewer; // 驗證頁專用:讓自動化測試能呼叫替換路徑
