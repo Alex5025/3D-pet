@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 export interface PetState {
   x: number;
   y: number;
+  z: number;
   rotY: number;
   camZ: number;
 }
@@ -10,8 +11,10 @@ export interface PetState {
 export interface Lighting {
   ambient: number;
   directional: number;
-  dirX: number;
-  dirY: number;
+  x: number;
+  y: number;
+  z: number;
+  shade: number;
 }
 
 const api = {
@@ -30,6 +33,8 @@ const api = {
   saveState: (s: PetState) => ipcRenderer.send('save-state', s),
   onState: (cb: (s: Partial<PetState>) => void) =>
     ipcRenderer.on('apply-state', (_e, s) => cb(s)),
+  /** 設定面板改角色位置:main 存檔 + 轉發疊層即時套用 */
+  setPetState: (s: PetState) => ipcRenderer.send('set-state', s),
 
   /** 右鍵選單(原生 Menu 由主行程彈出) */
   showMenu: () => ipcRenderer.send('show-menu'),

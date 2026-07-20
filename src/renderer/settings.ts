@@ -1,50 +1,142 @@
 import { DEFAULT_LIGHTING, type Lighting } from './viewer';
+import type { PetState } from '../preload/index';
 
 /**
- * 燈光設定面板:拉桿動了就即時送出(main 存檔 + 轉發疊層套用)。
- * 強度顯示成「× π」的倍數,比原始弧度值好讀。
+ * 燈光與位置面板。
+ * - 強度:拉桿(顯示成 × π 倍數)
+ * - 光源位置 / 角色位置:XY(正面)與 ZY(側面)兩個平面拖曳墊,拖點即時生效
+ * 所有變更即時送 main(存 config + 轉發疊層);疊層那邊拖角色時也會同步回來。
  */
-const KEYS = ['ambient', 'directional', 'dirX', 'dirY'] as const;
+const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 
+let lighting: Lighting = { ...DEFAULT_LIGHTING };
+let pet: PetState = { ...DEFAULT_STATE };
+
+/* ---------- 強度拉桿 ---------- */
+const INTENSITY = ['ambient', 'directional', 'shade'] as const;
 const sliders = Object.fromEntries(
-  KEYS.map((k) => [k, document.getElementById(k) as HTMLInputElement])
-) as Record<(typeof KEYS)[number], HTMLInputElement>;
+  INTENSITY.map((k) => [k, document.getElementById(k) as HTMLInputElement])
+) as Record<(typeof INTENSITY)[number], HTMLInputElement>;
+const sliderVals = Object.fromEntries(
+  INTENSITY.map((k) => [k, document.getElementById(`${k}-val`) as HTMLSpanElement])
+) as Record<(typeof INTENSITY)[number], HTMLSpanElement>;
 
-const vals = Object.fromEntries(
-  KEYS.map((k) => [k, document.getElementById(`${k}-val`) as HTMLSpanElement])
-) as Record<(typeof KEYS)[number], HTMLSpanElement>;
-
-function fmt(k: (typeof KEYS)[number], v: number): string {
-  return k === 'ambient' || k === 'directional' ? `${(v / Math.PI).toFixed(2)} π` : v.toFixed(2);
-}
-
-function show(l: Lighting): void {
-  for (const k of KEYS) {
-    sliders[k].value = String(l[k]);
-    vals[k].textContent = fmt(k, l[k]);
-  }
-}
-
-function current(): Lighting {
-  return {
-    ambient: Number(sliders.ambient.value),
-    directional: Number(sliders.directional.value),
-    dirX: Number(sliders.dirX.value),
-    dirY: Number(sliders.dirY.value)
-  };
-}
-
-for (const k of KEYS) {
+for (const k of INTENSITY) {
   sliders[k].addEventListener('input', () => {
-    const l = current();
-    vals[k].textContent = fmt(k, l[k]);
-    window.pet.setLighting(l);
+    lighting[k] = Number(sliders[k].value);
+    pushLighting();
+    render();
   });
 }
 
-document.getElementById('reset')!.addEventListener('click', () => {
-  show(DEFAULT_LIGHTING);
-  window.pet.setLighting(DEFAULT_LIGHTING);
+/* ---------- 平面拖曳墊 ---------- */
+interface PadSpec {
+  el: HTMLElement;
+  hRange: [number, number]; // 水平軸(左→右)
+  vRange: [number, number]; // 垂直軸(下→上)
+  getH: () => number;
+  getV: () => number;
+  set: (h: number, v: number) => void;
+}
+
+const pads: PadSpec[] = [];
+
+function makePad(spec: PadSpec): void {
+  pads.push(spec);
+  const drag = (e: PointerEvent): void => {
+    const r = spec.el.getBoundingClientRect();
+    const fh = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const fv = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    const h = spec.hRange[0] + fh * (spec.hRange[1] - spec.hRange[0]);
+    const v = spec.vRange[1] - fv * (spec.vRange[1] - spec.vRange[0]); // 螢幕 y 向下 → 軸向上
+    spec.set(Math.round(h * 100) / 100, Math.round(v * 100) / 100);
+    render();
+  };
+  spec.el.addEventListener('pointerdown', (e) => {
+    spec.el.setPointerCapture(e.pointerId);
+    drag(e);
+    const move = (ev: PointerEvent): void => drag(ev);
+    const up = (): void => {
+      spec.el.removeEventListener('pointermove', move);
+      spec.el.removeEventListener('pointerup', up);
+    };
+    spec.el.addEventListener('pointermove', move);
+    spec.el.addEventListener('pointerup', up);
+  });
+}
+
+const el = (id: string): HTMLElement => document.getElementById(id)!;
+
+makePad({
+  el: el('light-xy'),
+  hRange: [-3, 3], vRange: [-3, 3],
+  getH: () => lighting.x, getV: () => lighting.y,
+  set: (h, v) => { lighting.x = h; lighting.y = v; pushLighting(); }
+});
+makePad({
+  el: el('light-zy'),
+  hRange: [-3, 3], vRange: [-3, 3], // 水平 = Z(右 = 靠螢幕)
+  getH: () => lighting.z, getV: () => lighting.y,
+  set: (h, v) => { lighting.z = h; lighting.y = v; pushLighting(); }
+});
+makePad({
+  el: el('pet-xy'),
+  hRange: [-3, 3], vRange: [-3, 3],
+  getH: () => pet.x, getV: () => pet.y,
+  set: (h, v) => { pet.x = h; pet.y = v; pushPet(); }
+});
+makePad({
+  el: el('pet-zy'),
+  hRange: [-2, 2], vRange: [-3, 3], // 水平 = Z(右 = 靠鏡頭變大)
+  getH: () => pet.z, getV: () => pet.y,
+  set: (h, v) => { pet.z = h; pet.y = v; pushPet(); }
 });
 
-window.pet.getLighting().then((l) => show({ ...DEFAULT_LIGHTING, ...l }));
+/* ---------- 送出 / 顯示 ---------- */
+function pushLighting(): void {
+  window.pet.setLighting(lighting);
+}
+function pushPet(): void {
+  window.pet.setPetState(pet);
+}
+
+function render(): void {
+  for (const k of INTENSITY) {
+    sliders[k].value = String(lighting[k]);
+    sliderVals[k].textContent =
+      k === 'shade' ? lighting[k].toFixed(2) : `${(lighting[k] / Math.PI).toFixed(2)} π`;
+  }
+  for (const p of pads) {
+    const dot = p.el.querySelector('.dot') as HTMLElement;
+    const fh = (p.getH() - p.hRange[0]) / (p.hRange[1] - p.hRange[0]);
+    const fv = (p.vRange[1] - p.getV()) / (p.vRange[1] - p.vRange[0]);
+    dot.style.left = `${Math.min(100, Math.max(0, fh * 100))}%`;
+    dot.style.top = `${Math.min(100, Math.max(0, fv * 100))}%`;
+  }
+  el('lxy-val').textContent = `${lighting.x.toFixed(1)}, ${lighting.y.toFixed(1)}`;
+  el('lzy-val').textContent = `${lighting.z.toFixed(1)}, ${lighting.y.toFixed(1)}`;
+  el('pxy-val').textContent = `${pet.x.toFixed(1)}, ${pet.y.toFixed(1)}`;
+  el('pzy-val').textContent = `${pet.z.toFixed(1)}, ${pet.y.toFixed(1)}`;
+}
+
+document.getElementById('reset')!.addEventListener('click', () => {
+  lighting = { ...DEFAULT_LIGHTING };
+  pet = { ...DEFAULT_STATE };
+  pushLighting();
+  pushPet();
+  render();
+});
+
+/* 初始值 + 疊層拖曳時的同步 */
+window.pet.getLighting().then((l) => {
+  lighting = { ...DEFAULT_LIGHTING, ...l };
+  render();
+});
+window.pet.getState().then((s) => {
+  pet = { ...DEFAULT_STATE, ...s };
+  render();
+});
+window.pet.onState((s) => {
+  pet = { ...DEFAULT_STATE, ...s };
+  render();
+});

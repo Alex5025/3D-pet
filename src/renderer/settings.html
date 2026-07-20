@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <title>燈光設定</title>
+    <title>燈光與位置設定</title>
     <style>
       html, body {
         margin: 0;
@@ -11,14 +11,46 @@
         font: 400 13px/1.6 system-ui, -apple-system, "Noto Sans TC", sans-serif;
         user-select: none;
       }
-      #panel { padding: 16px 18px; }
-      .row { margin-bottom: 12px; }
+      #panel { padding: 14px 16px 18px; }
+      h3 { margin: 10px 0 6px; font-size: 13px; color: #a9a9e6; font-weight: 600; }
+      .row { margin-bottom: 10px; }
       .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: #c9c9d2; }
-      .row .val { font-variant-numeric: tabular-nums; color: #8f8fd9; }
+      .val { font-variant-numeric: tabular-nums; color: #8f8fd9; }
       input[type='range'] { width: 100%; accent-color: #6d64d8; }
+
+      .pads { display: flex; gap: 12px; }
+      .pad-box { flex: 1; }
+      .pad-box .cap { display: flex; justify-content: space-between; color: #c9c9d2; margin-bottom: 3px; }
+      .pad {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1;
+        background: #26262c;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        cursor: crosshair;
+        touch-action: none;
+      }
+      .pad::before, .pad::after {
+        content: '';
+        position: absolute;
+        background: rgba(255, 255, 255, 0.07);
+      }
+      .pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+      .pad::after { top: 50%; left: 0; right: 0; height: 1px; }
+      .dot {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        margin: -6px 0 0 -6px;
+        border-radius: 50%;
+        background: #6d64d8;
+        box-shadow: 0 0 6px rgba(109, 100, 216, 0.9);
+        pointer-events: none;
+      }
       button {
         width: 100%;
-        margin-top: 4px;
+        margin-top: 10px;
         padding: 7px;
         border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 8px;
@@ -32,23 +64,45 @@
   </head>
   <body>
     <div id="panel">
+      <h3>光源強度</h3>
       <div class="row">
-        <label>環境光強度 <span class="val" id="ambient-val"></span></label>
+        <label>環境光 <span class="val" id="ambient-val"></span></label>
         <input type="range" id="ambient" min="0" max="6.2832" step="0.02" />
       </div>
       <div class="row">
-        <label>方向光強度 <span class="val" id="directional-val"></span></label>
+        <label>方向光 <span class="val" id="directional-val"></span></label>
         <input type="range" id="directional" min="0" max="6.2832" step="0.02" />
       </div>
       <div class="row">
-        <label>方向光方向 X(左右) <span class="val" id="dirX-val"></span></label>
-        <input type="range" id="dirX" min="-1" max="1" step="0.02" />
+        <label>陰影濃度(立體感) <span class="val" id="shade-val"></span></label>
+        <input type="range" id="shade" min="0" max="1" step="0.01" />
       </div>
-      <div class="row">
-        <label>方向光方向 Y(上下) <span class="val" id="dirY-val"></span></label>
-        <input type="range" id="dirY" min="-1" max="1" step="0.02" />
+
+      <h3>光源位置</h3>
+      <div class="pads">
+        <div class="pad-box">
+          <div class="cap"><span>XY(正面)</span><span class="val" id="lxy-val"></span></div>
+          <div class="pad" id="light-xy"><div class="dot"></div></div>
+        </div>
+        <div class="pad-box">
+          <div class="cap"><span>ZY(側面)</span><span class="val" id="lzy-val"></span></div>
+          <div class="pad" id="light-zy"><div class="dot"></div></div>
+        </div>
       </div>
-      <button id="reset">重置為預設</button>
+
+      <h3>角色位置</h3>
+      <div class="pads">
+        <div class="pad-box">
+          <div class="cap"><span>XY(正面)</span><span class="val" id="pxy-val"></span></div>
+          <div class="pad" id="pet-xy"><div class="dot"></div></div>
+        </div>
+        <div class="pad-box">
+          <div class="cap"><span>ZY(側面)</span><span class="val" id="pzy-val"></span></div>
+          <div class="pad" id="pet-zy"><div class="dot"></div></div>
+        </div>
+      </div>
+
+      <button id="reset">全部重置為預設</button>
     </div>
     <script type="module" src="./settings.ts"></script>
   </body>

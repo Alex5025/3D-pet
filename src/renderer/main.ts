@@ -15,12 +15,13 @@ const viewer = createViewer({ transparent: true });
  * 狀態(config.json 持久化)
  * ------------------------------------------------------------------ */
 interface PetState {
-  x: number; // 角色在 z=0 平面上的世界座標
+  x: number; // 角色世界座標(公尺)
   y: number;
+  z: number; // 深度:+ 靠近鏡頭(變大)、- 遠離(變小)
   rotY: number; // 面向(弧度)
   camZ: number; // 相機距離 = 縮放
 }
-const DEFAULT_STATE: PetState = { x: 0, y: 0, rotY: 0, camZ: 5 };
+const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 let state: PetState = { ...DEFAULT_STATE };
 
 /** 角色半身高(公尺):縮放錨點 = 模型中心,每次載入後量測更新 */
@@ -35,7 +36,8 @@ function measureAnchor(): void {
 
 function applyState(): void {
   // transform 套在 viewer.root(容器),不碰 vrm.scene —— 那上面有 rotateVRM0 的轉正
-  viewer.root.position.set(state.x, state.y, 0);
+  state.z = Math.min(state.z, state.camZ - 1); // 角色不能跑到相機後面
+  viewer.root.position.set(state.x, state.y, state.z);
   viewer.root.rotation.y = state.rotY;
   viewer.camera.position.z = state.camZ;
 }
@@ -122,12 +124,12 @@ function setInteractive(v: boolean): void {
   window.pet.setInteractive(v);
 }
 
-/** 滑鼠像素 → z=0 平面上的世界座標(拖曳用) */
+/** 滑鼠像素 → 角色所在深度平面(z = state.z)上的世界座標(拖曳用) */
 const _dir = new THREE.Vector3();
 function screenToWorld(px: number, py: number): { x: number; y: number } {
   _dir.set((px / innerWidth) * 2 - 1, -((py / innerHeight) * 2 - 1), 0.5).unproject(viewer.camera);
   _dir.sub(viewer.camera.position);
-  const t = -viewer.camera.position.z / _dir.z;
+  const t = (state.z - viewer.camera.position.z) / _dir.z;
   return {
     x: viewer.camera.position.x + _dir.x * t,
     y: viewer.camera.position.y + _dir.y * t
@@ -228,8 +230,10 @@ addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('wheel', (e) => {
   lastPointerAt = performance.now();
   if (!interactive) return;
-  const newZ = Math.min(12, Math.max(1.2, state.camZ + e.deltaY * 0.005));
-  const r = newZ / state.camZ;
+  const minZ = state.z + 1.2; // 相機不能貼到角色深度
+  const newZ = Math.min(12, Math.max(minZ, state.camZ + e.deltaY * 0.005));
+  // 透視縮放以「與角色深度平面的距離」為準
+  const r = (newZ - state.z) / (state.camZ - state.z);
   if (r === 1) return;
   const ay = state.y + anchorH; // 錨點 = 模型中心
   state.x = state.x * r; // 光軸 x=0

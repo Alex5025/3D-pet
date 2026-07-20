@@ -27,15 +27,19 @@ export interface Viewer {
 export interface Lighting {
   ambient: number; // 環境光強度
   directional: number; // 方向光強度
-  dirX: number; // 方向光方向 X(-1..1),Z 固定 1 = 從螢幕打
-  dirY: number;
+  x: number; // 光源位置(公尺,原點=角色腳邊);方向光的方向 = 位置 → 原點
+  y: number;
+  z: number; // +Z = 螢幕這側
+  shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
 }
 
 export const DEFAULT_LIGHTING: Lighting = {
   ambient: Math.PI * 0.8,
   directional: Math.PI * 0.5,
-  dirX: 0,
-  dirY: 0
+  x: 0,
+  y: 1,
+  z: 2,
+  shade: 0.35
 };
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
@@ -64,16 +68,51 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const ambientLight = new THREE.AmbientLight(0xffffff, DEFAULT_LIGHTING.ambient);
   scene.add(ambientLight);
   const dirLight = new THREE.DirectionalLight(0xffffff, DEFAULT_LIGHTING.directional);
-  dirLight.position.set(DEFAULT_LIGHTING.dirX, DEFAULT_LIGHTING.dirY, 1.0).normalize();
   scene.add(dirLight);
+  scene.add(dirLight.target); // target 要在場景裡,matrixWorld 才會更新
 
+  let vrm: VRM | null = null; // 提前宣告:下面的 applyShade 會在載入前就被呼叫
   const lighting: Lighting = { ...DEFAULT_LIGHTING };
+
+  /* 陰影濃度:VRoid 系模型的材質常把方向陰影整個關死(實測解剖過,非程式問題):
+   *   1) 陰影色 = 受光色(純白)→ 就算進入陰影,顏色也一樣
+   *   2) shadingShift = 1 → 任何角度都判定為「受光」,陰影計算根本不會發生
+   * 所以這個滑桿拉兩個槓桿(都是 uniform,免重編,原始值存 userData 可還原):
+   *   - 陰影色依比例調暗
+   *   - shadingShift 從原值往 -0.1 內插(把被關死的陰影重新打開)
+   * 0 = 完全尊重模型原設定。 */
+  function applyShade(): void {
+    if (!vrm) return;
+    vrm.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats as Array<
+        THREE.Material & { isOutline?: boolean; shadeColorFactor?: THREE.Color; shadingShiftFactor?: number }
+      >) {
+        if (m.isOutline || !m.shadeColorFactor) continue;
+        const ud = m.userData;
+        if (!ud['origShade']) {
+          ud['origShade'] = m.shadeColorFactor.clone();
+          ud['origShift'] = m.shadingShiftFactor ?? 0;
+        }
+        m.shadeColorFactor.copy(ud['origShade'] as THREE.Color).multiplyScalar(1 - lighting.shade);
+        const orig = ud['origShift'] as number;
+        m.shadingShiftFactor = orig + (-0.1 - orig) * lighting.shade;
+      }
+    });
+  }
+
   function setLighting(l: Partial<Lighting>): void {
     Object.assign(lighting, l);
     ambientLight.intensity = lighting.ambient;
     dirLight.intensity = lighting.directional;
-    dirLight.position.set(lighting.dirX, lighting.dirY, 1.0).normalize();
+    // DirectionalLight 只看方向:position → target(原點)。位置由面板的平面墊直接拖。
+    dirLight.position.set(lighting.x, lighting.y, lighting.z);
+    if (dirLight.position.lengthSq() < 1e-6) dirLight.position.set(0, 0, 1); // 位置=原點時方向未定義
+    applyShade();
   }
+  setLighting({});
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
   const root = new THREE.Group();
@@ -91,7 +130,6 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   }
 
   // gltf and vrm —— official basic.html
-  let vrm: VRM | null = null;
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
 
@@ -110,8 +148,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
       VRMUtils.deepDispose(vrm.scene);
     }
     vrm = next;
-    root.add(vrm.scene); // 原尺寸,不縮放、不動任何材質;掛在 root 下,使用者 transform 動 root
+    root.add(vrm.scene); // 原尺寸,不縮放;掛在 root 下,使用者 transform 動 root
     if (vrm.lookAt) vrm.lookAt.target = lookAtTarget; // official lookat.html
+    applyShade(); // 換模型後套用目前的陰影濃度
     console.log('[viewer] vrm loaded');
     return vrm;
   }

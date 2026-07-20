@@ -12,8 +12,8 @@ const configPath = (): string => join(app.getPath('userData'), 'config.json');
 
 interface Config {
   vrmPath?: string;
-  state?: { x: number; y: number; rotY: number; camZ: number };
-  lighting?: { ambient: number; directional: number; dirX: number; dirY: number };
+  state?: { x: number; y: number; z: number; rotY: number; camZ: number };
+  lighting?: { ambient: number; directional: number; x: number; y: number; z: number; shade: number };
 }
 
 function readConfig(): Config {
@@ -53,9 +53,10 @@ async function chooseVrm(): Promise<void> {
 
 /** 重置位置/角度/縮放(不動已選的 VRM) */
 function resetState(): void {
-  const s = { x: 0, y: 0, rotY: 0, camZ: 5 };
+  const s = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
   writeConfig({ state: s });
   win?.webContents.send('apply-state', s);
+  settingsWin?.webContents.send('apply-state', s);
 }
 
 function petMenu(): Menu {
@@ -78,8 +79,8 @@ function openSettings(): void {
     return;
   }
   settingsWin = new BrowserWindow({
-    width: 340,
-    height: 320,
+    width: 380,
+    height: 750,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -155,7 +156,16 @@ app.whenReady().then(() => {
   );
 
   ipcMain.handle('get-state', () => readConfig().state ?? null);
-  ipcMain.on('save-state', (_e, s: Config['state']) => writeConfig({ state: s }));
+  // 疊層拖曳存檔 → 同步給設定面板(平面墊上的點跟著動)
+  ipcMain.on('save-state', (_e, s: Config['state']) => {
+    writeConfig({ state: s });
+    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('apply-state', s);
+  });
+  // 設定面板改位置 → 存檔 + 疊層即時套用
+  ipcMain.on('set-state', (_e, s: Config['state']) => {
+    writeConfig({ state: s });
+    win?.webContents.send('apply-state', s);
+  });
 
   ipcMain.handle('get-lighting', () => readConfig().lighting ?? null);
   ipcMain.on('set-lighting', (_e, l: Config['lighting']) => {
