@@ -71,6 +71,7 @@ function petMenu(): Menu {
 
 /* 燈光設定面板:一般可聚焦的小視窗(疊層 focusable:false 塞不了操作 UI),單例 */
 let settingsWin: BrowserWindow | null = null;
+let avatarIcons: { front: string; side: string } | null = null; // 疊層拍的角色小圖快取
 
 function openSettings(): void {
   if (settingsWin && !settingsWin.isDestroyed()) {
@@ -94,6 +95,9 @@ function openSettings(): void {
     }
   });
   settingsWin.on('closed', () => (settingsWin = null));
+  settingsWin.webContents.on('did-finish-load', () => {
+    if (avatarIcons) settingsWin?.webContents.send('avatar-icons-apply', avatarIcons);
+  });
   const dev = process.env['ELECTRON_RENDERER_URL'];
   if (dev) settingsWin.loadURL(`${dev}/settings.html`);
   else settingsWin.loadFile(join(__dirname, '../renderer/settings.html'));
@@ -165,6 +169,13 @@ app.whenReady().then(() => {
   ipcMain.on('set-state', (_e, s: Config['state']) => {
     writeConfig({ state: s });
     win?.webContents.send('apply-state', s);
+  });
+
+  // 疊層拍的角色小圖:存著,設定面板開啟/重載時補發
+  ipcMain.on('avatar-icons', (_e, icons: { front: string; side: string }) => {
+    avatarIcons = icons;
+    if (settingsWin && !settingsWin.isDestroyed())
+      settingsWin.webContents.send('avatar-icons-apply', icons);
   });
 
   ipcMain.handle('get-lighting', () => readConfig().lighting ?? null);

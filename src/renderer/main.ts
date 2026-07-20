@@ -34,6 +34,18 @@ function measureAnchor(): void {
   anchorH = (box.max.y + box.min.y) / 2 - viewer.root.position.y;
 }
 
+/** 拍正面/側面小圖給設定面板當原點小人(換模型會自動更新)。
+ *  等一幀讓 spring bone / 姿勢先安定,拍出來才不是 T-pose 剛落地的僵硬幀。 */
+function sendAvatarIcons(): void {
+  requestAnimationFrame(() => {
+    try {
+      window.pet.sendAvatarIcons({ front: viewer.snapshot(false), side: viewer.snapshot(true) });
+    } catch (e) {
+      console.log('[overlay] snapshot failed', e);
+    }
+  });
+}
+
 function applyState(): void {
   // transform 套在 viewer.root(容器),不碰 vrm.scene —— 那上面有 rotateVRM0 的轉正
   state.z = Math.min(state.z, state.camZ - 1); // 角色不能跑到相機後面
@@ -56,6 +68,7 @@ viewer
   .then(() => {
     measureAnchor();
     applyState();
+    sendAvatarIcons();
   })
   .catch((e) => console.log('[overlay] default load failed', e));
 
@@ -83,6 +96,7 @@ window.pet.onVrm(async (buf) => {
     await viewer.loadFromBuffer(buf);
     measureAnchor();
     applyState(); // 新模型套回同一組位置/角度
+    sendAvatarIcons();
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
   }
@@ -98,6 +112,7 @@ addEventListener('drop', async (e) => {
     await viewer.loadFromBuffer(await f.arrayBuffer());
     measureAnchor();
     applyState();
+    sendAvatarIcons();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
   }

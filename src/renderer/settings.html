@@ -58,8 +58,10 @@
         opacity: 0.9;
         text-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
       }
-      /* 側視圖:角色面朝 +Z(墊的右側)。emoji 側面圖預設朝左,鏡像成朝右 */
+      /* 側視圖:角色面朝 +Z(墊的右側)。emoji 側面圖預設朝左,鏡像成朝右
+         (真角色照送到後會移除此 class,照片本身已朝右) */
       .origin-side { transform: translate(-50%, -50%) scaleX(-1); }
+      .origin img { width: 48px; display: block; }
       .dot {
         position: absolute;
         width: 12px;
@@ -104,11 +106,11 @@
       <div class="pads">
         <div class="pad-box">
           <div class="cap"><span><b class="ax-x">X</b><b class="ax-z">Z</b>(俯視,下=朝你)</span><span class="val" id="lxz-val"></span></div>
-          <div class="pad hx vz" id="light-xz"><span class="origin">🧍‍♀️</span><div class="dot"></div></div>
+          <div class="pad hx vz" id="light-xz"><span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div></div>
         </div>
         <div class="pad-box">
           <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b>(側視,右=朝你)</span><span class="val" id="lyz-val"></span></div>
-          <div class="pad hz vy" id="light-yz"><span class="origin origin-side">🚶‍♀️</span><div class="dot"></div></div>
+          <div class="pad hz vy" id="light-yz"><span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div></div>
         </div>
       </div>
 

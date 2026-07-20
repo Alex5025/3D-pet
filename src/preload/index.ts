@@ -39,6 +39,12 @@ const api = {
   /** 右鍵選單(原生 Menu 由主行程彈出) */
   showMenu: () => ipcRenderer.send('show-menu'),
 
+  /* 角色小圖:疊層拍好送 main,設定面板拿來當原點小人 */
+  sendAvatarIcons: (icons: { front: string; side: string }) =>
+    ipcRenderer.send('avatar-icons', icons),
+  onAvatarIcons: (cb: (icons: { front: string; side: string }) => void) =>
+    ipcRenderer.on('avatar-icons-apply', (_e, icons) => cb(icons)),
+
   /* 燈光:設定面板 ↔ main ↔ 疊層 */
   getLighting: (): Promise<Partial<Lighting> | null> => ipcRenderer.invoke('get-lighting'),
   setLighting: (l: Lighting) => ipcRenderer.send('set-lighting', l),

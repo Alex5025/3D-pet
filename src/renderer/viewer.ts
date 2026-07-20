@@ -22,6 +22,8 @@ export interface Viewer {
   setLookAt: (px: number, py: number) => void;
   /** 即時調整燈光(設定面板用);缺的欄位維持現值 */
   setLighting: (l: Partial<Lighting>) => void;
+  /** 拍一張目前角色的小照片(透明背景 PNG dataURL)。side=true 從側面拍(臉朝右) */
+  snapshot: (side: boolean) => string;
 }
 
 export interface Lighting {
@@ -191,5 +193,21 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting };
+  /** 設定面板的原點小人用:以角色為中心拍正面/側面小圖(側面 = 從 -X 拍,臉朝畫面右)。 */
+  function snapshot(side: boolean): string {
+    const cam = new THREE.PerspectiveCamera(25, 96 / 128, 0.1, 20);
+    const p = root.position;
+    if (side) cam.position.set(p.x - 4.6, p.y + 0.85, p.z);
+    else cam.position.set(p.x, p.y + 0.85, p.z + 4.6);
+    cam.lookAt(p.x, p.y + 0.85, p.z);
+    const rr = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    rr.setSize(96, 128);
+    rr.setClearAlpha(0);
+    rr.render(scene, cam);
+    const url = rr.domElement.toDataURL('image/png');
+    rr.dispose();
+    return url;
+  }
+
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot };
 }

@@ -129,6 +129,15 @@ document.getElementById('reset')!.addEventListener('click', () => {
   render();
 });
 
+/* 原點小人:疊層送來「目前載入角色」的正面/側面照(側面照已朝 +Z,移除 emoji 的鏡像) */
+window.pet.onAvatarIcons(({ front, side }) => {
+  const fx = el('origin-xz');
+  fx.innerHTML = `<img src="${front}" alt="">`;
+  const fy = el('origin-yz');
+  fy.classList.remove('origin-side');
+  fy.innerHTML = `<img src="${side}" alt="">`;
+});
+
 /* 初始值 + 疊層拖曳時的同步 */
 window.pet.getLighting().then((l) => {
   lighting = { ...DEFAULT_LIGHTING, ...l };
