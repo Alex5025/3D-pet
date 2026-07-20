@@ -2,24 +2,70 @@ import * as THREE from 'three';
 import { createViewer } from './viewer';
 
 /**
- * 桌面疊層:透明背景 + 官方 viewer。
- * - 預設載入內建的 AvatarSample_A;主行程若送來使用者選的 VRM buffer 就替換。
- * - 拖任何 .vrm 檔到角色上也能替換(官方 dnd.html 同一條路)。
- * - hover 到角色 → 通知主行程把視窗切成可互動(否則整片 click-through)。
+ * 桌面疊層 = 官方 viewer + 互動層(對齊 Steam 桌寵的操作習慣):
+ *  - 視線跟著游標(官方 lookAt;游標座標由主行程輪詢推送,不需要視窗事件)
+ *  - 左鍵拖曳移動角色
+ *  - 右鍵拖曳旋轉;右鍵點一下 → 原生選單(換 VRM / 重置 / 結束)
+ *  - 滾輪縮放(動相機距離,不縮放模型 —— 模型永遠原尺寸)
+ *  - 位置/角度/縮放/選過的 VRM 都存 config.json,重開沿用
  */
 const viewer = createViewer({ transparent: true });
-viewer.loadFromUrl('/AvatarSample_A.vrm').catch((e) => console.log('[overlay] default load failed', e));
 
-/* 使用者選的 VRM(Tray / dialog 那條路),主行程讀完檔用 buffer 送過來 */
+/* ------------------------------------------------------------------ *
+ * 狀態(config.json 持久化)
+ * ------------------------------------------------------------------ */
+interface PetState {
+  x: number; // 角色在 z=0 平面上的世界座標
+  y: number;
+  rotY: number; // 面向(弧度)
+  camZ: number; // 相機距離 = 縮放
+}
+const DEFAULT_STATE: PetState = { x: 0, y: 0, rotY: 0, camZ: 5 };
+let state: PetState = { ...DEFAULT_STATE };
+
+function applyState(): void {
+  const vrm = viewer.currentVrm();
+  if (vrm) {
+    vrm.scene.position.set(state.x, state.y, 0);
+    vrm.scene.rotation.y = state.rotY;
+  }
+  viewer.camera.position.z = state.camZ;
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleSave(): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => window.pet.saveState(state), 300);
+}
+
+/* ------------------------------------------------------------------ *
+ * 載入
+ * ------------------------------------------------------------------ */
+viewer
+  .loadFromUrl('/AvatarSample_A.vrm')
+  .then(applyState)
+  .catch((e) => console.log('[overlay] default load failed', e));
+
+window.pet.getState().then((s) => {
+  if (s) state = { ...DEFAULT_STATE, ...s };
+  applyState();
+});
+
+window.pet.onState((s) => {
+  state = { ...DEFAULT_STATE, ...s };
+  applyState();
+});
+
 window.pet.onVrm(async (buf) => {
   try {
     await viewer.loadFromBuffer(buf);
+    applyState(); // 新模型套回同一組位置/角度
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
   }
 });
 
-/* 拖放替換(不需要檔案路徑,直接讀內容 → 官方 parse 路徑) */
+/* 拖 .vrm 檔到角色上 = 換模型(官方 dnd.html 路徑) */
 addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', async (e) => {
   e.preventDefault();
@@ -27,15 +73,14 @@ addEventListener('drop', async (e) => {
   if (!f || !f.name.endsWith('.vrm')) return;
   try {
     await viewer.loadFromBuffer(await f.arrayBuffer());
+    applyState();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
   }
 });
 
 /* ------------------------------------------------------------------ *
- * 命中 → 互動切換。
- * click-through 視窗在 macOS 收不到被動 mousemove(已實證),
- * 所以主行程輪詢游標座標推過來,這裡 raycast 判斷有沒有壓在角色上。
+ * 命中判定與互動切換
  * ------------------------------------------------------------------ */
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -55,5 +100,79 @@ function setInteractive(v: boolean): void {
   window.pet.setInteractive(v);
 }
 
-window.pet.onCursor(({ x, y }) => setInteractive(overPet(x, y)));
-addEventListener('mousemove', (e) => setInteractive(overPet(e.clientX, e.clientY)));
+/** 滑鼠像素 → z=0 平面上的世界座標(拖曳用) */
+const _dir = new THREE.Vector3();
+function screenToWorld(px: number, py: number): { x: number; y: number } {
+  _dir.set((px / innerWidth) * 2 - 1, -((py / innerHeight) * 2 - 1), 0.5).unproject(viewer.camera);
+  _dir.sub(viewer.camera.position);
+  const t = -viewer.camera.position.z / _dir.z;
+  return {
+    x: viewer.camera.position.x + _dir.x * t,
+    y: viewer.camera.position.y + _dir.y * t
+  };
+}
+
+/* 主行程輪詢的游標座標:視線跟隨永遠有效;沒在拖曳時順便做 hover 判定 */
+window.pet.onCursor(({ x, y }) => {
+  viewer.setLookAt(x, y);
+  if (!dragging && !rotating) setInteractive(overPet(x, y));
+});
+
+/* ------------------------------------------------------------------ *
+ * 左鍵拖曳移動 / 右鍵拖曳旋轉 / 右鍵點擊選單 / 滾輪縮放
+ * (視窗只有游標壓在角色上時才吃得到這些事件)
+ * ------------------------------------------------------------------ */
+let dragging = false;
+let rotating = false;
+let grab = { x: 0, y: 0 }; // 世界座標:按下點與角色原點的差
+let downAt = { x: 0, y: 0 }; // 螢幕像素:判斷右鍵是「點」還是「拖」
+let rotStart = 0;
+
+addEventListener('mousedown', (e) => {
+  if (!overPet(e.clientX, e.clientY)) return;
+  if (e.button === 0) {
+    dragging = true;
+    const w = screenToWorld(e.clientX, e.clientY);
+    grab = { x: w.x - state.x, y: w.y - state.y };
+  } else if (e.button === 2) {
+    rotating = true;
+    downAt = { x: e.clientX, y: e.clientY };
+    rotStart = state.rotY;
+  }
+});
+
+addEventListener('mousemove', (e) => {
+  viewer.setLookAt(e.clientX, e.clientY);
+  if (dragging) {
+    const w = screenToWorld(e.clientX, e.clientY);
+    state.x = w.x - grab.x;
+    state.y = w.y - grab.y;
+    applyState();
+  } else if (rotating) {
+    state.rotY = rotStart + (e.clientX - downAt.x) * 0.02;
+    applyState();
+  } else {
+    setInteractive(overPet(e.clientX, e.clientY));
+  }
+});
+
+addEventListener('mouseup', (e) => {
+  if (e.button === 0 && dragging) {
+    dragging = false;
+    scheduleSave();
+  } else if (e.button === 2 && rotating) {
+    rotating = false;
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4;
+    if (moved) scheduleSave();
+    else window.pet.showMenu(); // 右鍵點一下(沒拖)= 開選單
+  }
+});
+
+addEventListener('contextmenu', (e) => e.preventDefault());
+
+addEventListener('wheel', (e) => {
+  if (!interactive) return;
+  state.camZ = Math.min(12, Math.max(1.2, state.camZ + e.deltaY * 0.005));
+  applyState();
+  scheduleSave();
+});

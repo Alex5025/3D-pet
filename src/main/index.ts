@@ -5,14 +5,29 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
+/* ------------------------------------------------------------------ *
+ * config.json:{ vrmPath, state: {x, y, rotY, camZ} }
+ * ------------------------------------------------------------------ */
 const configPath = (): string => join(app.getPath('userData'), 'config.json');
 
-function savedVrmPath(): string | null {
+interface Config {
+  vrmPath?: string;
+  state?: { x: number; y: number; rotY: number; camZ: number };
+}
+
+function readConfig(): Config {
   try {
-    const c = JSON.parse(readFileSync(configPath(), 'utf8'));
-    return typeof c.vrmPath === 'string' && existsSync(c.vrmPath) ? c.vrmPath : null;
+    return JSON.parse(readFileSync(configPath(), 'utf8'));
   } catch {
-    return null;
+    return {};
+  }
+}
+
+function writeConfig(patch: Partial<Config>): void {
+  try {
+    writeFileSync(configPath(), JSON.stringify({ ...readConfig(), ...patch }));
+  } catch (e) {
+    console.log('[main] writeConfig failed', e);
   }
 }
 
@@ -20,7 +35,7 @@ function savedVrmPath(): string | null {
 function pushVrm(path: string): void {
   try {
     win?.webContents.send('vrm-buffer', readFileSync(path));
-    writeFileSync(configPath(), JSON.stringify({ vrmPath: path }));
+    writeConfig({ vrmPath: path });
   } catch (e) {
     console.log('[main] pushVrm failed', e);
   }
@@ -33,6 +48,22 @@ async function chooseVrm(): Promise<void> {
     filters: [{ name: 'VRM', extensions: ['vrm'] }]
   });
   if (!r.canceled && r.filePaths[0]) pushVrm(r.filePaths[0]);
+}
+
+/** 重置位置/角度/縮放(不動已選的 VRM) */
+function resetState(): void {
+  const s = { x: 0, y: 0, rotY: 0, camZ: 5 };
+  writeConfig({ state: s });
+  win?.webContents.send('apply-state', s);
+}
+
+function petMenu(): Menu {
+  return Menu.buildFromTemplate([
+    { label: '選擇 VRM 檔…', click: () => void chooseVrm() },
+    { label: '重置位置與大小', click: resetState },
+    { type: 'separator' },
+    { label: '結束', click: () => app.exit(0) }
+  ]);
 }
 
 function createOverlay(): BrowserWindow {
@@ -49,7 +80,7 @@ function createOverlay(): BrowserWindow {
     movable: false,
     skipTaskbar: true,
     backgroundColor: '#00000000',
-    focusable: false, // 不搶焦點;要打字的功能日後再議
+    focusable: false, // 不搶焦點
     ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -69,10 +100,10 @@ function createOverlay(): BrowserWindow {
   if (dev) w.loadURL(`${dev}/index.html`);
   else w.loadFile(join(__dirname, '../renderer/index.html'));
 
-  // 開機時若之前選過 VRM,載入完成後推過去
+  // 開機:之前選過的 VRM 載完推過去(位置狀態由 renderer 主動 get-state)
   w.webContents.on('did-finish-load', () => {
-    const p = savedVrmPath();
-    if (p) pushVrm(p);
+    const p = readConfig().vrmPath;
+    if (p && existsSync(p)) pushVrm(p);
   });
   return w;
 }
@@ -90,6 +121,12 @@ app.whenReady().then(() => {
     win?.setIgnoreMouseEvents(!v, { forward: true })
   );
 
+  ipcMain.handle('get-state', () => readConfig().state ?? null);
+  ipcMain.on('save-state', (_e, s: Config['state']) => writeConfig({ state: s }));
+  ipcMain.on('show-menu', () => {
+    if (win) petMenu().popup({ window: win });
+  });
+
   // click-through 視窗在 macOS 收不到被動 mousemove(實證),主行程輪詢游標推給 renderer
   setInterval(() => {
     if (!win || win.isDestroyed()) return;
@@ -102,13 +139,7 @@ app.whenReady().then(() => {
   icon.setTemplateImage(true);
   tray = new Tray(icon);
   tray.setToolTip('VRM 桌寵');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '選擇 VRM 檔…', click: () => void chooseVrm() },
-      { type: 'separator' },
-      { label: '結束', click: () => app.exit(0) }
-    ])
-  );
+  tray.setContextMenu(petMenu());
 });
 
 app.on('window-all-closed', () => {

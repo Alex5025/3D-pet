@@ -15,6 +15,8 @@ export interface Viewer {
   currentVrm: () => VRM | null;
   loadFromUrl: (url: string) => Promise<VRM>;
   loadFromBuffer: (buf: ArrayBuffer) => Promise<VRM>;
+  /** 視線跟隨:把注視點設到某個螢幕像素(官方 lookat.html 的公式) */
+  setLookAt: (px: number, py: number) => void;
 }
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
@@ -39,6 +41,17 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   light.position.set(1.0, 1.0, 1.0).normalize();
   scene.add(light);
 
+  // lookat —— official lookat.html:注視目標掛在 camera 底下
+  const lookAtTarget = new THREE.Object3D();
+  camera.add(lookAtTarget);
+  scene.add(camera); // camera 有子物件時要在場景裡,lookAtTarget 的世界座標才會更新
+
+  // official lookat.html 的 mousemove 公式,原樣照抄
+  function setLookAt(px: number, py: number): void {
+    lookAtTarget.position.x = 10.0 * ((px - 0.5 * window.innerWidth) / window.innerHeight);
+    lookAtTarget.position.y = -10.0 * ((py - 0.5 * window.innerHeight) / window.innerHeight);
+  }
+
   // gltf and vrm —— official basic.html
   let vrm: VRM | null = null;
   const loader = new GLTFLoader();
@@ -60,6 +73,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     }
     vrm = next;
     scene.add(vrm.scene); // 原尺寸,不縮放、不動任何材質
+    if (vrm.lookAt) vrm.lookAt.target = lookAtTarget; // official lookat.html
     console.log('[viewer] vrm loaded');
     return vrm;
   }
@@ -90,5 +104,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { scene, camera, renderer, currentVrm: () => vrm, loadFromUrl, loadFromBuffer };
+  return { scene, camera, renderer, currentVrm: () => vrm, loadFromUrl, loadFromBuffer, setLookAt };
 }

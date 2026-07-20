@@ -21,6 +21,8 @@
         () => (hud.textContent = 'default VRM loaded — drop another .vrm to swap'),
         (e) => (hud.textContent = 'ERR ' + e)
       );
+      // 與疊層相同的視線接線(官方 lookat.html)
+      addEventListener('mousemove', (e) => viewer.setLookAt(e.clientX, e.clientY));
       addEventListener('dragover', (e) => e.preventDefault());
       addEventListener('drop', async (e) => {
         e.preventDefault();
