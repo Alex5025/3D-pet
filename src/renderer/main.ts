@@ -154,46 +154,46 @@ window.pet.onSway((s) => viewer.setSway(s));
  * ------------------------------------------------------------------ */
 let wardrobeStates: Record<string, boolean> = {};
 
-/** mesh 的代表材質名(略過描邊材質) */
-function meshMatName(mesh: THREE.Mesh): string | null {
-  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-  for (const m of mats as Array<THREE.Material & { isOutline?: boolean }>) {
-    if (!m.isOutline && m.name) return m.name;
-  }
-  return null;
-}
-
 /** 可開關的服裝類材質:皮膚/臉/眼睛以外的都算(頭髮也可關,想換造型的人用得到) */
 function isWardrobeMat(name: string): boolean {
   return !/skin|face|eye|mouth|brow|lash|line/i.test(name);
 }
 
-function collectWardrobe(): void {
+/** 走訪模型的所有材質(含描邊)。cb 拿到「基底材質名」(描邊材質歸到其本體名下)。 */
+function eachMaterial(cb: (m: THREE.Material, baseName: string) => void): void {
   const vrm = viewer.currentVrm();
   if (!vrm) return;
-  const seen = new Map<string, string>();
   vrm.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    const name = meshMatName(mesh);
-    if (name && isWardrobeMat(name) && !seen.has(name)) {
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      if (!m.name) continue;
+      cb(m, m.name.replace(/ \(Outline\)$/i, ''));
+    }
+  });
+}
+
+function collectWardrobe(): void {
+  if (!viewer.currentVrm()) return;
+  const seen = new Map<string, string>();
+  eachMaterial((_m, base) => {
+    if (isWardrobeMat(base) && !seen.has(base)) {
       // 顯示名:去掉 VRoid 的長前綴(F00_006_01_Tops_01_CLOTH → Tops_01)
-      const label = name.replace(/^F\d+_\d+_?\d*_/i, '').replace(/_(CLOTH|HAIR)(_\d+)?$/i, '');
-      seen.set(name, label || name);
+      const label = base.replace(/^[FN]\d+_\d+_?\d*_/i, '').replace(/_(CLOTH|HAIR)(_\d+)?( \(Instance\))?$/i, '');
+      seen.set(base, label || base);
     }
   });
   window.pet.sendWardrobeList([...seen.entries()].map(([key, label]) => ({ key, label })));
   console.log(`[wardrobe] ${seen.size} items`);
 }
 
+/** ⚠️ 只關「材質」不關「網格」:同一個網格常同時裝著衣服和皮膚兩組材質,
+ *  關整個網格會把手臂等共乘的部位一起藏掉(實際踩過:取消上衣,手臂跟著消失)。
+ *  material.visible 只隱藏用到該材質的那部分幾何;描邊材質跟著本體一起開關。 */
 function applyWardrobe(): void {
-  const vrm = viewer.currentVrm();
-  if (!vrm) return;
-  vrm.scene.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const name = meshMatName(mesh);
-    if (name && isWardrobeMat(name)) mesh.visible = wardrobeStates[name] !== false;
+  eachMaterial((m, base) => {
+    if (isWardrobeMat(base)) m.visible = wardrobeStates[base] !== false;
   });
 }
 
