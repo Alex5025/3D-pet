@@ -16,14 +16,22 @@ let pet: PetState = { ...DEFAULT_STATE };
 const el = (id: string): HTMLElement => document.getElementById(id)!;
 
 /* ---------- 分頁 ---------- */
-for (const btn of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#tabs button').forEach((b) => b.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-    btn.classList.add('active');
-    el(`tab-${btn.dataset['tab']}`).classList.add('active');
+function activateTab(name: string): void {
+  if (!document.getElementById(`tab-${name}`)) return;
+  document.querySelectorAll('#tabs button').forEach((b) => {
+    b.classList.toggle('active', (b as HTMLButtonElement).dataset['tab'] === name);
   });
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  el(`tab-${name}`).classList.add('active');
 }
+
+for (const btn of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
+  btn.addEventListener('click', () => activateTab(btn.dataset['tab']!));
+}
+
+// 開啟時依選單指定的分頁;視窗已開著時由 IPC 切換
+activateTab(new URLSearchParams(location.search).get('tab') ?? 'light');
+window.pet.onSwitchTab(activateTab);
 
 /* ---------- 拉桿(光影 3 條 + 晃動 3 條) ---------- */
 const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;

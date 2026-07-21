@@ -49,6 +49,9 @@ const api = {
 
   /** 右鍵選單(原生 Menu 由主行程彈出) */
   showMenu: () => ipcRenderer.send('show-menu'),
+  /** 設定視窗已開啟時,由選單切換分頁 */
+  onSwitchTab: (cb: (tab: string) => void) =>
+    ipcRenderer.on('switch-tab', (_e, t) => cb(t)),
 
   /* 角色:晃動強度(設定面板 ↔ main ↔ 疊層) */
   getSway: (): Promise<Partial<Sway> | null> => ipcRenderer.invoke('get-sway'),

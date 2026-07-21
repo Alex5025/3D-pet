@@ -74,7 +74,8 @@ function resetState(): void {
 function petMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: '選擇 VRM 檔…', click: () => void chooseVrm() },
-    { label: '調整燈光…', click: openSettings },
+    { label: '調整燈光…', click: () => openSettings('light') },
+    { label: '角色調整…', click: () => openSettings('char') },
     { label: '重置位置與大小', click: resetState },
     { type: 'separator' },
     { label: '結束', click: () => app.exit(0) }
@@ -86,8 +87,9 @@ let settingsWin: BrowserWindow | null = null;
 let avatarIcons: { front: string; side: string } | null = null; // 疊層拍的角色小圖快取
 let wardrobeList: { key: string; label: string }[] = []; // 目前模型的服裝材質清單快取
 
-function openSettings(): void {
+function openSettings(tab: 'light' | 'char' = 'light'): void {
   if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.webContents.send('switch-tab', tab);
     settingsWin.show();
     settingsWin.focus();
     return;
@@ -112,8 +114,8 @@ function openSettings(): void {
     if (avatarIcons) settingsWin?.webContents.send('avatar-icons-apply', avatarIcons);
   });
   const dev = process.env['ELECTRON_RENDERER_URL'];
-  if (dev) settingsWin.loadURL(`${dev}/settings.html`);
-  else settingsWin.loadFile(join(__dirname, '../renderer/settings.html'));
+  if (dev) settingsWin.loadURL(`${dev}/settings.html?tab=${tab}`);
+  else settingsWin.loadFile(join(__dirname, '../renderer/settings.html'), { query: { tab } });
   app.focus({ steal: true }); // 背景 app 開的視窗會被壓在底下
 }
 
