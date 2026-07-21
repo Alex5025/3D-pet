@@ -127,7 +127,20 @@ VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = �
 
 ---
 
-## 12. 驗證方法論(現行慣例)
+## 12. 開發原則:資料的歸屬——未打包,就不進 Library
+
+**事件**:幫使用者下載測試模型時,我順手把檔案放進 `~/Library/Application Support/vrm-pet/`(Electron 的 `userData`),設定檔也一直存在那裡。使用者質問:「我們的專案有建立成一個 application 了嗎?如果沒有,就不應該當作 Apple 的專案,應該要放在專案資料夾。」
+
+**原則(重要)**:`~/Library/Application Support/` 是**已安裝應用程式**的資料目錄。專案還在 `npm run dev` 的開發階段,就不該以安裝好的 app 自居去佔用使用者的系統目錄——開發階段的一切資料(設定、下載的模型、快取)都應該住在**專案資料夾內**,和專案一起被看見、被管理、被刪除。散落在系統目錄的檔案,使用者看不到、專案刪了它們還在,就是垃圾。
+
+**處理**:
+- `configPath` 改以 `app.isPackaged` 分流:未打包 → `app.getAppPath()`(專案根目錄);將來真的打包成 `.app` 發佈,才切回 `userData`——屆時那才是正當用法。
+- 模型集中在專案的 `models/`;`config.json` 在專案根目錄;兩者進 `.gitignore`(個人狀態與大檔不進版控)。
+- `~/Library/Application Support/vrm-pet/` 整個刪除。
+
+---
+
+## 13. 驗證方法論(現行慣例)
 
 1. 渲染/燈光改動 → `vrmtest.html`(與 overlay 共用同一份 `viewer.ts`)自驗,必要時用**像素量測/framebuffer diff** 取代目測。
 2. IPC 鏈改動 → 直接寫 `config.json` 模擬、重啟看 log 回讀值。
