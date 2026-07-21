@@ -111,11 +111,20 @@ export function createViewer(opts: { transparent: boolean; background?: number }
         m.shadeColorFactor.copy(ud['origShade'] as THREE.Color).multiplyScalar(1 - lighting.shade);
         const shift = ud['origShift'] as number;
         const toony = ud['origToony'] as number;
-        // shift 往 -0.1 拉:重新打開被 shift=1 關死的陰影計算
-        m.shadingShiftFactor = shift + (-0.1 - shift) * lighting.shade;
-        // toony 往 0.5 拉:VRoid 常設 toony=1(硬邊、擠在極端角度,正面幾乎看不見),
-        // 柔化後明暗漸層才會在身體/衣服上鋪開 —— 沒有這步就是「只有臉會跟光」。
-        m.shadingToonyFactor = toony + (0.5 - toony) * lighting.shade;
+        const s = lighting.shade;
+        if (/skin/i.test(m.name) && s > 0) {
+          // 皮膚材質特例:VRoid 把臉皮(shift -0.05/toony 0.05)和身體皮(1/1)做成
+          // 不同參數,各自內插會讓臉半陰影、手腳全亮 → 膚色岔開(實際回報過)。
+          // 全部皮膚共用同一組值,臉/脖子/手/腳的明暗響應由構造保證一致。
+          m.shadingShiftFactor = 1 + (0.15 - 1) * s;
+          m.shadingToonyFactor = 1 + (0.6 - 1) * s;
+        } else {
+          // shift 往 -0.1 拉:重新打開被 shift=1 關死的陰影計算
+          m.shadingShiftFactor = shift + (-0.1 - shift) * s;
+          // toony 往 0.5 拉:VRoid 常設 toony=1(硬邊、擠在極端角度,正面幾乎看不見),
+          // 柔化後明暗漸層才會在身體/衣服上鋪開 —— 沒有這步就是「只有臉會跟光」。
+          m.shadingToonyFactor = toony + (0.5 - toony) * s;
+        }
       }
     });
   }
