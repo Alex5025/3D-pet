@@ -247,19 +247,29 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   /** 設定面板的原點小人用:以角色為中心拍正面/側面小圖(側面 = 從 -X 拍,臉朝畫面右)。
    *  ⚠️ 一定要用「主渲染器 + 離屏 RenderTarget」拍——另開第二個 WebGLRenderer 會與
    *  主 context 共用材質並污染著色狀態(實測:拍完後 body 不再回應光的方向)。 */
-  const SNAP_W = 96;
-  const SNAP_H = 128;
+  const SNAP_W = 120;
+  const SNAP_H = 160;
   function snapshot(side: boolean): string {
     const cam = new THREE.PerspectiveCamera(25, SNAP_W / SNAP_H, 0.1, 20);
     const p = root.position;
-    if (side) cam.position.set(p.x - 4.6, p.y + 0.85, p.z);
-    else cam.position.set(p.x, p.y + 0.85, p.z + 4.6);
+    if (side) cam.position.set(p.x - 3.9, p.y + 0.85, p.z);
+    else cam.position.set(p.x, p.y + 0.85, p.z + 3.9);
     cam.lookAt(p.x, p.y + 0.85, p.z);
+
+    // 用標準亮光拍(拍完還原):面板小人的亮度不該被使用者當下的燈光設定綁架
+    // (環境光調到 0 的話,拍出來會是黑剪影)
+    const keepAmbient = ambientLight.intensity;
+    const keepDir = dirLight.intensity;
+    ambientLight.intensity = Math.PI;
+    dirLight.intensity = 0;
 
     const rt = new THREE.WebGLRenderTarget(SNAP_W, SNAP_H);
     const prev = renderer.getRenderTarget();
     renderer.setRenderTarget(rt);
     renderer.render(scene, cam);
+
+    ambientLight.intensity = keepAmbient;
+    dirLight.intensity = keepDir;
     const buf = new Uint8Array(SNAP_W * SNAP_H * 4);
     renderer.readRenderTargetPixels(rt, 0, 0, SNAP_W, SNAP_H, buf);
     renderer.setRenderTarget(prev);
