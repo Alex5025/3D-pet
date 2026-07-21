@@ -24,6 +24,10 @@ export interface Viewer {
   setLighting: (l: Partial<Lighting>) => void;
   /** 拍一張目前角色的小照片(透明背景 PNG dataURL)。side=true 從側面拍(臉朝右) */
   snapshot: (side: boolean) => string;
+  /** 像素級命中探針:設定要檢測的螢幕座標(CSS px),負值 = 關閉 */
+  setHitProbe: (x: number, y: number) => void;
+  /** 上一幀探針位置的 alpha 是否非透明(= 游標壓在看得到的角色上) */
+  isHit: () => boolean;
 }
 
 export interface Lighting {
@@ -189,13 +193,38 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return new Promise((res, rej) => loader.parse(buf, '', (g) => res(onLoaded(g)), rej));
   }
 
-  // animate —— official basic.html + 燈光錨定
+  /* 像素級命中探針:hover 判定要「與看得到的完全一致」——透明處必須穿透。
+   * 包圍盒(T-pose 臂展寬)會把角色四周的透明角落誤判成可互動(實際發生過)。
+   * 做法:每幀渲染完,在同一個 task 內 readPixels 讀游標那 1 個像素的 alpha。 */
+  const probe = { x: -1, y: -1 };
+  let probeHit = false;
+  const _probePix = new Uint8Array(4);
+  function setHitProbe(x: number, y: number): void {
+    probe.x = x;
+    probe.y = y;
+  }
+  function isHit(): boolean {
+    return probeHit;
+  }
+
+  // animate —— official basic.html + 燈光錨定 + 命中探針
   const clock = new THREE.Clock();
   function animate(): void {
     requestAnimationFrame(animate);
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
     if (vrm) vrm.update(clock.getDelta());
     renderer.render(scene, camera);
+
+    if (probe.x >= 0) {
+      const gl = renderer.getContext();
+      const dpr = renderer.getPixelRatio();
+      const px = Math.round(probe.x * dpr);
+      const py = Math.round(renderer.domElement.height - probe.y * dpr);
+      gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _probePix);
+      probeHit = _probePix[3] > 16; // alpha 門檻:髮絲半透明邊緣也算命中
+    } else {
+      probeHit = false;
+    }
   }
   animate();
 
@@ -239,5 +268,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return cv.toDataURL('image/png');
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot, setHitProbe, isHit };
 }

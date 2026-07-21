@@ -131,16 +131,24 @@ const ndc = new THREE.Vector2();
 const _hitBox = new THREE.Box3();
 let interactive = false;
 
-/** 命中測試:射線 vs 角色包圍盒。
- *  ⚠️ 不要對 vrm.scene 做完整 raycast —— three 對 SkinnedMesh 是逐頂點骨骼變換,
- *  幾萬頂點 × 每 30ms 輪詢會把 renderer 主執行緒吃滿,滑鼠事件全面卡死
- *  (「點不到東西」的元兇之一)。包圍盒是 O(1),hover 用途足夠精準。 */
+/** 命中測試,兩段式:
+ *  1) 射線 vs 包圍盒(O(1) 預過濾)——盒外直接穿透,連像素都不用讀。
+ *     ⚠️ 不可對 vrm.scene 做完整 raycast:three 對 SkinnedMesh 是逐頂點骨骼變換,
+ *     幾萬頂點 × 每 30ms 輪詢會把 renderer 吃滿(「點不到東西」的元兇之一)。
+ *  2) 盒內問「像素 alpha」(viewer 每幀渲染後讀游標那 1px)——
+ *     T-pose 包圍盒=臂展寬,盒內的透明角落必須穿透,與看得到的完全一致。
+ *  像素結果晚一幀(上一幀渲染的 alpha),對 30ms 輪詢的 hover 無感。 */
 function overPet(x: number, y: number): boolean {
   if (!baseBoxReady) return false;
   ndc.set((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1));
   raycaster.setFromCamera(ndc, viewer.camera);
   _hitBox.copy(baseBox).translate(viewer.root.position);
-  return raycaster.ray.intersectsBox(_hitBox);
+  if (!raycaster.ray.intersectsBox(_hitBox)) {
+    viewer.setHitProbe(-1, -1);
+    return false;
+  }
+  viewer.setHitProbe(x, y);
+  return viewer.isHit();
 }
 
 function setInteractive(v: boolean): void {
