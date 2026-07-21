@@ -8,7 +8,10 @@ let tray: Tray | null = null;
 /* ------------------------------------------------------------------ *
  * config.json:{ vrmPath, state: {x, y, rotY, camZ} }
  * ------------------------------------------------------------------ */
-const configPath = (): string => join(app.getPath('userData'), 'config.json');
+/* 開發階段(未打包)資料放專案根目錄,不佔用 ~/Library;
+ * 將來真的打包成 .app 再改用系統的 userData 目錄。 */
+const dataDir = (): string => (app.isPackaged ? app.getPath('userData') : app.getAppPath());
+const configPath = (): string => join(dataDir(), 'config.json');
 
 interface Config {
   vrmPath?: string;
