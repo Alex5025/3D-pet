@@ -68,6 +68,7 @@ function hitSelfTest(): void {
     _hitBox.copy(baseBox).applyMatrix4(viewer.root.matrixWorld);
     const boxPass = raycaster.ray.intersectsBox(_hitBox);
     const alpha = viewer.alphaAt(px, py);
+    viewer.requestAlphaScan(); // 一併印出實際有像素的範圍,對照 center 是否真的在角色身上
     console.log(
       `[hit] selftest center=(${Math.round(px)},${Math.round(py)}) boxPass=${boxPass} alpha=${alpha} → ${boxPass && alpha > 16 ? 'OK,點得到' : '有問題'}`
     );
