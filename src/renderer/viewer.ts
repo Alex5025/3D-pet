@@ -108,17 +108,18 @@ export function createViewer(opts: { transparent: boolean; background?: number }
           ud['origShift'] = m.shadingShiftFactor ?? 0;
           ud['origToony'] = m.shadingToonyFactor ?? 0.9;
         }
-        m.shadeColorFactor.copy(ud['origShade'] as THREE.Color).multiplyScalar(1 - lighting.shade);
         const shift = ud['origShift'] as number;
         const toony = ud['origToony'] as number;
         const s = lighting.shade;
-        if (/skin/i.test(m.name) && s > 0) {
-          // 皮膚材質特例:VRoid 把臉皮(shift -0.05/toony 0.05)和身體皮(1/1)做成
-          // 不同參數,各自內插會讓臉半陰影、手腳全亮 → 膚色岔開(實際回報過)。
-          // 全部皮膚共用同一組值,臉/脖子/手/腳的明暗響應由構造保證一致。
-          m.shadingShiftFactor = 1 + (0.15 - 1) * s;
-          m.shadingToonyFactor = 1 + (0.6 - 1) * s;
+        if (/skin/i.test(m.name)) {
+          // 皮膚完全豁免:VRoid 刻意把皮膚做成平光(陰影色=受光色),保證臉/手/腳
+          // 在任何光線下同色 —— 對皮膚施加任何角度陰影,不同朝向的部位必然色差
+          // (臉朝前、腿朝下),調參數只是換一種岔法。立體感交給衣服和頭髮。
+          m.shadeColorFactor.copy(ud['origShade'] as THREE.Color);
+          m.shadingShiftFactor = shift;
+          m.shadingToonyFactor = toony;
         } else {
+          m.shadeColorFactor.copy(ud['origShade'] as THREE.Color).multiplyScalar(1 - s);
           // shift 往 -0.1 拉:重新打開被 shift=1 關死的陰影計算
           m.shadingShiftFactor = shift + (-0.1 - shift) * s;
           // toony 往 0.5 拉:VRoid 常設 toony=1(硬邊、擠在極端角度,正面幾乎看不見),
