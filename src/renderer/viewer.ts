@@ -204,10 +204,23 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   camera.add(lookAtTarget);
   scene.add(camera); // camera 有子物件時要在場景裡,lookAtTarget 的世界座標才會更新
 
-  // official lookat.html 的 mousemove 公式,原樣照抄
+  // 視線公式照 official lookat.html,但「正視基準點」改成角色眼睛的螢幕投影:
+  // 官方假設角色站在畫面中央;我們的角色會被拖到任何位置,
+  // 游標指著她的眼睛時應該是「直視你」(偏移 0),偏離眼睛才轉視線。
+  const _eyeWorld = new THREE.Vector3();
   function setLookAt(px: number, py: number): void {
-    lookAtTarget.position.x = 10.0 * ((px - 0.5 * window.innerWidth) / window.innerHeight);
-    lookAtTarget.position.y = -10.0 * ((py - 0.5 * window.innerHeight) / window.innerHeight);
+    let cx = 0.5 * window.innerWidth;
+    let cy = 0.5 * window.innerHeight;
+    const h = vrm?.humanoid;
+    const eyeBone =
+      h?.getNormalizedBoneNode('leftEye') ?? h?.getNormalizedBoneNode('head');
+    if (eyeBone) {
+      eyeBone.getWorldPosition(_eyeWorld).project(camera);
+      cx = (_eyeWorld.x * 0.5 + 0.5) * window.innerWidth;
+      cy = (-_eyeWorld.y * 0.5 + 0.5) * window.innerHeight;
+    }
+    lookAtTarget.position.x = 10.0 * ((px - cx) / window.innerHeight);
+    lookAtTarget.position.y = -10.0 * ((py - cy) / window.innerHeight);
   }
 
   // gltf and vrm —— official basic.html
