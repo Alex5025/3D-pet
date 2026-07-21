@@ -67,7 +67,14 @@ function hitSelfTest(): void {
     raycaster.setFromCamera(ndc, viewer.camera);
     _hitBox.copy(baseBox).applyMatrix4(viewer.root.matrixWorld);
     const boxPass = raycaster.ray.intersectsBox(_hitBox);
-    const alpha = viewer.alphaAt(px, py);
+    // 單點會恰好落在身體邊緣的空隙(旋轉的 T-pose 軀幹很窄),十字五點採樣才可靠
+    const alpha = Math.max(
+      viewer.alphaAt(px, py),
+      viewer.alphaAt(px - 30, py),
+      viewer.alphaAt(px + 30, py),
+      viewer.alphaAt(px, py - 30),
+      viewer.alphaAt(px, py + 30)
+    );
     viewer.requestAlphaScan(); // 一併印出實際有像素的範圍,對照 center 是否真的在角色身上
     console.log(
       `[hit] selftest center=(${Math.round(px)},${Math.round(py)}) boxPass=${boxPass} alpha=${alpha} → ${boxPass && alpha > 16 ? 'OK,點得到' : '有問題'}`
@@ -111,6 +118,8 @@ viewer
     applyState();
     sendAvatarIcons();
     hitSelfTest();
+    collectWardrobe();
+    applyWardrobe();
   })
   .catch((e) => console.log('[overlay] default load failed', e));
 
@@ -133,6 +142,70 @@ window.pet.getLighting().then((l) => {
 });
 window.pet.onLighting((l) => viewer.setLighting(l));
 
+/* 晃動強度(頭髮/衣服/胸部) */
+window.pet.getSway().then((s) => {
+  if (s) viewer.setSway(s);
+});
+window.pet.onSway((s) => viewer.setSway(s));
+
+/* ------------------------------------------------------------------ *
+ * 服裝顯示:以「材質名」為鍵開關網格。
+ * 清單在每次載入後送給 main(轉給設定面板),開關狀態存 config。
+ * ------------------------------------------------------------------ */
+let wardrobeStates: Record<string, boolean> = {};
+
+/** mesh 的代表材質名(略過描邊材質) */
+function meshMatName(mesh: THREE.Mesh): string | null {
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const m of mats as Array<THREE.Material & { isOutline?: boolean }>) {
+    if (!m.isOutline && m.name) return m.name;
+  }
+  return null;
+}
+
+/** 可開關的服裝類材質:皮膚/臉/眼睛以外的都算(頭髮也可關,想換造型的人用得到) */
+function isWardrobeMat(name: string): boolean {
+  return !/skin|face|eye|mouth|brow|lash|line/i.test(name);
+}
+
+function collectWardrobe(): void {
+  const vrm = viewer.currentVrm();
+  if (!vrm) return;
+  const seen = new Map<string, string>();
+  vrm.scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const name = meshMatName(mesh);
+    if (name && isWardrobeMat(name) && !seen.has(name)) {
+      // 顯示名:去掉 VRoid 的長前綴(F00_006_01_Tops_01_CLOTH → Tops_01)
+      const label = name.replace(/^F\d+_\d+_?\d*_/i, '').replace(/_(CLOTH|HAIR)(_\d+)?$/i, '');
+      seen.set(name, label || name);
+    }
+  });
+  window.pet.sendWardrobeList([...seen.entries()].map(([key, label]) => ({ key, label })));
+  console.log(`[wardrobe] ${seen.size} items`);
+}
+
+function applyWardrobe(): void {
+  const vrm = viewer.currentVrm();
+  if (!vrm) return;
+  vrm.scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const name = meshMatName(mesh);
+    if (name && isWardrobeMat(name)) mesh.visible = wardrobeStates[name] !== false;
+  });
+}
+
+window.pet.getWardrobe().then(({ states }) => {
+  wardrobeStates = states;
+  applyWardrobe();
+});
+window.pet.onWardrobe((states) => {
+  wardrobeStates = states;
+  applyWardrobe();
+});
+
 window.pet.onVrm(async (buf) => {
   try {
     await viewer.loadFromBuffer(buf);
@@ -140,6 +213,8 @@ window.pet.onVrm(async (buf) => {
     applyState(); // 新模型套回同一組位置/角度
     sendAvatarIcons();
     hitSelfTest();
+    collectWardrobe();
+    applyWardrobe();
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
   }
@@ -157,6 +232,8 @@ addEventListener('drop', async (e) => {
     applyState();
     sendAvatarIcons();
     hitSelfTest();
+    collectWardrobe();
+    applyWardrobe();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
   }

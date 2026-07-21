@@ -22,6 +22,8 @@ export interface Viewer {
   setLookAt: (px: number, py: number) => void;
   /** 即時調整燈光(設定面板用);缺的欄位維持現值 */
   setLighting: (l: Partial<Lighting>) => void;
+  /** 即時調整晃動強度(頭髮/衣服/胸部各自 0..2) */
+  setSway: (s: Partial<Sway>) => void;
   /** 拍一張目前角色的小照片(透明背景 PNG dataURL)。side=true 從側面拍(臉朝右) */
   snapshot: (side: boolean) => string;
   /** 像素級命中探針:設定要檢測的螢幕座標(CSS px),負值 = 關閉 */
@@ -41,8 +43,16 @@ export interface Lighting {
   y: number;
   z: number; // +Z = 螢幕這側
   shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
-  sway: number; // 晃動強度 0..2:縮放 spring bone 物理(1 = 模型原廠,0 = 幾乎不晃)
 }
+
+/** 晃動強度(0..2,1 = 模型原廠):依 spring 骨骼名稱分成三類各自控制 */
+export interface Sway {
+  hair: number; // 頭髮
+  cloth: number; // 衣服(裙襬/袖/緞帶等)
+  chest: number; // 胸部
+}
+
+export const DEFAULT_SWAY: Sway = { hair: 1, cloth: 1, chest: 1 };
 
 export const DEFAULT_LIGHTING: Lighting = {
   ambient: Math.PI * 0.8,
@@ -50,8 +60,7 @@ export const DEFAULT_LIGHTING: Lighting = {
   x: 0,
   y: 1,
   z: 2,
-  shade: 0.35,
-  sway: 1
+  shade: 0.35
 };
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
@@ -149,18 +158,31 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     dirLight.target.position.copy(root.position);
   }
 
-  /* 晃動強度:全域縮放 spring bone 物理。1 = 原廠;
-   * <1 加大阻尼、加硬 → 收斂快、不太晃;>1 變軟 → 更飄。原始值存在 joint 上可還原。 */
+  /* 晃動強度:縮放 spring bone 物理,依骨骼名稱分類(頭髮/胸部/其餘=衣服)各自控制。
+   * 1 = 原廠;<1 加大阻尼、加硬 → 不太晃;>1 變軟 → 更飄。原始值存在 joint 上可還原。 */
+  const sway: Sway = { ...DEFAULT_SWAY };
+
+  function swayCategory(boneName: string): keyof Sway {
+    if (/hair/i.test(boneName)) return 'hair';
+    if (/bust|breast|chest|oppai/i.test(boneName)) return 'chest';
+    return 'cloth';
+  }
+
   function applySway(): void {
     const joints = vrm?.springBoneManager?.joints;
     if (!joints) return;
-    const s = Math.max(0, lighting.sway);
     for (const j of joints) {
       const jj = j as typeof j & { _orig?: { stiffness: number; dragForce: number } };
       if (!jj._orig) jj._orig = { stiffness: j.settings.stiffness, dragForce: j.settings.dragForce };
+      const s = Math.max(0, sway[swayCategory(j.bone.name)]);
       j.settings.stiffness = jj._orig.stiffness * (s < 0.05 ? 50 : 1 / s);
       j.settings.dragForce = Math.min(1, Math.max(0, jj._orig.dragForce + (1 - s) * 0.4));
     }
+  }
+
+  function setSway(s: Partial<Sway>): void {
+    Object.assign(sway, s);
+    applySway();
   }
 
   function setLighting(l: Partial<Lighting>): void {
@@ -169,7 +191,6 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     dirLight.intensity = lighting.directional;
     anchorLight();
     applyShade();
-    applySway();
   }
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
@@ -359,5 +380,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return cv.toDataURL('image/png');
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt };
 }

@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <title>燈光與位置設定</title>
+    <title>設定</title>
     <style>
       html, body {
         margin: 0;
@@ -11,7 +11,24 @@
         font: 400 13px/1.6 system-ui, -apple-system, "Noto Sans TC", sans-serif;
         user-select: none;
       }
-      #panel { padding: 14px 16px 18px; }
+      #panel { padding: 12px 16px 18px; }
+
+      /* 分頁 */
+      #tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+      #tabs button {
+        flex: 1;
+        padding: 7px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.05);
+        color: #c9c9d2;
+        font: inherit;
+        cursor: pointer;
+      }
+      #tabs button.active { background: #4f46c8; border-color: #4f46c8; color: #fff; }
+      .tab { display: none; }
+      .tab.active { display: block; }
+
       h3 { margin: 10px 0 6px; font-size: 13px; color: #a9a9e6; font-weight: 600; }
       .row { margin-bottom: 10px; }
       .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: #c9c9d2; }
@@ -31,14 +48,9 @@
         cursor: crosshair;
         touch-action: none;
       }
-      .pad::before, .pad::after {
-        content: '';
-        position: absolute;
-        background: rgba(255, 255, 255, 0.07);
-      }
+      .pad::before, .pad::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.07); }
       .pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
       .pad::after { top: 50%; left: 0; right: 0; height: 1px; }
-      /* 座標軸顏色(3D 慣例):X 紅、Y 綠、Z 藍。::after = 橫線、::before = 直線 */
       .pad.hx::after { background: rgba(255, 99, 99, 0.55); }
       .pad.hz::after { background: rgba(96, 148, 255, 0.55); }
       .pad.vy::before { background: rgba(88, 214, 128, 0.55); }
@@ -46,7 +58,6 @@
       .ax-x { color: #ff6363; }
       .ax-y { color: #58d680; }
       .ax-z { color: #6094ff; }
-      /* 原點(0,0,0)= 角色 */
       .origin {
         position: absolute;
         left: 50%;
@@ -58,8 +69,6 @@
         opacity: 0.9;
         text-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
       }
-      /* 側視圖:角色面朝 +Z(墊的右側)。emoji 側面圖預設朝左,鏡像成朝右
-         (真角色照送到後會移除此 class,照片本身已朝右) */
       .origin-side { transform: translate(-50%, -50%) scaleX(-1); }
       .origin img { width: 68px; display: block; }
       .dot {
@@ -72,9 +81,24 @@
         box-shadow: 0 0 6px rgba(109, 100, 216, 0.9);
         pointer-events: none;
       }
-      button {
+
+      /* 服裝清單 */
+      #wardrobe { display: flex; flex-direction: column; gap: 4px; }
+      #wardrobe label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        cursor: pointer;
+      }
+      #wardrobe input { accent-color: #6d64d8; }
+      #wardrobe .empty { color: #6f6f7a; }
+
+      button.wide {
         width: 100%;
-        margin-top: 10px;
+        margin-top: 12px;
         padding: 7px;
         border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 8px;
@@ -83,54 +107,78 @@
         font: inherit;
         cursor: pointer;
       }
-      button:hover { background: rgba(255, 255, 255, 0.12); }
+      button.wide:hover { background: rgba(255, 255, 255, 0.12); }
     </style>
   </head>
   <body>
     <div id="panel">
-      <h3>光源強度</h3>
-      <div class="row">
-        <label>環境光 <span class="val" id="ambient-val"></span></label>
-        <input type="range" id="ambient" min="0" max="6.2832" step="0.02" />
-      </div>
-      <div class="row">
-        <label>方向光 <span class="val" id="directional-val"></span></label>
-        <input type="range" id="directional" min="0" max="6.2832" step="0.02" />
-      </div>
-      <div class="row">
-        <label>陰影濃度(立體感) <span class="val" id="shade-val"></span></label>
-        <input type="range" id="shade" min="0" max="1" step="0.01" />
-      </div>
-      <div class="row">
-        <label>晃動強度(頭髮/衣襬物理) <span class="val" id="sway-val"></span></label>
-        <input type="range" id="sway" min="0" max="2" step="0.02" />
+      <div id="tabs">
+        <button data-tab="light" class="active">光影</button>
+        <button data-tab="char">角色</button>
       </div>
 
-      <h3>光源位置(相對角色)</h3>
-      <div class="pads">
-        <div class="pad-box">
-          <div class="cap"><span><b class="ax-x">X</b><b class="ax-z">Z</b>(俯視,下=朝你)</span><span class="val" id="lxz-val"></span></div>
-          <div class="pad hx vz" id="light-xz"><span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div></div>
+      <!-- ── 光影 ── -->
+      <div class="tab active" id="tab-light">
+        <h3>光源強度</h3>
+        <div class="row">
+          <label>環境光 <span class="val" id="ambient-val"></span></label>
+          <input type="range" id="ambient" min="0" max="6.2832" step="0.02" />
         </div>
-        <div class="pad-box">
-          <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b>(側視,右=朝你)</span><span class="val" id="lyz-val"></span></div>
-          <div class="pad hz vy" id="light-yz"><span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div></div>
+        <div class="row">
+          <label>方向光 <span class="val" id="directional-val"></span></label>
+          <input type="range" id="directional" min="0" max="6.2832" step="0.02" />
         </div>
-      </div>
+        <div class="row">
+          <label>陰影濃度(立體感) <span class="val" id="shade-val"></span></label>
+          <input type="range" id="shade" min="0" max="1" step="0.01" />
+        </div>
 
-      <h3>角色位置</h3>
-      <div class="pads">
-        <div class="pad-box">
-          <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b>(正面)</span><span class="val" id="pxy-val"></span></div>
-          <div class="pad hx vy" id="pet-xy"><div class="dot"></div></div>
-        </div>
-        <div class="pad-box">
-          <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b>(側面)</span><span class="val" id="pzy-val"></span></div>
-          <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
+        <h3>光源位置(相對角色)</h3>
+        <div class="pads">
+          <div class="pad-box">
+            <div class="cap"><span><b class="ax-x">X</b><b class="ax-z">Z</b>(俯視,下=朝你)</span><span class="val" id="lxz-val"></span></div>
+            <div class="pad hx vz" id="light-xz"><span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div></div>
+          </div>
+          <div class="pad-box">
+            <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b>(側視,右=朝你)</span><span class="val" id="lyz-val"></span></div>
+            <div class="pad hz vy" id="light-yz"><span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div></div>
+          </div>
         </div>
       </div>
 
-      <button id="reset">全部重置為預設</button>
+      <!-- ── 角色 ── -->
+      <div class="tab" id="tab-char">
+        <h3>晃動強度(1 = 模型原廠)</h3>
+        <div class="row">
+          <label>頭髮 <span class="val" id="hair-val"></span></label>
+          <input type="range" id="hair" min="0" max="2" step="0.02" />
+        </div>
+        <div class="row">
+          <label>衣服 <span class="val" id="cloth-val"></span></label>
+          <input type="range" id="cloth" min="0" max="2" step="0.02" />
+        </div>
+        <div class="row">
+          <label>胸部 <span class="val" id="chest-val"></span></label>
+          <input type="range" id="chest" min="0" max="2" step="0.02" />
+        </div>
+
+        <h3>服裝顯示</h3>
+        <div id="wardrobe"><span class="empty">載入中…</span></div>
+
+        <h3>角色位置</h3>
+        <div class="pads">
+          <div class="pad-box">
+            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b>(正面)</span><span class="val" id="pxy-val"></span></div>
+            <div class="pad hx vy" id="pet-xy"><div class="dot"></div></div>
+          </div>
+          <div class="pad-box">
+            <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b>(側面)</span><span class="val" id="pzy-val"></span></div>
+            <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <button class="wide" id="reset">全部重置為預設</button>
     </div>
     <script type="module" src="./settings.ts"></script>
   </body>

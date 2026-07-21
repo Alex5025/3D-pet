@@ -23,8 +23,9 @@ interface Config {
     y: number;
     z: number;
     shade: number;
-    sway: number;
   };
+  sway?: { hair: number; cloth: number; chest: number };
+  wardrobe?: Record<string, boolean>; // 材質名 → 顯示與否(缺 = 顯示)
 }
 
 function readConfig(): Config {
@@ -83,6 +84,7 @@ function petMenu(): Menu {
 /* 燈光設定面板:一般可聚焦的小視窗(疊層 focusable:false 塞不了操作 UI),單例 */
 let settingsWin: BrowserWindow | null = null;
 let avatarIcons: { front: string; side: string } | null = null; // 疊層拍的角色小圖快取
+let wardrobeList: { key: string; label: string }[] = []; // 目前模型的服裝材質清單快取
 
 function openSettings(): void {
   if (settingsWin && !settingsWin.isDestroyed()) {
@@ -92,7 +94,7 @@ function openSettings(): void {
   }
   settingsWin = new BrowserWindow({
     width: 380,
-    height: 800,
+    height: 680,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -204,6 +206,25 @@ app.whenReady().then(() => {
   ipcMain.on('set-lighting', (_e, l: Config['lighting']) => {
     writeConfig({ lighting: l });
     win?.webContents.send('apply-lighting', l); // 疊層即時套用
+  });
+
+  ipcMain.handle('get-sway', () => readConfig().sway ?? null);
+  ipcMain.on('set-sway', (_e, s: Config['sway']) => {
+    writeConfig({ sway: s });
+    win?.webContents.send('apply-sway', s);
+  });
+
+  // 服裝顯示:疊層在每次載入後送材質清單;開關狀態存 config、疊層即時套用
+  ipcMain.on('wardrobe-list', (_e, list: { key: string; label: string }[]) => {
+    wardrobeList = list;
+    if (settingsWin && !settingsWin.isDestroyed())
+      settingsWin.webContents.send('wardrobe-list-apply', list);
+  });
+  ipcMain.handle('get-wardrobe', () => ({ list: wardrobeList, states: readConfig().wardrobe ?? {} }));
+  ipcMain.on('set-wardrobe', (_e, key: string, visible: boolean) => {
+    const states = { ...(readConfig().wardrobe ?? {}), [key]: visible };
+    writeConfig({ wardrobe: states });
+    win?.webContents.send('apply-wardrobe', states);
   });
   ipcMain.on('show-menu', () => {
     if (win) petMenu().popup({ window: win });
