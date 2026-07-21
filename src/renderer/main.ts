@@ -33,10 +33,45 @@ let baseBoxReady = false;
 function measureAnchor(): void {
   const vrm = viewer.currentVrm();
   if (!vrm) return;
-  const box = new THREE.Box3().setFromObject(vrm.scene);
-  anchorH = (box.max.y + box.min.y) / 2 - viewer.root.position.y;
-  baseBox.copy(box).translate(viewer.root.position.clone().negate());
+  // ⚠️ 不用 Box3.setFromObject:SkinnedMesh 的 geometry.boundingBox 會被 morph 目標
+  // 撐爆、且和骨骼空間對不上(B 換膚後盒子整個歪掉 → 點不到,實際踩過)。
+  // 改用「骨骼節點的世界座標」建盒:幾百個點、便宜、永遠貼著實際身形,
+  // 再加一圈皮肉邊距;精準命中交給像素探針,盒子只負責預過濾。
+  viewer.root.updateWorldMatrix(true, true);
+  const inv = new THREE.Matrix4().copy(viewer.root.matrixWorld).invert();
+  const p = new THREE.Vector3();
+  baseBox.makeEmpty();
+  vrm.scene.traverse((o) => {
+    if ((o as THREE.Bone).isBone) baseBox.expandByPoint(o.getWorldPosition(p));
+  });
+  if (baseBox.isEmpty()) baseBox.set(new THREE.Vector3(-1, 0, -1), new THREE.Vector3(1, 2, 1));
+  baseBox.applyMatrix4(inv).expandByScalar(0.2);
+  anchorH = (baseBox.max.y + baseBox.min.y) / 2;
   baseBoxReady = true;
+}
+
+/** 載入後自我診斷:探針戳角色中心,驗證整條命中鏈(box → 像素 alpha),結果進終端機。
+ *  換模型後「點不到」這類問題不用使用者配合,看 log 就能定位斷在哪一環。 */
+function hitSelfTest(): void {
+  setTimeout(() => {
+    const c = new THREE.Vector3(
+      viewer.root.position.x,
+      viewer.root.position.y + anchorH,
+      viewer.root.position.z
+    ).project(viewer.camera);
+    const px = (c.x * 0.5 + 0.5) * innerWidth;
+    const py = (-c.y * 0.5 + 0.5) * innerHeight;
+    // 不經 overPet/探針(探針 30ms 就會被真游標輪詢覆蓋,一次性呼叫只會讀到假值):
+    // 盒測直接算、像素直接同步渲染讀 alpha。
+    ndc.set((px / innerWidth) * 2 - 1, -((py / innerHeight) * 2 - 1));
+    raycaster.setFromCamera(ndc, viewer.camera);
+    _hitBox.copy(baseBox).applyMatrix4(viewer.root.matrixWorld);
+    const boxPass = raycaster.ray.intersectsBox(_hitBox);
+    const alpha = viewer.alphaAt(px, py);
+    console.log(
+      `[hit] selftest center=(${Math.round(px)},${Math.round(py)}) boxPass=${boxPass} alpha=${alpha} → ${boxPass && alpha > 16 ? 'OK,點得到' : '有問題'}`
+    );
+  }, 500);
 }
 
 /** 拍正面/側面小圖給設定面板當原點小人(換模型會自動更新)。
@@ -74,6 +109,7 @@ viewer
     measureAnchor();
     applyState();
     sendAvatarIcons();
+    hitSelfTest();
   })
   .catch((e) => console.log('[overlay] default load failed', e));
 
@@ -102,6 +138,7 @@ window.pet.onVrm(async (buf) => {
     measureAnchor();
     applyState(); // 新模型套回同一組位置/角度
     sendAvatarIcons();
+    hitSelfTest();
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
   }
@@ -118,6 +155,7 @@ addEventListener('drop', async (e) => {
     measureAnchor();
     applyState();
     sendAvatarIcons();
+    hitSelfTest();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
   }
@@ -142,7 +180,7 @@ function overPet(x: number, y: number): boolean {
   if (!baseBoxReady) return false;
   ndc.set((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1));
   raycaster.setFromCamera(ndc, viewer.camera);
-  _hitBox.copy(baseBox).translate(viewer.root.position);
+  _hitBox.copy(baseBox).applyMatrix4(viewer.root.matrixWorld); // 局部 → 世界(含旋轉)
   if (!raycaster.ray.intersectsBox(_hitBox)) {
     viewer.setHitProbe(-1, -1);
     return false;

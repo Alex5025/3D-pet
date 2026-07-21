@@ -28,6 +28,10 @@ export interface Viewer {
   setHitProbe: (x: number, y: number) => void;
   /** 上一幀探針位置的 alpha 是否非透明(= 游標壓在看得到的角色上) */
   isHit: () => boolean;
+  /** 診斷:下一幀掃描整個畫面的 alpha,把「實際有像素的區域」印進 console */
+  requestAlphaScan: () => void;
+  /** 診斷:同步渲染一幀並讀某 CSS 座標的 alpha(不經探針,不受游標輪詢干擾) */
+  alphaAt: (x: number, y: number) => number;
 }
 
 export interface Lighting {
@@ -186,6 +190,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     }
     vrm = next;
     root.add(vrm.scene); // 原尺寸,不縮放;掛在 root 下,使用者 transform 動 root
+    // SkinnedMesh 的 geometry 邊界(bind pose + morph 撐爆)不可靠,
+    // three 會據此誤剔除整隻模型 → 關掉逐物件剔除(單一角色,成本可忽略)
+    vrm.scene.traverse((o) => (o.frustumCulled = false));
     if (vrm.lookAt) vrm.lookAt.target = lookAtTarget; // official lookat.html
     applyShade(); // 換模型後套用目前的陰影濃度
     console.log('[viewer] vrm loaded');
@@ -208,6 +215,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
    * 做法:每幀渲染完,在同一個 task 內 readPixels 讀游標那 1 個像素的 alpha。 */
   const probe = { x: -1, y: -1 };
   let probeHit = false;
+  let scanRequested = false;
   const _probePix = new Uint8Array(4);
   function setHitProbe(x: number, y: number): void {
     probe.x = x;
@@ -235,8 +243,53 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     } else {
       probeHit = false;
     }
+
+    if (scanRequested) {
+      scanRequested = false;
+      const gl = renderer.getContext();
+      const W = renderer.domElement.width;
+      const H = renderer.domElement.height;
+      const dpr = renderer.getPixelRatio();
+      const b = new Uint8Array(4);
+      let minX = 1e9, maxX = -1, minY = 1e9, maxY = -1, count = 0;
+      for (let gy = 0; gy < H; gy += 24) {
+        for (let gx = 0; gx < W; gx += 24) {
+          gl.readPixels(gx, gy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b);
+          if (b[3] > 16) {
+            count++;
+            if (gx < minX) minX = gx;
+            if (gx > maxX) maxX = gx;
+            if (gy < minY) minY = gy;
+            if (gy > maxY) maxY = gy;
+          }
+        }
+      }
+      // 回報成 CSS px、y 從頂部算(和 probe 的輸入座標同一座標系)
+      console.log(
+        count === 0
+          ? '[viewer] alphaScan: 整個畫面沒有任何非透明像素(角色沒被渲染!)'
+          : `[viewer] alphaScan: 角色像素範圍 x=${Math.round(minX / dpr)}..${Math.round(maxX / dpr)} ` +
+            `y=${Math.round((H - maxY) / dpr)}..${Math.round((H - minY) / dpr)} (CSS px, 取樣點 ${count})`
+      );
+    }
   }
   animate();
+
+  function requestAlphaScan(): void {
+    scanRequested = true;
+  }
+
+  function alphaAt(x: number, y: number): number {
+    renderer.render(scene, camera); // readPixels 只在同一個 task 的 render 後有效
+    const gl = renderer.getContext();
+    const dpr = renderer.getPixelRatio();
+    gl.readPixels(
+      Math.round(x * dpr),
+      Math.round(renderer.domElement.height - y * dpr),
+      1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _probePix
+    );
+    return _probePix[3];
+  }
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -288,5 +341,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return cv.toDataURL('image/png');
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot, setHitProbe, isHit };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt };
 }
