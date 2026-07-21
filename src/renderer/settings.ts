@@ -35,7 +35,7 @@ window.pet.onSwitchTab(activateTab);
 
 /* ---------- 拉桿(光影 3 條 + 晃動 3 條) ---------- */
 const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;
-const SWAY_KEYS = ['hair', 'cloth', 'chest'] as const;
+const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
 
 const slider = (id: string): HTMLInputElement => el(id) as HTMLInputElement;
 

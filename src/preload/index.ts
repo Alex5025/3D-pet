@@ -21,6 +21,7 @@ export interface Sway {
   hair: number;
   cloth: number;
   chest: number;
+  tail: number;
 }
 
 export interface WardrobeItem {

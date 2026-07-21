@@ -24,7 +24,7 @@ interface Config {
     z: number;
     shade: number;
   };
-  sway?: { hair: number; cloth: number; chest: number };
+  sway?: { hair: number; cloth: number; chest: number; tail: number };
   wardrobe?: Record<string, boolean>; // 材質名 → 顯示與否(缺 = 顯示)
 }
 
@@ -96,7 +96,7 @@ function openSettings(tab: 'light' | 'char' = 'light'): void {
   }
   settingsWin = new BrowserWindow({
     width: 380,
-    height: 680,
+    height: 720,
     resizable: false,
     minimizable: false,
     maximizable: false,

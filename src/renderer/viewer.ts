@@ -45,14 +45,15 @@ export interface Lighting {
   shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
 }
 
-/** 晃動強度(0..2,1 = 模型原廠):依 spring 骨骼名稱分成三類各自控制 */
+/** 晃動強度(0..2,1 = 模型原廠):依 spring 骨骼名稱分類各自控制 */
 export interface Sway {
   hair: number; // 頭髮
   cloth: number; // 衣服(裙襬/袖/緞帶等)
   chest: number; // 胸部
+  tail: number; // 尾巴(獸耳角色等;模型沒有尾巴骨骼時此項無作用)
 }
 
-export const DEFAULT_SWAY: Sway = { hair: 1, cloth: 1, chest: 1 };
+export const DEFAULT_SWAY: Sway = { hair: 1, cloth: 1, chest: 1, tail: 1 };
 
 export const DEFAULT_LIGHTING: Lighting = {
   ambient: Math.PI * 0.8,
@@ -165,6 +166,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   function swayCategory(boneName: string): keyof Sway {
     if (/hair/i.test(boneName)) return 'hair';
     if (/bust|breast|chest|oppai/i.test(boneName)) return 'chest';
+    if (/(?<!pony)tail|shippo/i.test(boneName)) return 'tail'; // ponytail 馬尾是頭髮,排除
     return 'cloth';
   }
 
