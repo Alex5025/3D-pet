@@ -41,6 +41,7 @@ export interface Lighting {
   y: number;
   z: number; // +Z = 螢幕這側
   shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
+  sway: number; // 晃動強度 0..2:縮放 spring bone 物理(1 = 模型原廠,0 = 幾乎不晃)
 }
 
 export const DEFAULT_LIGHTING: Lighting = {
@@ -49,7 +50,8 @@ export const DEFAULT_LIGHTING: Lighting = {
   x: 0,
   y: 1,
   z: 2,
-  shade: 0.35
+  shade: 0.35,
+  sway: 1
 };
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
@@ -147,12 +149,27 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     dirLight.target.position.copy(root.position);
   }
 
+  /* 晃動強度:全域縮放 spring bone 物理。1 = 原廠;
+   * <1 加大阻尼、加硬 → 收斂快、不太晃;>1 變軟 → 更飄。原始值存在 joint 上可還原。 */
+  function applySway(): void {
+    const joints = vrm?.springBoneManager?.joints;
+    if (!joints) return;
+    const s = Math.max(0, lighting.sway);
+    for (const j of joints) {
+      const jj = j as typeof j & { _orig?: { stiffness: number; dragForce: number } };
+      if (!jj._orig) jj._orig = { stiffness: j.settings.stiffness, dragForce: j.settings.dragForce };
+      j.settings.stiffness = jj._orig.stiffness * (s < 0.05 ? 50 : 1 / s);
+      j.settings.dragForce = Math.min(1, Math.max(0, jj._orig.dragForce + (1 - s) * 0.4));
+    }
+  }
+
   function setLighting(l: Partial<Lighting>): void {
     Object.assign(lighting, l);
     ambientLight.intensity = lighting.ambient;
     dirLight.intensity = lighting.directional;
     anchorLight();
     applyShade();
+    applySway();
   }
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
@@ -195,6 +212,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     vrm.scene.traverse((o) => (o.frustumCulled = false));
     if (vrm.lookAt) vrm.lookAt.target = lookAtTarget; // official lookat.html
     applyShade(); // 換模型後套用目前的陰影濃度
+    applySway(); // 換模型後套用目前的晃動強度
     console.log('[viewer] vrm loaded');
     return vrm;
   }

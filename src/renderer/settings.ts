@@ -13,7 +13,7 @@ let lighting: Lighting = { ...DEFAULT_LIGHTING };
 let pet: PetState = { ...DEFAULT_STATE };
 
 /* ---------- 強度拉桿 ---------- */
-const INTENSITY = ['ambient', 'directional', 'shade'] as const;
+const INTENSITY = ['ambient', 'directional', 'shade', 'sway'] as const;
 const sliders = Object.fromEntries(
   INTENSITY.map((k) => [k, document.getElementById(k) as HTMLInputElement])
 ) as Record<(typeof INTENSITY)[number], HTMLInputElement>;
@@ -106,7 +106,9 @@ function render(): void {
   for (const k of INTENSITY) {
     sliders[k].value = String(lighting[k]);
     sliderVals[k].textContent =
-      k === 'shade' ? lighting[k].toFixed(2) : `${(lighting[k] / Math.PI).toFixed(2)} π`;
+      k === 'shade' ? lighting[k].toFixed(2)
+      : k === 'sway' ? `× ${lighting[k].toFixed(2)}`
+      : `${(lighting[k] / Math.PI).toFixed(2)} π`;
   }
   for (const p of pads) {
     const dot = p.el.querySelector('.dot') as HTMLElement;

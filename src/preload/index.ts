@@ -15,6 +15,7 @@ export interface Lighting {
   y: number;
   z: number;
   shade: number;
+  sway: number;
 }
 
 const api = {

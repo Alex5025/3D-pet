@@ -16,7 +16,15 @@ const configPath = (): string => join(dataDir(), 'config.json');
 interface Config {
   vrmPath?: string;
   state?: { x: number; y: number; z: number; rotY: number; camZ: number };
-  lighting?: { ambient: number; directional: number; x: number; y: number; z: number; shade: number };
+  lighting?: {
+    ambient: number;
+    directional: number;
+    x: number;
+    y: number;
+    z: number;
+    shade: number;
+    sway: number;
+  };
 }
 
 function readConfig(): Config {
@@ -84,7 +92,7 @@ function openSettings(): void {
   }
   settingsWin = new BrowserWindow({
     width: 380,
-    height: 750,
+    height: 800,
     resizable: false,
     minimizable: false,
     maximizable: false,
