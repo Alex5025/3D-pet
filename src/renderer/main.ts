@@ -256,13 +256,24 @@ addEventListener('mouseup', (e) => {
 
 addEventListener('contextmenu', (e) => e.preventDefault());
 
-/* 縮放 = 相機遠近。透視下離軸的物體會朝光軸中心滑動,
- * 所以同步補償角色位置,讓「角色中心」在螢幕上釘住不動:
+/* 觸控板/滾輪(游標壓在角色上才生效):
+ *  - 垂直(兩指上下)= 縮放(相機遠近)
+ *  - 水平(兩指左右)= 旋轉角色 —— 與右鍵拖曳同方向
+ * 縮放時同步補償角色位置,讓「角色中心」在螢幕上釘住不動:
  * 保持 (錨點 - 光軸中心) / 相機距離 不變 → 錨點' = 中心 + (錨點 - 中心) × (z'/z)。
  * 光軸中心 = 相機 x/y = (0, 1)(viewer 的官方設定,固定不動)。 */
 addEventListener('wheel', (e) => {
   lastPointerAt = performance.now();
   if (!interactive) return;
+
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    // 兩指左右滑 = 旋轉(方向對齊右鍵拖曳:往右滑往右轉;覺得反了改這裡的正負號)
+    state.rotY -= e.deltaX * 0.005;
+    applyState();
+    scheduleSave();
+    return;
+  }
+
   const minZ = state.z + 1.2; // 相機不能貼到角色深度
   const newZ = Math.min(12, Math.max(minZ, state.camZ + e.deltaY * 0.005));
   // 透視縮放以「與角色深度平面的距離」為準
