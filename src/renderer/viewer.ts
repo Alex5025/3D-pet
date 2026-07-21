@@ -90,30 +90,52 @@ export function createViewer(opts: { transparent: boolean; background?: number }
       if (!mesh.isMesh) return;
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const m of mats as Array<
-        THREE.Material & { isOutline?: boolean; shadeColorFactor?: THREE.Color; shadingShiftFactor?: number }
+        THREE.Material & {
+          isOutline?: boolean;
+          shadeColorFactor?: THREE.Color;
+          shadingShiftFactor?: number;
+          shadingToonyFactor?: number;
+        }
       >) {
         if (m.isOutline || !m.shadeColorFactor) continue;
         const ud = m.userData;
         if (!ud['origShade']) {
           ud['origShade'] = m.shadeColorFactor.clone();
           ud['origShift'] = m.shadingShiftFactor ?? 0;
+          ud['origToony'] = m.shadingToonyFactor ?? 0.9;
         }
         m.shadeColorFactor.copy(ud['origShade'] as THREE.Color).multiplyScalar(1 - lighting.shade);
-        const orig = ud['origShift'] as number;
-        m.shadingShiftFactor = orig + (-0.1 - orig) * lighting.shade;
+        const shift = ud['origShift'] as number;
+        const toony = ud['origToony'] as number;
+        // shift 往 -0.1 拉:重新打開被 shift=1 關死的陰影計算
+        m.shadingShiftFactor = shift + (-0.1 - shift) * lighting.shade;
+        // toony 往 0.5 拉:VRoid 常設 toony=1(硬邊、擠在極端角度,正面幾乎看不見),
+        // 柔化後明暗漸層才會在身體/衣服上鋪開 —— 沒有這步就是「只有臉會跟光」。
+        m.shadingToonyFactor = toony + (0.5 - toony) * lighting.shade;
       }
     });
+  }
+
+  /** 燈光錨定:方向光以「角色」為參考座標系(位置 = 角色 + 偏移,方向指向角色)。
+   *  animate 每幀呼叫(角色被拖曳時跟著走);setLighting 也立即呼叫一次,
+   *  避免 rAF 被節流(背景分頁)時位置停在舊值。 */
+  function anchorLight(): void {
+    dirLight.position.set(
+      root.position.x + lighting.x,
+      root.position.y + lighting.y,
+      root.position.z + lighting.z
+    );
+    if (lighting.x === 0 && lighting.y === 0 && lighting.z === 0) dirLight.position.z += 1; // 偏移=0 時方向未定義
+    dirLight.target.position.copy(root.position);
   }
 
   function setLighting(l: Partial<Lighting>): void {
     Object.assign(lighting, l);
     ambientLight.intensity = lighting.ambient;
     dirLight.intensity = lighting.directional;
+    anchorLight();
     applyShade();
-    // 光源「位置」不在這裡設:燈的座標系以角色為原點(見 animate 內的錨定),
-    // 拖動角色時光與角色的相對關係不變。
   }
-  setLighting({});
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
   const root = new THREE.Group();
@@ -171,17 +193,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const clock = new THREE.Clock();
   function animate(): void {
     requestAnimationFrame(animate);
-
-    // 方向光以「角色」為參考座標系:位置 = 角色位置 + 面板偏移,方向恆指向角色。
-    // 拖動角色 → 光跟著走,打光完全不變;旋轉角色 → 受光面照樣流動(燈不隨旋轉)。
-    dirLight.position.set(
-      root.position.x + lighting.x,
-      root.position.y + lighting.y,
-      root.position.z + lighting.z
-    );
-    if (lighting.x === 0 && lighting.y === 0 && lighting.z === 0) dirLight.position.z += 1; // 偏移=0 時方向未定義
-    dirLight.target.position.copy(root.position);
-
+    anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
     if (vrm) vrm.update(clock.getDelta());
     renderer.render(scene, camera);
   }
@@ -193,20 +205,38 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  /** 設定面板的原點小人用:以角色為中心拍正面/側面小圖(側面 = 從 -X 拍,臉朝畫面右)。 */
+  /** 設定面板的原點小人用:以角色為中心拍正面/側面小圖(側面 = 從 -X 拍,臉朝畫面右)。
+   *  ⚠️ 一定要用「主渲染器 + 離屏 RenderTarget」拍——另開第二個 WebGLRenderer 會與
+   *  主 context 共用材質並污染著色狀態(實測:拍完後 body 不再回應光的方向)。 */
+  const SNAP_W = 96;
+  const SNAP_H = 128;
   function snapshot(side: boolean): string {
-    const cam = new THREE.PerspectiveCamera(25, 96 / 128, 0.1, 20);
+    const cam = new THREE.PerspectiveCamera(25, SNAP_W / SNAP_H, 0.1, 20);
     const p = root.position;
     if (side) cam.position.set(p.x - 4.6, p.y + 0.85, p.z);
     else cam.position.set(p.x, p.y + 0.85, p.z + 4.6);
     cam.lookAt(p.x, p.y + 0.85, p.z);
-    const rr = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    rr.setSize(96, 128);
-    rr.setClearAlpha(0);
-    rr.render(scene, cam);
-    const url = rr.domElement.toDataURL('image/png');
-    rr.dispose();
-    return url;
+
+    const rt = new THREE.WebGLRenderTarget(SNAP_W, SNAP_H);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.render(scene, cam);
+    const buf = new Uint8Array(SNAP_W * SNAP_H * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, SNAP_W, SNAP_H, buf);
+    renderer.setRenderTarget(prev);
+    rt.dispose();
+
+    // GPU 讀回來的像素是上下顛倒的,翻回來畫進 2D canvas 再輸出 PNG
+    const cv = document.createElement('canvas');
+    cv.width = SNAP_W;
+    cv.height = SNAP_H;
+    const ctx = cv.getContext('2d')!;
+    const img = ctx.createImageData(SNAP_W, SNAP_H);
+    for (let y = 0; y < SNAP_H; y++) {
+      img.data.set(buf.subarray((SNAP_H - 1 - y) * SNAP_W * 4, (SNAP_H - y) * SNAP_W * 4), y * SNAP_W * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+    return cv.toDataURL('image/png');
   }
 
   return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, snapshot };
