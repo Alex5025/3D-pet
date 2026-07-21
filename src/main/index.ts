@@ -134,6 +134,17 @@ function createOverlay(): BrowserWindow {
   // renderer console 轉發到終端機,疊層開不了 DevTools 也看得到
   w.webContents.on('console-message', (_e, _l, m) => console.log('[overlay]', m));
 
+  // 保險絲:renderer 掛掉/無回應時,視窗絕不能停留在「吃掉全螢幕點擊」的狀態
+  w.webContents.on('render-process-gone', (_e, d) => {
+    console.log('[main] renderer gone:', d.reason, '→ 強制恢復穿透並重載');
+    w.setIgnoreMouseEvents(true, { forward: true });
+    w.webContents.reload();
+  });
+  w.on('unresponsive', () => {
+    console.log('[main] overlay unresponsive → 強制恢復穿透');
+    w.setIgnoreMouseEvents(true, { forward: true });
+  });
+
   const dev = process.env['ELECTRON_RENDERER_URL'];
   if (dev) w.loadURL(`${dev}/index.html`);
   else w.loadFile(join(__dirname, '../renderer/index.html'));

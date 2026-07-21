@@ -26,12 +26,17 @@ let state: PetState = { ...DEFAULT_STATE };
 
 /** 角色半身高(公尺):縮放錨點 = 模型中心,每次載入後量測更新 */
 let anchorH = 0.8;
+/** 命中測試用包圍盒(以 root 為原點的局部座標),載入時量一次 */
+const baseBox = new THREE.Box3();
+let baseBoxReady = false;
 
 function measureAnchor(): void {
   const vrm = viewer.currentVrm();
   if (!vrm) return;
   const box = new THREE.Box3().setFromObject(vrm.scene);
   anchorH = (box.max.y + box.min.y) / 2 - viewer.root.position.y;
+  baseBox.copy(box).translate(viewer.root.position.clone().negate());
+  baseBoxReady = true;
 }
 
 /** 拍正面/側面小圖給設定面板當原點小人(換模型會自動更新)。
@@ -123,14 +128,19 @@ addEventListener('drop', async (e) => {
  * ------------------------------------------------------------------ */
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
+const _hitBox = new THREE.Box3();
 let interactive = false;
 
+/** 命中測試:射線 vs 角色包圍盒。
+ *  ⚠️ 不要對 vrm.scene 做完整 raycast —— three 對 SkinnedMesh 是逐頂點骨骼變換,
+ *  幾萬頂點 × 每 30ms 輪詢會把 renderer 主執行緒吃滿,滑鼠事件全面卡死
+ *  (「點不到東西」的元兇之一)。包圍盒是 O(1),hover 用途足夠精準。 */
 function overPet(x: number, y: number): boolean {
-  const vrm = viewer.currentVrm();
-  if (!vrm) return false;
+  if (!baseBoxReady) return false;
   ndc.set((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1));
   raycaster.setFromCamera(ndc, viewer.camera);
-  return raycaster.intersectObject(vrm.scene, true).length > 0;
+  _hitBox.copy(baseBox).translate(viewer.root.position);
+  return raycaster.ray.intersectsBox(_hitBox);
 }
 
 function setInteractive(v: boolean): void {
