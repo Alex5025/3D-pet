@@ -184,8 +184,20 @@ function collectWardrobe(): void {
       seen.set(base, label || base);
     }
   });
-  window.pet.sendWardrobeList([...seen.entries()].map(([key, label]) => ({ key, label })));
-  console.log(`[wardrobe] ${seen.size} items`);
+  // 同名材質(常見:頭髮拆成多個 Hair_00)自動編號,清單才分得出誰是誰
+  const items = [...seen.entries()].map(([key, label]) => ({ key, label }));
+  const total = new Map<string, number>();
+  for (const it of items) total.set(it.label, (total.get(it.label) ?? 0) + 1);
+  const nth = new Map<string, number>();
+  for (const it of items) {
+    if ((total.get(it.label) ?? 0) > 1) {
+      const n = (nth.get(it.label) ?? 0) + 1;
+      nth.set(it.label, n);
+      it.label = `${it.label} #${n}`;
+    }
+  }
+  window.pet.sendWardrobeList(items);
+  console.log(`[wardrobe] ${items.length} items`);
 }
 
 /** ⚠️ 只關「材質」不關「網格」:同一個網格常同時裝著衣服和皮膚兩組材質,
