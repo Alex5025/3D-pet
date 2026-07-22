@@ -113,13 +113,13 @@ makePad({
 });
 makePad({
   el: el('pet-xy'),
-  hRange: [-3, 3], vRange: [-3, 3],
+  hRange: [-6, 6], vRange: [-6, 6], // 拖到畫面邊緣/拉遠時座標會超過 ±3,給足餘裕
   getH: () => pet.x, getV: () => pet.y,
   set: (h, v) => { pet.x = h; pet.y = v; window.pet.setPetState(pet); }
 });
 makePad({
   el: el('pet-zy'),
-  hRange: [-2, 2], vRange: [-3, 3], // 橫 = Z(右 = 靠鏡頭變大)
+  hRange: [-4, 4], vRange: [-6, 6], // 橫 = Z(右 = 靠鏡頭變大)
   getH: () => pet.z, getV: () => pet.y,
   set: (h, v) => { pet.z = h; pet.y = v; window.pet.setPetState(pet); }
 });
