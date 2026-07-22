@@ -96,7 +96,7 @@ function openSettings(tab: 'light' | 'char' = 'light'): void {
     return;
   }
   settingsWin = new BrowserWindow({
-    width: 380,
+    width: 460,
     height: 770,
     resizable: false,
     minimizable: false,
