@@ -92,13 +92,13 @@ function makePad(spec: PadSpec): void {
 
 makePad({
   el: el('light-xz'),
-  hRange: [-3, 3], vRange: [3, -3], // 俯視:下 = 朝你(+Z)
+  hRange: [-20, 20], vRange: [20, -20], // 俯視:下 = 朝你(+Z)
   getH: () => lighting.x, getV: () => lighting.z,
   set: (h, v) => { lighting.x = h; lighting.z = v; window.pet.setLighting(lighting); }
 });
 makePad({
   el: el('light-yz'),
-  hRange: [-3, 3], vRange: [-3, 3], // 側視:橫 = Z(右 = 朝你)
+  hRange: [-20, 20], vRange: [-20, 20], // 側視:橫 = Z(右 = 朝你)
   getH: () => lighting.z, getV: () => lighting.y,
   set: (h, v) => { lighting.z = h; lighting.y = v; window.pet.setLighting(lighting); }
 });
