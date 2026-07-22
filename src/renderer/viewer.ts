@@ -260,8 +260,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     const clip = createVRMAnimationClip(anim, vrm);
     mixer?.stopAllAction();
     mixer = new THREE.AnimationMixer(vrm.scene);
-    mixer.clipAction(clip).play();
-    console.log('[viewer] vrma playing');
+    const action = mixer.clipAction(clip);
+    action.setLoop(THREE.LoopOnce, 1); // 播一次就好,不循環
+    action.clampWhenFinished = true; // 播完停在動作的最後一幀(不彈回 T-pose)
+    action.play();
+    console.log('[viewer] vrma playing (once)');
   }
 
   function stopVRMA(): void {
