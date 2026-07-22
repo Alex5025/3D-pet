@@ -49,7 +49,18 @@
 
       .pads { display: flex; gap: 12px; }
       .pad-box { flex: 1; }
-      .pad-box .cap { display: flex; justify-content: space-between; color: #c9c9d2; margin-bottom: 3px; }
+      .pad-box .cap {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 6px;
+        color: #c9c9d2;
+        margin-bottom: 3px;
+        font-size: 12px;
+        white-space: nowrap; /* 標題不因數值寬度換行 */
+      }
+      /* 數值預留固定寬度(容得下 "-20.0, -20.0")+ 靠右 + 等寬數字,位數變化不re排版 */
+      .pad-box .cap .val { min-width: 88px; text-align: right; }
       .pad {
         position: relative;
         width: 100%;
