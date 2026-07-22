@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
+import {
+  createVRMAnimationClip,
+  VRMAnimationLoaderPlugin,
+  VRMLookAtQuaternionProxy,
+  type VRMAnimation
+} from '@pixiv/three-vrm-animation';
 
 /**
  * VRM 檢視核心 —— 逐行對照 pixiv/three-vrm 官方範例,不自創:
@@ -34,6 +40,10 @@ export interface Viewer {
   requestAlphaScan: () => void;
   /** 診斷:同步渲染一幀並讀某 CSS 座標的 alpha(不經探針,不受游標輪詢干擾) */
   alphaAt: (x: number, y: number) => number;
+  /** 播放 VRMA 動作(官方 three-vrm-animation);重複播放直到 stop 或換動作 */
+  playVRMA: (buf: ArrayBuffer) => Promise<void>;
+  /** 停止動作,回到靜止姿勢 */
+  stopVRMA: () => void;
 }
 
 export interface Lighting {
@@ -232,9 +242,34 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     lookAtTarget.position.y = -10.0 * ((py - cy) / window.innerHeight);
   }
 
-  // gltf and vrm —— official basic.html
+  // gltf and vrm —— official basic.html;動作 —— official three-vrm-animation loader-plugin.html
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
+  loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+
+  /* VRMA 動作播放(官方範例原樣:mixer.update → vrm.update → render) */
+  let mixer: THREE.AnimationMixer | null = null;
+
+  async function playVRMA(buf: ArrayBuffer): Promise<void> {
+    if (!vrm) return;
+    const gltf = await new Promise<{ userData: { vrmAnimations?: VRMAnimation[] } }>((res, rej) =>
+      loader.parse(buf, '', res, rej)
+    );
+    const anim = gltf.userData.vrmAnimations?.[0];
+    if (!anim) throw new Error('檔案裡沒有 VRM 動作');
+    const clip = createVRMAnimationClip(anim, vrm);
+    mixer?.stopAllAction();
+    mixer = new THREE.AnimationMixer(vrm.scene);
+    mixer.clipAction(clip).play();
+    console.log('[viewer] vrma playing');
+  }
+
+  function stopVRMA(): void {
+    mixer?.stopAllAction();
+    mixer = null;
+    // 骨骼會停在最後一幀,重置回綁定姿
+    (vrm?.humanoid as { resetNormalizedPose?: () => void } | undefined)?.resetNormalizedPose?.();
+  }
 
   function onLoaded(gltf: { userData: { vrm?: VRM }; scene: THREE.Group }): VRM {
     const next = gltf.userData.vrm as VRM;
@@ -245,7 +280,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     VRMUtils.combineMorphs(next);
     VRMUtils.rotateVRM0(next); // VRM0 校正為面朝 +Z(相機那側)
 
-    // 官方 dnd.html:換模型前把舊的整個 dispose
+    // 官方 dnd.html:換模型前把舊的整個 dispose(動作 mixer 綁在舊骨架上,一併停掉)
+    mixer?.stopAllAction();
+    mixer = null;
     if (vrm) {
       root.remove(vrm.scene);
       VRMUtils.deepDispose(vrm.scene);
@@ -255,7 +292,13 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     // SkinnedMesh 的 geometry 邊界(bind pose + morph 撐爆)不可靠,
     // three 會據此誤剔除整隻模型 → 關掉逐物件剔除(單一角色,成本可忽略)
     vrm.scene.traverse((o) => (o.frustumCulled = false));
-    if (vrm.lookAt) vrm.lookAt.target = lookAtTarget; // official lookat.html
+    if (vrm.lookAt) {
+      vrm.lookAt.target = lookAtTarget; // official lookat.html
+      // official three-vrm-animation:VRMA 內含視線軌時需要這個 proxy 才能驅動
+      const proxy = new VRMLookAtQuaternionProxy(vrm.lookAt);
+      proxy.name = 'lookAtQuaternionProxy';
+      vrm.scene.add(proxy);
+    }
     applyShade(); // 換模型後套用目前的陰影濃度
     applySway(); // 換模型後套用目前的晃動強度
     console.log('[viewer] vrm loaded');
@@ -293,7 +336,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   function animate(): void {
     requestAnimationFrame(animate);
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
-    if (vrm) vrm.update(clock.getDelta());
+    const dt = clock.getDelta();
+    if (mixer) mixer.update(dt); // 官方順序:mixer 先動骨架,vrm.update 再套約束/物理
+    if (vrm) vrm.update(dt);
     renderer.render(scene, camera);
 
     if (probe.x >= 0) {
@@ -407,5 +452,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return cv.toDataURL('image/png');
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, playVRMA, stopVRMA };
 }

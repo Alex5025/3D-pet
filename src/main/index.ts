@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, dialog } from 'electron';
 import { join } from 'node:path';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -72,9 +72,34 @@ function resetState(): void {
   settingsWin?.webContents.send('apply-state', s);
 }
 
+/** motions/ 資料夾裡的 .vrma 動態生成子選單(每次開選單都重掃,丟新檔進去就會出現) */
+function motionMenuItems(): Electron.MenuItemConstructorOptions[] {
+  const dir = join(dataDir(), 'motions');
+  try {
+    const files = readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith('.vrma'))
+      .sort();
+    if (!files.length) return [{ label: '(motions 資料夾裡沒有 .vrma 檔)', enabled: false }];
+    return files.map((f) => ({
+      label: f.replace(/\.vrma$/i, ''),
+      click: () => {
+        try {
+          win?.webContents.send('vrma-play', readFileSync(join(dir, f)));
+        } catch (e) {
+          console.log('[main] vrma read failed', e);
+        }
+      }
+    }));
+  } catch {
+    return [{ label: '(找不到 motions 資料夾)', enabled: false }];
+  }
+}
+
 function petMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: '選擇 VRM 檔…', click: () => void chooseVrm() },
+    { label: '播放動作', submenu: motionMenuItems() },
+    { label: '停止動作', click: () => win?.webContents.send('vrma-stop') },
     { label: '調整燈光…', click: () => openSettings('light') },
     { label: '角色調整…', click: () => openSettings('char') },
     { label: '重置位置與大小', click: resetState },

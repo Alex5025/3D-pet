@@ -55,6 +55,13 @@ const api = {
   onSwitchTab: (cb: (tab: string) => void) =>
     ipcRenderer.on('switch-tab', (_e, t) => cb(t)),
 
+  /* VRMA 動作:主行程讀檔推 buffer 播放 / 停止 */
+  onVRMA: (cb: (buf: ArrayBuffer) => void) =>
+    ipcRenderer.on('vrma-play', (_e, u8: Uint8Array) =>
+      cb(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer)
+    ),
+  onVRMAStop: (cb: () => void) => ipcRenderer.on('vrma-stop', () => cb()),
+
   /* 角色:晃動強度(設定面板 ↔ main ↔ 疊層) */
   getSway: (): Promise<Partial<Sway> | null> => ipcRenderer.invoke('get-sway'),
   setSway: (s: Sway) => ipcRenderer.send('set-sway', s),

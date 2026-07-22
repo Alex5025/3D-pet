@@ -232,12 +232,25 @@ window.pet.onVrm(async (buf) => {
   }
 });
 
-/* 拖 .vrm 檔到角色上 = 換模型(官方 dnd.html 路徑) */
+/* VRMA 動作:選單點播 / 拖 .vrma 檔到角色上 */
+window.pet.onVRMA((buf) => viewer.playVRMA(buf).catch((e) => console.log('[overlay] vrma failed', e)));
+window.pet.onVRMAStop(() => viewer.stopVRMA());
+
+/* 拖 .vrm 檔到角色上 = 換模型(官方 dnd.html 路徑);拖 .vrma = 播放動作 */
 addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', async (e) => {
   e.preventDefault();
   const f = e.dataTransfer?.files?.[0];
-  if (!f || !f.name.endsWith('.vrm')) return;
+  if (!f) return;
+  if (f.name.toLowerCase().endsWith('.vrma')) {
+    try {
+      await viewer.playVRMA(await f.arrayBuffer());
+    } catch (err) {
+      console.log('[overlay] vrma drop failed', err);
+    }
+    return;
+  }
+  if (!f.name.endsWith('.vrm')) return;
   try {
     await viewer.loadFromBuffer(await f.arrayBuffer());
     measureAnchor();
