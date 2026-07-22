@@ -17,6 +17,7 @@ interface Config {
   vrmPath?: string;
   state?: { x: number; y: number; z: number; rotY: number; camZ: number };
   lighting?: {
+    type: 'directional' | 'point';
     ambient: number;
     directional: number;
     x: number;
@@ -96,7 +97,7 @@ function openSettings(tab: 'light' | 'char' = 'light'): void {
   }
   settingsWin = new BrowserWindow({
     width: 380,
-    height: 720,
+    height: 770,
     resizable: false,
     minimizable: false,
     maximizable: false,

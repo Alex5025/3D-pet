@@ -33,6 +33,15 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('#tabs button')) 
 activateTab(new URLSearchParams(location.search).get('tab') ?? 'light');
 window.pet.onSwitchTab(activateTab);
 
+/* ---------- 光源類型 ---------- */
+for (const btn of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
+  btn.addEventListener('click', () => {
+    lighting.type = btn.dataset['t'] as 'directional' | 'point';
+    window.pet.setLighting(lighting);
+    render();
+  });
+}
+
 /* ---------- 拉桿(光影 3 條 + 晃動 3 條) ---------- */
 const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;
 const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
@@ -142,6 +151,9 @@ function renderWardrobe(list: WardrobeItem[]): void {
 
 /* ---------- 顯示 ---------- */
 function render(): void {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
+    btn.classList.toggle('active', btn.dataset['t'] === lighting.type);
+  }
   for (const k of LIGHT_KEYS) {
     slider(k).value = String(lighting[k]);
     el(`${k}-val`).textContent =

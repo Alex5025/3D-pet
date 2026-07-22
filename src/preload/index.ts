@@ -9,6 +9,7 @@ export interface PetState {
 }
 
 export interface Lighting {
+  type: 'directional' | 'point';
   ambient: number;
   directional: number;
   x: number;

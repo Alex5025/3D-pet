@@ -26,6 +26,18 @@
         cursor: pointer;
       }
       #tabs button.active { background: #4f46c8; border-color: #4f46c8; color: #fff; }
+      #ltype { display: flex; gap: 6px; }
+      #ltype button {
+        flex: 1;
+        padding: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.05);
+        color: #c9c9d2;
+        font: inherit;
+        cursor: pointer;
+      }
+      #ltype button.active { background: #4f46c8; border-color: #4f46c8; color: #fff; }
       .tab { display: none; }
       .tab.active { display: block; }
 
@@ -119,6 +131,12 @@
 
       <!-- ── 光影 ── -->
       <div class="tab active" id="tab-light">
+        <h3>光源類型</h3>
+        <div id="ltype">
+          <button data-t="directional" class="active">平行光(太陽)</button>
+          <button data-t="point">點光源(燈泡)</button>
+        </div>
+
         <h3>光源強度</h3>
         <div class="row">
           <label>環境光 <span class="val" id="ambient-val"></span></label>

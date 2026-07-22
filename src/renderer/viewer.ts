@@ -37,9 +37,10 @@ export interface Viewer {
 }
 
 export interface Lighting {
+  type: 'directional' | 'point'; // 平行光(太陽,只看方向) / 點光源(燈泡,遠近有感)
   ambient: number; // 環境光強度
-  directional: number; // 方向光強度
-  x: number; // 光源位置(公尺,原點=角色腳邊);方向光的方向 = 位置 → 原點
+  directional: number; // 主光強度(兩種類型共用這個值)
+  x: number; // 光源位置(公尺,原點=角色腳邊);平行光取方向,點光源整個位置都生效
   y: number;
   z: number; // +Z = 螢幕這側
   shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
@@ -56,6 +57,7 @@ export interface Sway {
 export const DEFAULT_SWAY: Sway = { hair: 1, cloth: 1, chest: 1, tail: 1 };
 
 export const DEFAULT_LIGHTING: Lighting = {
+  type: 'directional',
   ambient: Math.PI * 0.8,
   directional: Math.PI * 0.5,
   x: 0,
@@ -92,6 +94,10 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const dirLight = new THREE.DirectionalLight(0xffffff, DEFAULT_LIGHTING.directional);
   scene.add(dirLight);
   scene.add(dirLight.target); // target 要在場景裡,matrixWorld 才會更新
+  // 點光源:distance 0 = 不截斷;decay 1(線性衰減)比物理的平方衰減好調,
+  // 「遠近影響亮度與陰影分布」的手感仍然真實
+  const pointLight = new THREE.PointLight(0xffffff, 0, 0, 1);
+  scene.add(pointLight);
 
   let vrm: VRM | null = null; // 提前宣告:下面的 applyShade 會在載入前就被呼叫
   const lighting: Lighting = { ...DEFAULT_LIGHTING };
@@ -157,6 +163,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     );
     if (lighting.x === 0 && lighting.y === 0 && lighting.z === 0) dirLight.position.z += 1; // 偏移=0 時方向未定義
     dirLight.target.position.copy(root.position);
+    pointLight.position.copy(dirLight.position); // 點光源同一個錨定位置(遠近真實生效)
   }
 
   /* 晃動強度:縮放 spring bone 物理,依骨骼名稱分類(頭髮/胸部/其餘=衣服)各自控制。
@@ -190,7 +197,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   function setLighting(l: Partial<Lighting>): void {
     Object.assign(lighting, l);
     ambientLight.intensity = lighting.ambient;
-    dirLight.intensity = lighting.directional;
+    const isPoint = lighting.type === 'point';
+    dirLight.intensity = isPoint ? 0 : lighting.directional;
+    pointLight.intensity = isPoint ? lighting.directional : 0;
     anchorLight();
     applyShade();
   }
@@ -367,8 +376,10 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     // (環境光調到 0 的話,拍出來會是黑剪影)
     const keepAmbient = ambientLight.intensity;
     const keepDir = dirLight.intensity;
+    const keepPoint = pointLight.intensity;
     ambientLight.intensity = Math.PI;
     dirLight.intensity = 0;
+    pointLight.intensity = 0;
 
     const rt = new THREE.WebGLRenderTarget(SNAP_W, SNAP_H);
     const prev = renderer.getRenderTarget();
@@ -377,6 +388,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
 
     ambientLight.intensity = keepAmbient;
     dirLight.intensity = keepDir;
+    pointLight.intensity = keepPoint;
     const buf = new Uint8Array(SNAP_W * SNAP_H * 4);
     renderer.readRenderTargetPixels(rt, 0, 0, SNAP_W, SNAP_H, buf);
     renderer.setRenderTarget(prev);
