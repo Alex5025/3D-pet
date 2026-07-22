@@ -61,6 +61,11 @@ const api = {
       cb(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer)
     ),
   onVRMAStop: (cb: () => void) => ipcRenderer.on('vrma-stop', () => cb()),
+  /** 預設姿勢:有設定就回傳該 .vrma 的內容,否則 null */
+  getDefaultPose: async (): Promise<ArrayBuffer | null> => {
+    const u8: Uint8Array | null = await ipcRenderer.invoke('get-default-pose');
+    return u8 ? (u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer) : null;
+  },
 
   /* 角色:晃動強度(設定面板 ↔ main ↔ 疊層) */
   getSway: (): Promise<Partial<Sway> | null> => ipcRenderer.invoke('get-sway'),

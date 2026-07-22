@@ -27,6 +27,7 @@ interface Config {
   };
   sway?: { hair: number; cloth: number; chest: number; tail: number };
   wardrobe?: Record<string, boolean>; // 材質名 → 顯示與否(缺 = 顯示)
+  defaultPose?: string; // motions/ 內的 .vrma 檔名:模型載入後自動播一次
 }
 
 function readConfig(): Config {
@@ -95,10 +96,46 @@ function motionMenuItems(): Electron.MenuItemConstructorOptions[] {
   }
 }
 
+/** 預設姿勢子選單:radio 標記目前選擇;點選即存檔並立刻示範播放 */
+function defaultPoseMenuItems(): Electron.MenuItemConstructorOptions[] {
+  const dir = join(dataDir(), 'motions');
+  const current = readConfig().defaultPose;
+  const none: Electron.MenuItemConstructorOptions = {
+    label: '(無)',
+    type: 'radio',
+    checked: !current,
+    click: () => writeConfig({ defaultPose: undefined })
+  };
+  try {
+    const files = readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith('.vrma'))
+      .sort();
+    return [
+      none,
+      ...files.map((f): Electron.MenuItemConstructorOptions => ({
+        label: f.replace(/\.vrma$/i, ''),
+        type: 'radio',
+        checked: f === current,
+        click: () => {
+          writeConfig({ defaultPose: f });
+          try {
+            win?.webContents.send('vrma-play', readFileSync(join(dir, f))); // 立刻示範
+          } catch (e) {
+            console.log('[main] default pose read failed', e);
+          }
+        }
+      }))
+    ];
+  } catch {
+    return [none];
+  }
+}
+
 function petMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: '選擇 VRM 檔…', click: () => void chooseVrm() },
     { label: '播放動作', submenu: motionMenuItems() },
+    { label: '預設姿勢', submenu: defaultPoseMenuItems() },
     { label: '停止動作', click: () => win?.webContents.send('vrma-stop') },
     { label: '調整燈光…', click: () => openSettings('light') },
     { label: '角色調整…', click: () => openSettings('char') },
@@ -234,6 +271,18 @@ app.whenReady().then(() => {
   ipcMain.on('set-lighting', (_e, l: Config['lighting']) => {
     writeConfig({ lighting: l });
     win?.webContents.send('apply-lighting', l); // 疊層即時套用
+  });
+
+  // 預設姿勢:renderer 每次模型載入完來要,存在才回 buffer
+  ipcMain.handle('get-default-pose', () => {
+    const f = readConfig().defaultPose;
+    if (!f) return null;
+    const p = join(dataDir(), 'motions', f);
+    try {
+      return existsSync(p) ? readFileSync(p) : null;
+    } catch {
+      return null;
+    }
   });
 
   ipcMain.handle('get-sway', () => readConfig().sway ?? null);

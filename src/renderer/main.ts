@@ -82,6 +82,13 @@ function hitSelfTest(): void {
   }, 500);
 }
 
+/** 預設姿勢:模型載入完自動播一次(有設定才播) */
+function playDefaultPose(): void {
+  window.pet.getDefaultPose().then((buf) => {
+    if (buf) viewer.playVRMA(buf).catch((e) => console.log('[overlay] default pose failed', e));
+  });
+}
+
 /** 拍正面/側面小圖給設定面板當原點小人(換模型會自動更新)。
  *  等一幀讓 spring bone / 姿勢先安定,拍出來才不是 T-pose 剛落地的僵硬幀。 */
 function sendAvatarIcons(): void {
@@ -120,6 +127,7 @@ viewer
     hitSelfTest();
     collectWardrobe();
     applyWardrobe();
+    playDefaultPose();
   })
   .catch((e) => console.log('[overlay] default load failed', e));
 
@@ -227,6 +235,7 @@ window.pet.onVrm(async (buf) => {
     hitSelfTest();
     collectWardrobe();
     applyWardrobe();
+    playDefaultPose();
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
   }
@@ -259,6 +268,7 @@ addEventListener('drop', async (e) => {
     hitSelfTest();
     collectWardrobe();
     applyWardrobe();
+    playDefaultPose();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
   }
