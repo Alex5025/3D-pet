@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-07-22。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-07-23。對應的 commit 見 `git log`。
 
 ---
 
@@ -208,3 +208,21 @@ VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = �
 ## 20. 資產集中管理
 
 模型全部集中 `models/`(內建預設 AvatarSample_A 也搬入,`public/` 留符號連結——renderer 載入、驗證頁、打包全不用改,build 會把連結解析成真檔嵌入);動作集中 `motions/`。gitignore:`models/*` 全忽略、唯獨預設模型例外進版控,保證 clone 開箱可用。
+
+---
+
+## 21. 全專案 Code Review(2026-07-23)
+
+功能穩定後做了一輪全檔審查(6 檔 ~1600 行),8 項發現全數修復(commit `b958a34`):
+
+**高(正確性)**
+1. **開機載入競態 + 重複載入**:renderer 啟動即載內建預設,main 又在 `did-finish-load` 推 config 模型——每次開機白載 14MB,且兩個載入並行、完成順序無保證,晚到的舊載入會把新模型 dispose 掉(靠運氣沒炸)。修:`get-boot-vrm` 單一載入路徑 + viewer 載入世代計數(過期結果丟棄並釋放)。實測開機 `vrm loaded` 從 2 次變 1 次。
+2. **服裝過濾誤傷**:排除規則 `|line` 本意擋 FaceEyeline,卻會誤殺任何含 "line" 的服裝材質名(Marine_CLOTH 之類)——從清單消失且永久鎖定顯示。Eyeline 本就被 `face|eye` 涵蓋,移除冗餘 token。
+
+**中(健壯性)**:`.vrm` 拖放副檔名大小寫;Tray 選單是開機快照(預設姿勢單選狀態不更新 → 變更時 `refreshTray()` 重建);設定墊 `pointercancel` 監聽器殘留;AnimationMixer 換播不 `uncacheRoot` 的 binding 洩漏。
+
+**低(效率)**:診斷掃描 1.3 萬次逐點 `readPixels`(每次 GPU 同步)→ 一次讀整幅;resize 未重設 `devicePixelRatio`(跨 DPI 螢幕)。
+
+**審過不動的**:IPC 安全姿勢(contextIsolation + 白名單 API)、同步讀檔(桌面 app 可接受)、滑桿事件的全場景 traverse(物件數少)、命中判定晚一幀語意(設計如此,有註解)。
+
+**心得**:這輪的兩個真 bug 都是「歷史演進的殘留」——雙載入是推播機制疊在預設載入上的結果,`|line` 是為單一案例補的過寬規則。定期整檔重讀比事後追症狀便宜。
