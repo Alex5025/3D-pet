@@ -93,9 +93,11 @@ function makePad(spec: PadSpec): void {
     const up = (): void => {
       spec.el.removeEventListener('pointermove', move);
       spec.el.removeEventListener('pointerup', up);
+      spec.el.removeEventListener('pointercancel', up); // cancel 也要清,監聽器才不殘留
     };
     spec.el.addEventListener('pointermove', move);
     spec.el.addEventListener('pointerup', up);
+    spec.el.addEventListener('pointercancel', up);
   });
 }
 

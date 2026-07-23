@@ -258,7 +258,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     const anim = gltf.userData.vrmAnimations?.[0];
     if (!anim) throw new Error('檔案裡沒有 VRM 動作');
     const clip = createVRMAnimationClip(anim, vrm);
-    mixer?.stopAllAction();
+    disposeMixer();
     mixer = new THREE.AnimationMixer(vrm.scene);
     const action = mixer.clipAction(clip);
     action.setLoop(THREE.LoopOnce, 1); // 播一次就好,不循環
@@ -267,15 +267,30 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     console.log('[viewer] vrma playing (once)');
   }
 
-  function stopVRMA(): void {
-    mixer?.stopAllAction();
+  /** 停掉並釋放 mixer(uncacheRoot 清 binding 快取,連播不累積) */
+  function disposeMixer(): void {
+    if (!mixer) return;
+    mixer.stopAllAction();
+    mixer.uncacheRoot(mixer.getRoot() as THREE.Object3D);
     mixer = null;
+  }
+
+  function stopVRMA(): void {
+    disposeMixer();
     // 骨骼會停在最後一幀,重置回綁定姿
     (vrm?.humanoid as { resetNormalizedPose?: () => void } | undefined)?.resetNormalizedPose?.();
   }
 
-  function onLoaded(gltf: { userData: { vrm?: VRM }; scene: THREE.Group }): VRM {
+  /* 載入世代:並行載入(不同來源同時發起)只認最後發起的那個,
+   * 過期的完成結果直接丟棄並釋放,不准覆蓋新模型(code review R1 競態)。 */
+  let loadSeq = 0;
+
+  function onLoaded(gltf: { userData: { vrm?: VRM }; scene: THREE.Group }, seq: number): VRM {
     const next = gltf.userData.vrm as VRM;
+    if (seq !== loadSeq) {
+      VRMUtils.deepDispose(next.scene);
+      throw new Error('此載入已被更新的載入取代,結果丟棄');
+    }
 
     // official 範例的載入後優化與朝向校正
     VRMUtils.removeUnnecessaryVertices(gltf.scene);
@@ -284,8 +299,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     VRMUtils.rotateVRM0(next); // VRM0 校正為面朝 +Z(相機那側)
 
     // 官方 dnd.html:換模型前把舊的整個 dispose(動作 mixer 綁在舊骨架上,一併停掉)
-    mixer?.stopAllAction();
-    mixer = null;
+    disposeMixer();
     if (vrm) {
       root.remove(vrm.scene);
       VRMUtils.deepDispose(vrm.scene);
@@ -309,14 +323,40 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   }
 
   function loadFromUrl(url: string): Promise<VRM> {
+    const seq = ++loadSeq;
     return new Promise((res, rej) =>
-      loader.load(url, (g) => res(onLoaded(g)), undefined, rej)
+      loader.load(
+        url,
+        (g) => {
+          try {
+            res(onLoaded(g, seq));
+          } catch (e) {
+            rej(e);
+          }
+        },
+        undefined,
+        rej
+      )
     );
   }
 
   // 官方 dnd.html 的替換路徑:拿到檔案內容(ArrayBuffer)直接 parse
   function loadFromBuffer(buf: ArrayBuffer): Promise<VRM> {
-    return new Promise((res, rej) => loader.parse(buf, '', (g) => res(onLoaded(g)), rej));
+    const seq = ++loadSeq;
+    return new Promise((res, rej) =>
+      loader.parse(
+        buf,
+        '',
+        (g) => {
+          try {
+            res(onLoaded(g, seq));
+          } catch (e) {
+            rej(e);
+          }
+        },
+        rej
+      )
+    );
   }
 
   /* 像素級命中探針:hover 判定要「與看得到的完全一致」——透明處必須穿透。
@@ -361,12 +401,13 @@ export function createViewer(opts: { transparent: boolean; background?: number }
       const W = renderer.domElement.width;
       const H = renderer.domElement.height;
       const dpr = renderer.getPixelRatio();
-      const b = new Uint8Array(4);
+      // 一次讀整幅再用 CPU 掃:逐點 readPixels 每次都是 GPU 同步,一萬多次會卡一大下
+      const full = new Uint8Array(W * H * 4);
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, full);
       let minX = 1e9, maxX = -1, minY = 1e9, maxY = -1, count = 0;
       for (let gy = 0; gy < H; gy += 24) {
         for (let gx = 0; gx < W; gx += 24) {
-          gl.readPixels(gx, gy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b);
-          if (b[3] > 16) {
+          if (full[(gy * W + gx) * 4 + 3] > 16) {
             count++;
             if (gx < minX) minX = gx;
             if (gx > maxX) maxX = gx;
@@ -405,6 +446,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(window.devicePixelRatio); // 跨螢幕(不同 dpr)時解析度要跟上
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 

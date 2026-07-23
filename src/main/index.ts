@@ -73,6 +73,11 @@ function resetState(): void {
   settingsWin?.webContents.send('apply-state', s);
 }
 
+/** Tray 的選單是建構時的快照,狀態變了要重建才會反映(popup 版每次重建、無此問題) */
+function refreshTray(): void {
+  tray?.setContextMenu(petMenu());
+}
+
 /** motions/ 資料夾裡的 .vrma 動態生成子選單(每次開選單都重掃,丟新檔進去就會出現) */
 function motionMenuItems(): Electron.MenuItemConstructorOptions[] {
   const dir = join(dataDir(), 'motions');
@@ -104,7 +109,10 @@ function defaultPoseMenuItems(): Electron.MenuItemConstructorOptions[] {
     label: '(無)',
     type: 'radio',
     checked: !current,
-    click: () => writeConfig({ defaultPose: undefined })
+    click: () => {
+      writeConfig({ defaultPose: undefined });
+      refreshTray();
+    }
   };
   try {
     const files = readdirSync(dir)
@@ -118,6 +126,7 @@ function defaultPoseMenuItems(): Electron.MenuItemConstructorOptions[] {
         checked: f === current,
         click: () => {
           writeConfig({ defaultPose: f });
+          refreshTray();
           try {
             win?.webContents.send('vrma-play', readFileSync(join(dir, f))); // 立刻示範
           } catch (e) {
@@ -227,11 +236,8 @@ function createOverlay(): BrowserWindow {
   if (dev) w.loadURL(`${dev}/index.html`);
   else w.loadFile(join(__dirname, '../renderer/index.html'));
 
-  // 開機:之前選過的 VRM 載完推過去(位置狀態由 renderer 主動 get-state)
-  w.webContents.on('did-finish-load', () => {
-    const p = readConfig().vrmPath;
-    if (p && existsSync(p)) pushVrm(p);
-  });
+  // 開機模型由 renderer 主動來要(get-boot-vrm),不在這裡推——
+  // 「先載預設再被推播蓋掉」曾造成雙載入與完成順序競態(code review R1)。
   return w;
 }
 
@@ -271,6 +277,17 @@ app.whenReady().then(() => {
   ipcMain.on('set-lighting', (_e, l: Config['lighting']) => {
     writeConfig({ lighting: l });
     win?.webContents.send('apply-lighting', l); // 疊層即時套用
+  });
+
+  // 開機模型:config 指定且存在 → 回它的 buffer;否則 null = 用內建預設。
+  // 單一載入路徑,杜絕「預設與推播並行」的完成順序競態(code review R1)。
+  ipcMain.handle('get-boot-vrm', () => {
+    const p = readConfig().vrmPath;
+    try {
+      return p && existsSync(p) ? readFileSync(p) : null;
+    } catch {
+      return null;
+    }
   });
 
   // 預設姿勢:renderer 每次模型載入完來要,存在才回 buffer

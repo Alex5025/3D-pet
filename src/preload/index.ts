@@ -61,6 +61,12 @@ const api = {
       cb(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer)
     ),
   onVRMAStop: (cb: () => void) => ipcRenderer.on('vrma-stop', () => cb()),
+  /** 開機模型:config 有指定且存在就回它的內容,否則 null(用內建預設) */
+  getBootVrm: async (): Promise<ArrayBuffer | null> => {
+    const u8: Uint8Array | null = await ipcRenderer.invoke('get-boot-vrm');
+    return u8 ? (u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer) : null;
+  },
+
   /** 預設姿勢:有設定就回傳該 .vrma 的內容,否則 null */
   getDefaultPose: async (): Promise<ArrayBuffer | null> => {
     const u8: Uint8Array | null = await ipcRenderer.invoke('get-default-pose');

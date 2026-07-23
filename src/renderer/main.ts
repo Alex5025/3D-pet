@@ -118,18 +118,35 @@ function scheduleSave(): void {
 /* ------------------------------------------------------------------ *
  * 載入
  * ------------------------------------------------------------------ */
-viewer
-  .loadFromUrl('/AvatarSample_A.vrm')
-  .then(() => {
-    measureAnchor();
-    applyState();
-    sendAvatarIcons();
-    hitSelfTest();
-    collectWardrobe();
-    applyWardrobe();
-    playDefaultPose();
-  })
-  .catch((e) => console.log('[overlay] default load failed', e));
+/** 模型載入完成後的共用鏈:量測/套狀態/快照/自檢/服裝/預設姿勢 */
+function afterModelLoad(): void {
+  measureAnchor();
+  applyState();
+  sendAvatarIcons();
+  hitSelfTest();
+  collectWardrobe();
+  applyWardrobe();
+  playDefaultPose();
+}
+
+/* 開機:先問 main 有沒有指定模型,單一載入路徑——
+ * 「先載預設再被推播蓋掉」曾造成每次開機白載 14MB + 完成順序競態(code review R1)。 */
+(async () => {
+  try {
+    const boot = await window.pet.getBootVrm();
+    if (boot) await viewer.loadFromBuffer(boot);
+    else await viewer.loadFromUrl('/AvatarSample_A.vrm');
+    afterModelLoad();
+  } catch (e) {
+    console.log('[overlay] boot load failed, falling back to default', e);
+    try {
+      await viewer.loadFromUrl('/AvatarSample_A.vrm');
+      afterModelLoad();
+    } catch (e2) {
+      console.log('[overlay] default load failed', e2);
+    }
+  }
+})();
 
 window.pet.getState().then((s) => {
   if (s) state = { ...DEFAULT_STATE, ...s };
@@ -164,7 +181,7 @@ let wardrobeStates: Record<string, boolean> = {};
 
 /** 可開關的服裝類材質:皮膚/臉/眼睛以外的都算(頭髮也可關,想換造型的人用得到) */
 function isWardrobeMat(name: string): boolean {
-  return !/skin|face|eye|mouth|brow|lash|line/i.test(name);
+  return !/skin|face|eye|mouth|brow|lash/i.test(name);
 }
 
 /** 走訪模型的所有材質(含描邊)。cb 拿到「基底材質名」(描邊材質歸到其本體名下)。 */
@@ -229,13 +246,7 @@ window.pet.onWardrobe((states) => {
 window.pet.onVrm(async (buf) => {
   try {
     await viewer.loadFromBuffer(buf);
-    measureAnchor();
-    applyState(); // 新模型套回同一組位置/角度
-    sendAvatarIcons();
-    hitSelfTest();
-    collectWardrobe();
-    applyWardrobe();
-    playDefaultPose();
+    afterModelLoad();
   } catch (e) {
     console.log('[overlay] vrm swap failed', e);
   }
@@ -259,16 +270,10 @@ addEventListener('drop', async (e) => {
     }
     return;
   }
-  if (!f.name.endsWith('.vrm')) return;
+  if (!f.name.toLowerCase().endsWith('.vrm')) return;
   try {
     await viewer.loadFromBuffer(await f.arrayBuffer());
-    measureAnchor();
-    applyState();
-    sendAvatarIcons();
-    hitSelfTest();
-    collectWardrobe();
-    applyWardrobe();
-    playDefaultPose();
+    afterModelLoad();
   } catch (err) {
     console.log('[overlay] drop swap failed', err);
   }
