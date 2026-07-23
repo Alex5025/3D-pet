@@ -40,4 +40,5 @@ electron-vite 三段式(`electron.vite.config.ts`):main / preload / renderer,輸
 ## 慣例
 
 - 回覆與註解使用繁體中文。
+- commit msg 用中文
 - TypeScript strict;無 lint 設定,風格比照現有檔案。

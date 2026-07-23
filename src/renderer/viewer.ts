@@ -40,7 +40,11 @@ export interface Viewer {
   requestAlphaScan: () => void;
   /** 診斷:同步渲染一幀並讀某 CSS 座標的 alpha(不經探針,不受游標輪詢干擾) */
   alphaAt: (x: number, y: number) => number;
-  /** 播放 VRMA 動作(官方 three-vrm-animation);重複播放直到 stop 或換動作 */
+  /** 診斷:同步渲染一幀,讀多個 CSS 座標的 alpha 取最大(一次重繪讀多點,省重複渲染) */
+  alphaMax: (pts: Array<[number, number]>) => number;
+  /** 喚醒渲染:外部狀態變更(拖曳/縮放/面板改位置)時呼叫,恢復全速;idle 會自動節流省電 */
+  wake: () => void;
+  /** 播放 VRMA 動作(官方 three-vrm-animation);播一次,播完停在最後一幀,不循環 */
   playVRMA: (buf: ArrayBuffer) => Promise<void>;
   /** 停止動作,回到靜止姿勢 */
   stopVRMA: () => void;
@@ -202,16 +206,19 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   function setSway(s: Partial<Sway>): void {
     Object.assign(sway, s);
     applySway();
+    wake();
   }
 
   function setLighting(l: Partial<Lighting>): void {
+    const prevShade = lighting.shade;
     Object.assign(lighting, l);
     ambientLight.intensity = lighting.ambient;
     const isPoint = lighting.type === 'point';
     dirLight.intensity = isPoint ? 0 : lighting.directional;
     pointLight.intensity = isPoint ? lighting.directional : 0;
     anchorLight();
-    applyShade();
+    if (lighting.shade !== prevShade) applyShade(); // 只調亮度/位置時不必整棵材質樹重走
+    wake();
   }
 
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
@@ -227,19 +234,23 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   // 官方假設角色站在畫面中央;我們的角色會被拖到任何位置,
   // 游標指著她的眼睛時應該是「直視你」(偏移 0),偏離眼睛才轉視線。
   const _eyeWorld = new THREE.Vector3();
+  let eyeBone: THREE.Object3D | null = null; // 載入時解析一次,免每次游標事件都查骨骼名字
   function setLookAt(px: number, py: number): void {
     let cx = 0.5 * window.innerWidth;
     let cy = 0.5 * window.innerHeight;
-    const h = vrm?.humanoid;
-    const eyeBone =
-      h?.getNormalizedBoneNode('leftEye') ?? h?.getNormalizedBoneNode('head');
     if (eyeBone) {
       eyeBone.getWorldPosition(_eyeWorld).project(camera);
       cx = (_eyeWorld.x * 0.5 + 0.5) * window.innerWidth;
       cy = (-_eyeWorld.y * 0.5 + 0.5) * window.innerHeight;
     }
-    lookAtTarget.position.x = 10.0 * ((px - cx) / window.innerHeight);
-    lookAtTarget.position.y = -10.0 * ((py - cy) / window.innerHeight);
+    const tx = 10.0 * ((px - cx) / window.innerHeight);
+    const ty = -10.0 * ((py - cy) / window.innerHeight);
+    // 游標沒動時主行程仍可能重送同座標:目標沒變就不喚醒,idle 節流才守得住
+    if (Math.abs(tx - lookAtTarget.position.x) > 1e-3 || Math.abs(ty - lookAtTarget.position.y) > 1e-3) {
+      lookAtTarget.position.x = tx;
+      lookAtTarget.position.y = ty;
+      wake();
+    }
   }
 
   // gltf and vrm —— official basic.html;動作 —— official three-vrm-animation loader-plugin.html
@@ -260,15 +271,21 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     const clip = createVRMAnimationClip(anim, vrm);
     disposeMixer();
     mixer = new THREE.AnimationMixer(vrm.scene);
+    mixer.addEventListener('finished', () => {
+      mixerActive = false; // 播完(clamp 停在最後一幀)就允許進入 idle 節流
+    });
     const action = mixer.clipAction(clip);
     action.setLoop(THREE.LoopOnce, 1); // 播一次就好,不循環
     action.clampWhenFinished = true; // 播完停在動作的最後一幀(不彈回 T-pose)
     action.play();
+    mixerActive = true;
+    wake();
     console.log('[viewer] vrma playing (once)');
   }
 
   /** 停掉並釋放 mixer(uncacheRoot 清 binding 快取,連播不累積) */
   function disposeMixer(): void {
+    mixerActive = false;
     if (!mixer) return;
     mixer.stopAllAction();
     mixer.uncacheRoot(mixer.getRoot() as THREE.Object3D);
@@ -279,6 +296,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     disposeMixer();
     // 骨骼會停在最後一幀,重置回綁定姿
     (vrm?.humanoid as { resetNormalizedPose?: () => void } | undefined)?.resetNormalizedPose?.();
+    wake();
   }
 
   /* 載入世代:並行載入(不同來源同時發起)只認最後發起的那個,
@@ -316,8 +334,14 @@ export function createViewer(opts: { transparent: boolean; background?: number }
       proxy.name = 'lookAtQuaternionProxy';
       vrm.scene.add(proxy);
     }
+    // 視線基準的眼睛骨骼只在這裡解析一次(setLookAt 每次游標事件都會用到)
+    eyeBone =
+      next.humanoid?.getNormalizedBoneNode('leftEye') ??
+      next.humanoid?.getNormalizedBoneNode('head') ??
+      null;
     applyShade(); // 換模型後套用目前的陰影濃度
     applySway(); // 換模型後套用目前的晃動強度
+    wake();
     console.log('[viewer] vrm loaded');
     return vrm;
   }
@@ -364,33 +388,57 @@ export function createViewer(opts: { transparent: boolean; background?: number }
    * 做法:每幀渲染完,在同一個 task 內 readPixels 讀游標那 1 個像素的 alpha。 */
   const probe = { x: -1, y: -1 };
   let probeHit = false;
+  let probeDirty = false; // readPixels 是 GPU 同步點:只在「探針換座標」或「場景被 wake」後才重讀
   let scanRequested = false;
   const _probePix = new Uint8Array(4);
   function setHitProbe(x: number, y: number): void {
+    if (x === probe.x && y === probe.y) return; // 輪詢重送同座標:上次讀的 alpha 仍有效
     probe.x = x;
     probe.y = y;
+    probeDirty = true;
   }
   function isHit(): boolean {
     return probeHit;
   }
 
-  // animate —— official basic.html + 燈光錨定 + 命中探針
+  // animate —— official basic.html + 燈光錨定 + 命中探針 + idle 節流
+  // 節流不動官方渲染路徑,只是閒置時跳過多餘的幀(桌寵絕大多數時間是靜止的)
+  const IDLE_DELAY_MS = 3000; // 最後活動後的全速緩衝:讓 spring bone 有時間安定
+  const IDLE_SKIP = 6; // 節流時每 6 個 rAF 才渲染一次(60Hz 螢幕 ≈ 10fps)
+  const MAX_DT = 1 / 30; // 跳幀後 getDelta 變大:鉗制單步 dt,防 spring bone(Verlet)大步過衝爆掉
+  let lastActiveAt = performance.now();
+  let frameNo = 0;
+  let mixerActive = false; // 動作播放中 = 持續活動(finished 事件後清除)
+
+  function wake(): void {
+    lastActiveAt = performance.now();
+    probeDirty = true; // 場景要變了,上次讀的探針 alpha 不可信
+  }
+
   const clock = new THREE.Clock();
   function animate(): void {
     requestAnimationFrame(animate);
+    frameNo++;
+    if (mixerActive) wake(); // 播動作期間視為持續活動(角色在動,探針也要每幀重讀)
+    const idle = performance.now() - lastActiveAt > IDLE_DELAY_MS;
+    if (idle && frameNo % IDLE_SKIP !== 0) return; // 跳幀要在 getDelta 之前,delta 才不會被拆碎
+
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
-    const dt = clock.getDelta();
+    const dt = Math.min(clock.getDelta(), MAX_DT);
     if (mixer) mixer.update(dt); // 官方順序:mixer 先動骨架,vrm.update 再套約束/物理
     if (vrm) vrm.update(dt);
     renderer.render(scene, camera);
 
     if (probe.x >= 0) {
-      const gl = renderer.getContext();
-      const dpr = renderer.getPixelRatio();
-      const px = Math.round(probe.x * dpr);
-      const py = Math.round(renderer.domElement.height - probe.y * dpr);
-      gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _probePix);
-      probeHit = _probePix[3] > 16; // alpha 門檻:髮絲半透明邊緣也算命中
+      if (probeDirty) {
+        probeDirty = false;
+        const gl = renderer.getContext();
+        const dpr = renderer.getPixelRatio();
+        const px = Math.round(probe.x * dpr);
+        const py = Math.round(renderer.domElement.height - probe.y * dpr);
+        gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _probePix);
+        probeHit = _probePix[3] > 16; // alpha 門檻:髮絲半透明邊緣也算命中
+      }
     } else {
       probeHit = false;
     }
@@ -431,16 +479,24 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     scanRequested = true;
   }
 
-  function alphaAt(x: number, y: number): number {
+  function alphaMax(pts: Array<[number, number]>): number {
     renderer.render(scene, camera); // readPixels 只在同一個 task 的 render 後有效
     const gl = renderer.getContext();
     const dpr = renderer.getPixelRatio();
-    gl.readPixels(
-      Math.round(x * dpr),
-      Math.round(renderer.domElement.height - y * dpr),
-      1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _probePix
-    );
-    return _probePix[3];
+    let max = 0;
+    for (const [x, y] of pts) {
+      gl.readPixels(
+        Math.round(x * dpr),
+        Math.round(renderer.domElement.height - y * dpr),
+        1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _probePix
+      );
+      if (_probePix[3] > max) max = _probePix[3];
+    }
+    return max;
+  }
+
+  function alphaAt(x: number, y: number): number {
+    return alphaMax([[x, y]]);
   }
 
   window.addEventListener('resize', () => {
@@ -497,5 +553,5 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return cv.toDataURL('image/png');
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, playVRMA, stopVRMA };
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, playVRMA, stopVRMA };
 }

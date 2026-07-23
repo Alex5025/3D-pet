@@ -4,7 +4,7 @@
   "description": "Desktop VRM pet — rendering follows pixiv/three-vrm official examples verbatim",
   "main": "out/main/index.js",
   "scripts": {
-    "predev": "pkill -9 -f '3D-pet/node_modules/electron/dist' || true",
+    "predev": "pkill -9 -f \"$(pwd)/node_modules/electron/dist\" || true",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit"

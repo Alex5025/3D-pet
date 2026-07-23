@@ -68,13 +68,14 @@ function hitSelfTest(): void {
     _hitBox.copy(baseBox).applyMatrix4(viewer.root.matrixWorld);
     const boxPass = raycaster.ray.intersectsBox(_hitBox);
     // 單點會恰好落在身體邊緣的空隙(旋轉的 T-pose 軀幹很窄),十字五點採樣才可靠
-    const alpha = Math.max(
-      viewer.alphaAt(px, py),
-      viewer.alphaAt(px - 30, py),
-      viewer.alphaAt(px + 30, py),
-      viewer.alphaAt(px, py - 30),
-      viewer.alphaAt(px, py + 30)
-    );
+    // alphaMax:一次重繪讀五點(alphaAt 每呼叫都同步渲染一幀,五連發 = 白渲染四次)
+    const alpha = viewer.alphaMax([
+      [px, py],
+      [px - 30, py],
+      [px + 30, py],
+      [px, py - 30],
+      [px, py + 30]
+    ]);
     viewer.requestAlphaScan(); // 一併印出實際有像素的範圍,對照 center 是否真的在角色身上
     console.log(
       `[hit] selftest center=(${Math.round(px)},${Math.round(py)}) boxPass=${boxPass} alpha=${alpha} → ${boxPass && alpha > 16 ? 'OK,點得到' : '有問題'}`
@@ -102,6 +103,7 @@ function sendAvatarIcons(): void {
 }
 
 function applyState(): void {
+  viewer.wake(); // 拖曳/旋轉/縮放/面板改位置都經過這裡:恢復全速渲染
   // transform 套在 viewer.root(容器),不碰 vrm.scene —— 那上面有 rotateVRM0 的轉正
   state.z = Math.min(state.z, state.camZ - 1); // 角色不能跑到相機後面
   viewer.root.position.set(state.x, state.y, state.z);
@@ -333,16 +335,19 @@ function screenToWorld(px: number, py: number): { x: number; y: number } {
  * 真拖曳中視窗是可互動的,DOM mousemove 連續進來;超過 1.2 秒沒有任何 DOM 指標
  * 事件 = mouseup 已漏接 → 強制解除,恢復正常 hover 判定。 */
 window.pet.onCursor(({ x, y }) => {
-  viewer.setLookAt(x, y);
   if (dragging || rotating) {
     if (performance.now() - lastPointerAt > 1200) {
       console.log('[hit] watchdog cleared stuck drag');
       clearDragFlags();
       scheduleSave();
     } else {
-      return;
+      return; // 拖曳中 DOM mousemove 會做 setLookAt,這裡不重工
     }
   }
+  // 互動中且 DOM 指標事件仍在流動 → 同一次移動 mousemove 已做過 setLookAt+overPet;
+  // 用 lastPointerAt 而非只看 interactive:panel 視窗漏 DOM 事件時這裡自動接手,視線不凍結
+  if (interactive && performance.now() - lastPointerAt < 100) return;
+  viewer.setLookAt(x, y);
   setInteractive(overPet(x, y));
 });
 
@@ -368,6 +373,7 @@ document.addEventListener('visibilitychange', clearDragFlags);
 
 addEventListener('mousedown', (e) => {
   lastPointerAt = performance.now();
+  viewer.wake();
   if (!overPet(e.clientX, e.clientY)) return;
   if (e.button === 0) {
     dragging = true;
@@ -382,6 +388,7 @@ addEventListener('mousedown', (e) => {
 
 addEventListener('mousemove', (e) => {
   lastPointerAt = performance.now();
+  viewer.wake(); // hover 判定需要新渲染幀,即使視線目標沒變
   viewer.setLookAt(e.clientX, e.clientY);
   if (dragging) {
     const w = screenToWorld(e.clientX, e.clientY);
@@ -420,6 +427,7 @@ addEventListener('contextmenu', (e) => e.preventDefault());
  * 光軸中心 = 相機 x/y = (0, 1)(viewer 的官方設定,固定不動)。 */
 addEventListener('wheel', (e) => {
   lastPointerAt = performance.now();
+  viewer.wake();
   if (!interactive) return;
 
   if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
