@@ -15,14 +15,95 @@
       // 拖任何 .vrm 進來即時替換 —— 跟 app 內行為同一條程式路徑。
       import * as THREE from 'three';
       import { createViewer } from './viewer.ts';
+      import { createSpeechBubble } from './speechBubble.ts';
       window.THREE = THREE; // 驗證頁專用:讓自動化測試能現場調燈
       const hud = document.getElementById('hud');
       const viewer = createViewer({ transparent: false, background: 0xf0f0f0 });
       window.__viewer = viewer; // 驗證頁專用:讓自動化測試能呼叫替換路徑
+      const query = new URLSearchParams(location.search);
+      const rootMotionCase = query.get('rootMotion') === '1';
+
+      async function verifyRootMotionSway() {
+        const manager = viewer.currentVrm()?.springBoneManager;
+        const joints = [...(manager?.joints ?? [])];
+        if (!manager || joints.length === 0) {
+          document.body.dataset.rootMotionSway = 'fail';
+          hud.textContent = 'root motion sway FAIL — model has no Spring Bone';
+          return;
+        }
+        // 等到 viewer 進入 3 秒 idle 節流後再移動，同時排除載入落位造成的晃動。
+        await new Promise((resolve) => setTimeout(resolve, 3300));
+        const before = joints.map((joint) => joint.bone.quaternion.clone());
+        const originalX = viewer.root.position.x;
+        // 約等於一般拖曳一幀的 20–30px 位移；避免用瞬間傳送誇大物理反應。
+        viewer.root.position.x += 0.12;
+        viewer.root.updateWorldMatrix(true, true);
+        viewer.wake();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const maxAngle = Math.max(
+          ...joints.map((joint, index) => before[index].angleTo(joint.bone.quaternion)),
+        );
+        viewer.root.position.x = originalX;
+        viewer.root.updateWorldMatrix(true, true);
+        manager.reset();
+        viewer.wake();
+        const passed = maxAngle > 0.01;
+        document.body.dataset.rootMotionSway = passed ? 'pass' : 'fail';
+        document.body.dataset.rootMotionAngle = maxAngle.toFixed(4);
+        hud.textContent = `root motion sway ${passed ? 'OK' : 'FAIL'} — max angle ${maxAngle.toFixed(4)} rad`;
+      }
+
       viewer.loadFromUrl('/AvatarSample_A.vrm').then(
-        () => (hud.textContent = 'default VRM loaded — drop another .vrm to swap'),
+        () => {
+          viewer.enableRootMotionSway();
+          hud.textContent = 'default VRM loaded — drop another .vrm to swap';
+          if (rootMotionCase) void verifyRootMotionSway();
+        },
         (e) => (hud.textContent = 'ERR ' + e)
       );
+
+      // 對話泡泡驗證入口：只在 ?speechBubble=1 啟用，不影響平常的模型測試頁。
+      const speechBubbleCase = query.get('speechBubble');
+      if (speechBubbleCase) {
+        const target = document.createElement('button');
+        target.textContent = '將滑鼠移到這裡測試對話泡泡';
+        target.style.cssText = speechBubbleCase === 'top-right'
+          ? 'position:fixed;z-index:5;right:28px;top:28px;padding:12px 16px'
+          : 'position:fixed;z-index:5;left:50%;top:62%;transform:translate(-50%,-50%);padding:12px 16px';
+        document.body.appendChild(target);
+        const hideTarget = document.createElement('button');
+        hideTarget.textContent = '隱藏對話泡泡';
+        hideTarget.style.cssText =
+          'position:fixed;z-index:5;left:50%;top:72%;transform:translate(-50%,-50%);padding:8px 12px';
+        document.body.appendChild(hideTarget);
+        const bubble = createSpeechBubble();
+        let hideTimer;
+        const cancelHide = () => {
+          if (hideTimer) clearTimeout(hideTimer);
+          hideTimer = undefined;
+        };
+        const scheduleHide = () => {
+          cancelHide();
+          hideTimer = setTimeout(() => bubble.hide(), 160);
+        };
+        const showBubble = () => {
+          cancelHide();
+          const rect = target.getBoundingClientRect();
+          bubble.showAt(rect.left + rect.width / 2, rect.top, {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom,
+          });
+        };
+        target.addEventListener('mouseenter', showBubble);
+        target.addEventListener('click', showBubble);
+        target.addEventListener('mouseleave', scheduleHide);
+        bubble.element.addEventListener('mouseenter', cancelHide);
+        bubble.element.addEventListener('mouseleave', scheduleHide);
+        hideTarget.addEventListener('click', () => bubble.hide());
+        window.__speechBubble = bubble;
+      }
       // 與疊層相同的視線接線(官方 lookat.html)
       addEventListener('mousemove', (e) => viewer.setLookAt(e.clientX, e.clientY));
       addEventListener('dragover', (e) => e.preventDefault());
@@ -31,7 +112,12 @@
         const f = e.dataTransfer?.files?.[0];
         if (!f || !f.name.endsWith('.vrm')) return;
         hud.textContent = 'loading ' + f.name + '…';
-        try { await viewer.loadFromBuffer(await f.arrayBuffer()); hud.textContent = f.name + ' loaded'; }
+        try {
+          await viewer.loadFromBuffer(await f.arrayBuffer());
+          viewer.enableRootMotionSway();
+          hud.textContent = f.name + ' loaded';
+          if (rootMotionCase) void verifyRootMotionSway();
+        }
         catch (err) { hud.textContent = 'ERR ' + err; }
       });
     </script>

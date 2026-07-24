@@ -6,12 +6,40 @@
     <style>
       html, body {
         margin: 0;
+        height: 100%;
         background: #1c1c20;
         color: #f2f2f4;
         font: 400 13px/1.6 system-ui, -apple-system, "Noto Sans TC", sans-serif;
         user-select: none;
+        overflow-y: auto;
       }
       #panel { padding: 12px 16px 18px; }
+
+      /* 寵物管理 */
+      #pet-toolbar { display: flex; gap: 7px; margin-bottom: 10px; }
+      #pet-select, .text-input {
+        box-sizing: border-box;
+        min-width: 0;
+        padding: 7px 9px;
+        color: #eeeeF4;
+        background: #28282e;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        font: inherit;
+        outline: none;
+      }
+      #pet-select { flex: 1; }
+      #pet-toolbar button {
+        width: 36px;
+        color: #eeeef4;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        font: 600 17px/1 system-ui;
+        cursor: pointer;
+      }
+      #pet-toolbar button:hover { background: rgba(255, 255, 255, 0.12); }
+      #pet-toolbar button[disabled] { opacity: 0.45; cursor: default; }
 
       /* 分頁 */
       #tabs { display: flex; gap: 6px; margin-bottom: 12px; }
@@ -131,13 +159,50 @@
         cursor: pointer;
       }
       button.wide:hover { background: rgba(255, 255, 255, 0.12); }
+
+      /* 工作設定 */
+      .project-note { margin: 0 0 12px; color: #a9a9b3; }
+      .workspace-card {
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .workspace-label { margin-bottom: 5px; color: #c9c9d2; font-size: 12px; }
+      .field { display: block; margin-bottom: 11px; color: #c9c9d2; }
+      .field > span { display: block; margin-bottom: 4px; font-size: 12px; }
+      .text-input { width: 100%; user-select: text; }
+      .toggle-field { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: #c9c9d2; }
+      .toggle-field input { accent-color: #6d64d8; }
+      #workspace-path {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 52px;
+        padding: 9px 10px;
+        color: #dedee8;
+        background: #151519;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        overflow-wrap: anywhere;
+        user-select: text;
+      }
+      #workspace-path.empty { color: #777783; }
+      #change-workspace[disabled] { opacity: 0.55; cursor: wait; }
     </style>
   </head>
   <body>
     <div id="panel">
+      <div id="pet-toolbar">
+        <select id="pet-select" aria-label="目前寵物"></select>
+        <button id="add-pet" title="新增寵物" aria-label="新增寵物">＋</button>
+        <button id="remove-pet" title="移除寵物" aria-label="移除寵物">−</button>
+      </div>
       <div id="tabs">
         <button data-tab="light" class="active">光影</button>
         <button data-tab="char">角色</button>
+        <button data-tab="project">工作</button>
       </div>
 
       <!-- ── 光影 ── -->
@@ -208,6 +273,29 @@
             <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b>(側面)</span><span class="val" id="pzy-val"></span></div>
             <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
           </div>
+        </div>
+      </div>
+
+      <!-- ── 工作設定 ── -->
+      <div class="tab" id="tab-project">
+        <h3>工作設定</h3>
+        <p class="project-note">每隻寵物可分別連結工作目錄與 Codex Session。切換寵物不會自動開啟瀏覽視窗。</p>
+        <div class="workspace-card">
+          <label class="field">
+            <span>寵物名稱</span>
+            <input class="text-input" id="pet-name" type="text" maxlength="40" placeholder="例如：小粉" />
+          </label>
+          <label class="field">
+            <span>Codex Session ID</span>
+            <input class="text-input" id="codex-session-id" type="text" maxlength="160" placeholder="例如：019f…" spellcheck="false" />
+          </label>
+          <label class="toggle-field">
+            <input id="pet-enabled" type="checkbox" />
+            在桌面顯示這隻寵物
+          </label>
+          <div class="workspace-label">工作目錄</div>
+          <code id="workspace-path" class="empty">尚未選擇工作目錄</code>
+          <button class="wide" id="change-workspace">選擇工作目錄…</button>
         </div>
       </div>
 

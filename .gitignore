@@ -2,6 +2,8 @@ node_modules
 out
 .DS_Store
 config.json
+runtime-data/*.json
+runtime-data/pets/
 models/*
 !models/AvatarSample_A.vrm
 motions/

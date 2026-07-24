@@ -30,6 +30,8 @@ export interface Viewer {
   setLighting: (l: Partial<Lighting>) => void;
   /** 即時調整晃動強度(頭髮/衣服/胸部各自 0..2) */
   setSway: (s: Partial<Sway>) => void;
+  /** 使用稍微落後角色的物理中心，讓拖曳整隻角色時產生受控的慣性晃動。 */
+  enableRootMotionSway: () => void;
   /** 拍一張目前角色的小照片(透明背景 PNG dataURL)。side=true 從側面拍(臉朝右) */
   snapshot: (side: boolean) => string;
   /** 像素級命中探針:設定要檢測的螢幕座標(CSS px),負值 = 關閉 */
@@ -48,6 +50,8 @@ export interface Viewer {
   playVRMA: (buf: ArrayBuffer) => Promise<void>;
   /** 停止動作,回到靜止姿勢 */
   stopVRMA: () => void;
+  /** 移除這隻寵物的 WebGL 畫布、模型與動畫資源。 */
+  dispose: () => void;
 }
 
 export interface Lighting {
@@ -114,6 +118,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   scene.add(pointLight);
 
   let vrm: VRM | null = null; // 提前宣告:下面的 applyShade 會在載入前就被呼叫
+  let disposed = false;
   const lighting: Lighting = { ...DEFAULT_LIGHTING };
 
   /* 陰影濃度:VRoid 系模型的材質常把方向陰影整個關死(實測解剖過,非程式問題):
@@ -209,6 +214,26 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     wake();
   }
 
+  function enableRootMotionSway(): void {
+    const manager = vrm?.springBoneManager;
+    if (!manager) return;
+    // VRM 常把 hips/root 設為 center；角色與 center 一起平移時，Verlet 看不到位移。
+    // 改用獨立中心並讓它略微落後 root，既能產生拖曳慣性，也避免直接切成 world-space
+    // 時短髮絲骨骼因一次較大的滑鼠位移而翻轉。切換座標系後必須 reset。
+    root.updateWorldMatrix(true, true);
+    root.getWorldPosition(rootMotionPosition);
+    root.getWorldQuaternion(rootMotionQuaternion);
+    root.getWorldScale(rootMotionScale);
+    rootMotionCenter.position.copy(rootMotionPosition);
+    rootMotionCenter.quaternion.copy(rootMotionQuaternion);
+    rootMotionCenter.scale.copy(rootMotionScale);
+    rootMotionCenter.updateMatrixWorld(true);
+    for (const joint of manager.joints) joint.center = rootMotionCenter;
+    manager.reset();
+    rootMotionSwayEnabled = true;
+    wake();
+  }
+
   function setLighting(l: Partial<Lighting>): void {
     const prevShade = lighting.shade;
     Object.assign(lighting, l);
@@ -224,6 +249,44 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   // 使用者位移/旋轉的容器;vrm.scene 的 transform 保留給 loader
   const root = new THREE.Group();
   scene.add(root);
+
+  // Spring Bone 專用的世界座標中心。每幀跟隨 94%，保留小幅位移作為慣性輸入；
+  // 最大落後距離另有限制，避免快速拖曳或設定面板瞬移讓骨骼彈飛。
+  const rootMotionCenter = new THREE.Object3D();
+  const rootMotionPosition = new THREE.Vector3();
+  const rootMotionQuaternion = new THREE.Quaternion();
+  const rootMotionScale = new THREE.Vector3();
+  const rootMotionLag = new THREE.Vector3();
+  const ROOT_MOTION_FOLLOW = 0.94;
+  const MAX_ROOT_MOTION_LAG = 0.012;
+  const MAX_ROOT_ROTATION_LAG = 0.05;
+  let rootMotionSwayEnabled = false;
+  scene.add(rootMotionCenter);
+
+  function updateRootMotionCenter(): void {
+    if (!rootMotionSwayEnabled) return;
+    root.updateWorldMatrix(true, false);
+    root.getWorldPosition(rootMotionPosition);
+    root.getWorldQuaternion(rootMotionQuaternion);
+    root.getWorldScale(rootMotionScale);
+    rootMotionCenter.position.lerp(rootMotionPosition, ROOT_MOTION_FOLLOW);
+    rootMotionLag.subVectors(rootMotionPosition, rootMotionCenter.position);
+    if (rootMotionLag.lengthSq() > MAX_ROOT_MOTION_LAG ** 2) {
+      rootMotionCenter.position
+        .copy(rootMotionPosition)
+        .addScaledVector(rootMotionLag.normalize(), -MAX_ROOT_MOTION_LAG);
+    }
+    rootMotionCenter.quaternion.slerp(rootMotionQuaternion, ROOT_MOTION_FOLLOW);
+    const rotationLag = rootMotionCenter.quaternion.angleTo(rootMotionQuaternion);
+    if (rotationLag > MAX_ROOT_ROTATION_LAG) {
+      rootMotionCenter.quaternion.slerp(
+        rootMotionQuaternion,
+        1 - MAX_ROOT_ROTATION_LAG / rotationLag,
+      );
+    }
+    rootMotionCenter.scale.copy(rootMotionScale);
+    rootMotionCenter.updateMatrixWorld(true);
+  }
 
   // lookat —— official lookat.html:注視目標掛在 camera 底下
   const lookAtTarget = new THREE.Object3D();
@@ -305,7 +368,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
 
   function onLoaded(gltf: { userData: { vrm?: VRM }; scene: THREE.Group }, seq: number): VRM {
     const next = gltf.userData.vrm as VRM;
-    if (seq !== loadSeq) {
+    if (disposed || seq !== loadSeq) {
       VRMUtils.deepDispose(next.scene);
       throw new Error('此載入已被更新的載入取代,結果丟棄');
     }
@@ -417,6 +480,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
 
   const clock = new THREE.Clock();
   function animate(): void {
+    if (disposed) return;
     requestAnimationFrame(animate);
     frameNo++;
     if (mixerActive) wake(); // 播動作期間視為持續活動(角色在動,探針也要每幀重讀)
@@ -426,6 +490,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
     const dt = Math.min(clock.getDelta(), MAX_DT);
     if (mixer) mixer.update(dt); // 官方順序:mixer 先動骨架,vrm.update 再套約束/物理
+    updateRootMotionCenter();
     if (vrm) vrm.update(dt);
     renderer.render(scene, camera);
 
@@ -553,5 +618,20 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return cv.toDataURL('image/png');
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, playVRMA, stopVRMA };
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    loadSeq++;
+    disposeMixer();
+    if (vrm) {
+      root.remove(vrm.scene);
+      VRMUtils.deepDispose(vrm.scene);
+      vrm = null;
+    }
+    scene.remove(rootMotionCenter);
+    renderer.dispose();
+    renderer.domElement.remove();
+  }
+
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, enableRootMotionSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, playVRMA, stopVRMA, dispose };
 }

@@ -1,134 +1,263 @@
 import { DEFAULT_LIGHTING, DEFAULT_SWAY, type Lighting, type Sway } from './viewer';
-import type { PetState, WardrobeItem } from '../preload/index';
+import type { PetProfile, PetState, WardrobeItem } from '../preload/index';
 
-/**
- * 設定面板,兩個分頁:
- *  - 光影:光源強度/陰影 + 光源位置平面墊(XZ 俯視 / YZ 側視)
- *  - 角色:晃動強度(頭髮/衣服/胸部)+ 服裝顯示開關 + 角色位置平面墊
- * 所有變更即時送 main(存 config + 轉發疊層);疊層拖角色時也會同步回來。
- */
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
+const el = (id: string): HTMLElement => document.getElementById(id)!;
+const input = (id: string): HTMLInputElement => el(id) as HTMLInputElement;
 
+let profiles: PetProfile[] = [];
+let selectedPetId = '';
 let lighting: Lighting = { ...DEFAULT_LIGHTING };
 let sway: Sway = { ...DEFAULT_SWAY };
-let pet: PetState = { ...DEFAULT_STATE };
+let petState: PetState = { ...DEFAULT_STATE };
+let wardrobeStates: Record<string, boolean> = {};
 
-const el = (id: string): HTMLElement => document.getElementById(id)!;
+function selectedProfile(): PetProfile | null {
+  return profiles.find((profile) => profile.id === selectedPetId) ?? null;
+}
 
 /* ---------- 分頁 ---------- */
 function activateTab(name: string): void {
   if (!document.getElementById(`tab-${name}`)) return;
-  document.querySelectorAll('#tabs button').forEach((b) => {
-    b.classList.toggle('active', (b as HTMLButtonElement).dataset['tab'] === name);
+  document.querySelectorAll('#tabs button').forEach((button) => {
+    button.classList.toggle('active', (button as HTMLButtonElement).dataset['tab'] === name);
   });
-  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
   el(`tab-${name}`).classList.add('active');
+  el('reset').hidden = name === 'project';
 }
 
-for (const btn of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
-  btn.addEventListener('click', () => activateTab(btn.dataset['tab']!));
+for (const button of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
+  button.addEventListener('click', () => activateTab(button.dataset['tab']!));
 }
-
-// 開啟時依選單指定的分頁;視窗已開著時由 IPC 切換
 activateTab(new URLSearchParams(location.search).get('tab') ?? 'light');
 window.pet.onSwitchTab(activateTab);
 
-/* ---------- 光源類型 ---------- */
-for (const btn of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
-  btn.addEventListener('click', () => {
-    lighting.type = btn.dataset['t'] as 'directional' | 'point';
-    window.pet.setLighting(lighting);
+/* ---------- 寵物選擇與工作設定 ---------- */
+function renderPetSelector(): void {
+  const select = el('pet-select') as HTMLSelectElement;
+  select.innerHTML = '';
+  for (const profile of profiles) {
+    const option = document.createElement('option');
+    option.value = profile.id;
+    option.textContent = `${profile.enabled ? '' : '（隱藏）'}${profile.name}`;
+    select.appendChild(option);
+  }
+  select.value = selectedPetId;
+  (el('remove-pet') as HTMLButtonElement).disabled = profiles.length <= 1;
+}
+
+function renderWorkSettings(): void {
+  const profile = selectedProfile();
+  input('pet-name').value = profile?.name ?? '';
+  input('codex-session-id').value = profile?.codexSessionId ?? '';
+  input('pet-enabled').checked = profile?.enabled !== false;
+  const path = el('workspace-path');
+  path.textContent = profile?.workspacePath ?? '尚未選擇工作目錄';
+  path.classList.toggle('empty', !profile?.workspacePath);
+  el('change-workspace').textContent = profile?.workspacePath ? '更改工作目錄…' : '選擇工作目錄…';
+}
+
+async function loadSelectedPet(notifyMain = true): Promise<void> {
+  const profile = selectedProfile();
+  if (!profile) return;
+  if (notifyMain) await window.pet.selectPet(profile.id);
+  lighting = { ...DEFAULT_LIGHTING, ...(profile.lighting ?? {}) };
+  sway = { ...DEFAULT_SWAY, ...(profile.sway ?? {}) };
+  petState = { ...DEFAULT_STATE, ...(profile.state ?? {}) };
+  wardrobeStates = { ...(profile.wardrobe ?? {}) };
+  renderPetSelector();
+  renderWorkSettings();
+  render();
+  const front = el('origin-xz');
+  const side = el('origin-yz');
+  front.textContent = '🧍‍♀️';
+  side.textContent = '🚶‍♀️';
+  const [savedState, savedLighting, savedSway, wardrobe] = await Promise.all([
+    window.pet.getState(profile.id),
+    window.pet.getLighting(profile.id),
+    window.pet.getSway(profile.id),
+    window.pet.getWardrobe(profile.id)
+  ]);
+  if (selectedPetId !== profile.id) return;
+  petState = { ...DEFAULT_STATE, ...(savedState ?? {}) };
+  lighting = { ...DEFAULT_LIGHTING, ...(savedLighting ?? {}) };
+  sway = { ...DEFAULT_SWAY, ...(savedSway ?? {}) };
+  wardrobeStates = { ...wardrobe.states };
+  renderWardrobe(wardrobe.list);
+  render();
+}
+
+function syncProfiles(next: PetProfile[], selectedFromMain: string): void {
+  profiles = next;
+  if (!profiles.some((profile) => profile.id === selectedPetId)) selectedPetId = selectedFromMain;
+  if (!profiles.some((profile) => profile.id === selectedPetId)) selectedPetId = profiles[0]?.id ?? '';
+  void loadSelectedPet(false);
+}
+
+(el('pet-select') as HTMLSelectElement).addEventListener('change', (event) => {
+  selectedPetId = (event.currentTarget as HTMLSelectElement).value;
+  void loadSelectedPet(true);
+});
+
+el('add-pet').addEventListener('click', async () => {
+  const created = await window.pet.createPet();
+  selectedPetId = created.id;
+  const collection = await window.pet.getPetCollection();
+  syncProfiles(collection.pets, collection.selectedPetId);
+  activateTab('project');
+});
+
+el('remove-pet').addEventListener('click', async () => {
+  const profile = selectedProfile();
+  if (!profile || profiles.length <= 1) return;
+  if (!confirm(`要移除「${profile.name}」嗎？設定檔會保留在 .trash。`)) return;
+  if (!await window.pet.removePet(profile.id)) return;
+  const collection = await window.pet.getPetCollection();
+  selectedPetId = collection.selectedPetId;
+  syncProfiles(collection.pets, collection.selectedPetId);
+});
+
+input('pet-name').addEventListener('change', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  await window.pet.updatePetMeta(profile.id, { name: input('pet-name').value });
+});
+
+input('codex-session-id').addEventListener('change', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  await window.pet.updatePetMeta(profile.id, { codexSessionId: input('codex-session-id').value });
+});
+
+input('pet-enabled').addEventListener('change', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  await window.pet.updatePetMeta(profile.id, { enabled: input('pet-enabled').checked });
+});
+
+el('change-workspace').addEventListener('click', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  const button = el('change-workspace') as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    await window.pet.chooseWorkspace(profile.id);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+window.pet.onPetProfiles(syncProfiles);
+window.pet.onSelectedPet((petId) => {
+  if (!profiles.some((profile) => profile.id === petId)) return;
+  selectedPetId = petId;
+  void loadSelectedPet(false);
+});
+
+/* ---------- 光源與晃動 ---------- */
+for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
+  button.addEventListener('click', () => {
+    if (!selectedPetId) return;
+    lighting.type = button.dataset['t'] as 'directional' | 'point';
+    window.pet.setLighting(selectedPetId, lighting);
     render();
   });
 }
 
-/* ---------- 拉桿(光影 3 條 + 晃動 3 條) ---------- */
 const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;
 const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
-
-const slider = (id: string): HTMLInputElement => el(id) as HTMLInputElement;
-
-for (const k of LIGHT_KEYS) {
-  slider(k).addEventListener('input', () => {
-    lighting[k] = Number(slider(k).value);
-    window.pet.setLighting(lighting);
+for (const key of LIGHT_KEYS) {
+  input(key).addEventListener('input', () => {
+    if (!selectedPetId) return;
+    lighting[key] = Number(input(key).value);
+    window.pet.setLighting(selectedPetId, lighting);
     render();
   });
 }
-for (const k of SWAY_KEYS) {
-  slider(k).addEventListener('input', () => {
-    sway[k] = Number(slider(k).value);
-    window.pet.setSway(sway);
+for (const key of SWAY_KEYS) {
+  input(key).addEventListener('input', () => {
+    if (!selectedPetId) return;
+    sway[key] = Number(input(key).value);
+    window.pet.setSway(selectedPetId, sway);
     render();
   });
 }
 
 /* ---------- 平面拖曳墊 ---------- */
 interface PadSpec {
-  el: HTMLElement;
-  hRange: [number, number]; // 水平軸(左→右)
-  vRange: [number, number]; // 垂直軸(下→上;反向範圍 = 軸朝下)
-  getH: () => number;
-  getV: () => number;
-  set: (h: number, v: number) => void;
+  element: HTMLElement;
+  horizontalRange: [number, number];
+  verticalRange: [number, number];
+  getHorizontal: () => number;
+  getVertical: () => number;
+  set: (horizontal: number, vertical: number) => void;
 }
 
 const pads: PadSpec[] = [];
-
 function makePad(spec: PadSpec): void {
   pads.push(spec);
-  const drag = (e: PointerEvent): void => {
-    const r = spec.el.getBoundingClientRect();
-    const fh = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    const fv = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-    const h = spec.hRange[0] + fh * (spec.hRange[1] - spec.hRange[0]);
-    const v = spec.vRange[1] - fv * (spec.vRange[1] - spec.vRange[0]);
-    spec.set(Math.round(h * 100) / 100, Math.round(v * 100) / 100);
+  const drag = (event: PointerEvent): void => {
+    if (!selectedPetId) return;
+    const rect = spec.element.getBoundingClientRect();
+    const horizontalFraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const verticalFraction = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    const horizontal = spec.horizontalRange[0] + horizontalFraction *
+      (spec.horizontalRange[1] - spec.horizontalRange[0]);
+    const vertical = spec.verticalRange[1] - verticalFraction *
+      (spec.verticalRange[1] - spec.verticalRange[0]);
+    spec.set(Math.round(horizontal * 100) / 100, Math.round(vertical * 100) / 100);
     render();
   };
-  spec.el.addEventListener('pointerdown', (e) => {
-    spec.el.setPointerCapture(e.pointerId);
-    drag(e);
-    const move = (ev: PointerEvent): void => drag(ev);
+  spec.element.addEventListener('pointerdown', (event) => {
+    spec.element.setPointerCapture(event.pointerId);
+    drag(event);
+    const move = (next: PointerEvent): void => drag(next);
     const up = (): void => {
-      spec.el.removeEventListener('pointermove', move);
-      spec.el.removeEventListener('pointerup', up);
-      spec.el.removeEventListener('pointercancel', up); // cancel 也要清,監聽器才不殘留
+      spec.element.removeEventListener('pointermove', move);
+      spec.element.removeEventListener('pointerup', up);
+      spec.element.removeEventListener('pointercancel', up);
     };
-    spec.el.addEventListener('pointermove', move);
-    spec.el.addEventListener('pointerup', up);
-    spec.el.addEventListener('pointercancel', up);
+    spec.element.addEventListener('pointermove', move);
+    spec.element.addEventListener('pointerup', up);
+    spec.element.addEventListener('pointercancel', up);
   });
 }
 
 makePad({
-  el: el('light-xz'),
-  hRange: [-20, 20], vRange: [20, -20], // 俯視:下 = 朝你(+Z)
-  getH: () => lighting.x, getV: () => lighting.z,
-  set: (h, v) => { lighting.x = h; lighting.z = v; window.pet.setLighting(lighting); }
+  element: el('light-xz'), horizontalRange: [-20, 20], verticalRange: [20, -20],
+  getHorizontal: () => lighting.x, getVertical: () => lighting.z,
+  set: (horizontal, vertical) => {
+    lighting.x = horizontal; lighting.z = vertical;
+    window.pet.setLighting(selectedPetId, lighting);
+  }
 });
 makePad({
-  el: el('light-yz'),
-  hRange: [-20, 20], vRange: [-20, 20], // 側視:橫 = Z(右 = 朝你)
-  getH: () => lighting.z, getV: () => lighting.y,
-  set: (h, v) => { lighting.z = h; lighting.y = v; window.pet.setLighting(lighting); }
+  element: el('light-yz'), horizontalRange: [-20, 20], verticalRange: [-20, 20],
+  getHorizontal: () => lighting.z, getVertical: () => lighting.y,
+  set: (horizontal, vertical) => {
+    lighting.z = horizontal; lighting.y = vertical;
+    window.pet.setLighting(selectedPetId, lighting);
+  }
 });
 makePad({
-  el: el('pet-xy'),
-  hRange: [-6, 6], vRange: [-6, 6], // 拖到畫面邊緣/拉遠時座標會超過 ±3,給足餘裕
-  getH: () => pet.x, getV: () => pet.y,
-  set: (h, v) => { pet.x = h; pet.y = v; window.pet.setPetState(pet); }
+  element: el('pet-xy'), horizontalRange: [-6, 6], verticalRange: [-6, 6],
+  getHorizontal: () => petState.x, getVertical: () => petState.y,
+  set: (horizontal, vertical) => {
+    petState.x = horizontal; petState.y = vertical;
+    window.pet.setPetState(selectedPetId, petState);
+  }
 });
 makePad({
-  el: el('pet-zy'),
-  hRange: [-4, 4], vRange: [-6, 6], // 橫 = Z(右 = 靠鏡頭變大)
-  getH: () => pet.z, getV: () => pet.y,
-  set: (h, v) => { pet.z = h; pet.y = v; window.pet.setPetState(pet); }
+  element: el('pet-zy'), horizontalRange: [-4, 4], verticalRange: [-6, 6],
+  getHorizontal: () => petState.z, getVertical: () => petState.y,
+  set: (horizontal, vertical) => {
+    petState.z = horizontal; petState.y = vertical;
+    window.pet.setPetState(selectedPetId, petState);
+  }
 });
 
-/* ---------- 服裝顯示 ---------- */
-let wardrobeStates: Record<string, boolean> = {};
-
+/* ---------- 服裝 ---------- */
 function renderWardrobe(list: WardrobeItem[]): void {
   const box = el('wardrobe');
   box.innerHTML = '';
@@ -138,92 +267,83 @@ function renderWardrobe(list: WardrobeItem[]): void {
   }
   for (const item of list) {
     const label = document.createElement('label');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = wardrobeStates[item.key] !== false;
-    cb.addEventListener('change', () => {
-      wardrobeStates[item.key] = cb.checked;
-      window.pet.setWardrobe(item.key, cb.checked);
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = wardrobeStates[item.key] !== false;
+    checkbox.addEventListener('change', () => {
+      if (!selectedPetId) return;
+      wardrobeStates[item.key] = checkbox.checked;
+      window.pet.setWardrobe(selectedPetId, item.key, checkbox.checked);
     });
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(item.label));
+    label.append(checkbox, document.createTextNode(item.label));
     box.appendChild(label);
   }
 }
 
-/* ---------- 顯示 ---------- */
+window.pet.onWardrobeList((petId, list) => {
+  if (petId === selectedPetId) renderWardrobe(list);
+});
+window.pet.onAvatarIcons((petId, { front, side }) => {
+  if (petId !== selectedPetId) return;
+  el('origin-xz').innerHTML = `<img src="${front}" alt="">`;
+  const sideOrigin = el('origin-yz');
+  sideOrigin.classList.remove('origin-side');
+  sideOrigin.innerHTML = `<img src="${side}" alt="">`;
+});
+window.pet.onState((petId, state) => {
+  if (petId !== selectedPetId) return;
+  petState = { ...DEFAULT_STATE, ...state };
+  render();
+});
+
+/* ---------- 顯示與重置 ---------- */
 function render(): void {
-  for (const btn of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
-    btn.classList.toggle('active', btn.dataset['t'] === lighting.type);
+  for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
+    button.classList.toggle('active', button.dataset['t'] === lighting.type);
   }
-  for (const k of LIGHT_KEYS) {
-    slider(k).value = String(lighting[k]);
-    el(`${k}-val`).textContent =
-      k === 'shade' ? lighting[k].toFixed(2) : `${(lighting[k] / Math.PI).toFixed(2)} π`;
+  for (const key of LIGHT_KEYS) {
+    input(key).value = String(lighting[key]);
+    el(`${key}-val`).textContent = key === 'shade'
+      ? lighting[key].toFixed(2)
+      : `${(lighting[key] / Math.PI).toFixed(2)} π`;
   }
-  for (const k of SWAY_KEYS) {
-    slider(k).value = String(sway[k]);
-    el(`${k}-val`).textContent = `× ${sway[k].toFixed(2)}`;
+  for (const key of SWAY_KEYS) {
+    input(key).value = String(sway[key]);
+    el(`${key}-val`).textContent = `× ${sway[key].toFixed(2)}`;
   }
-  for (const p of pads) {
-    const dot = p.el.querySelector('.dot') as HTMLElement;
-    const fh = (p.getH() - p.hRange[0]) / (p.hRange[1] - p.hRange[0]);
-    const fv = (p.vRange[1] - p.getV()) / (p.vRange[1] - p.vRange[0]);
-    dot.style.left = `${Math.min(100, Math.max(0, fh * 100))}%`;
-    dot.style.top = `${Math.min(100, Math.max(0, fv * 100))}%`;
+  for (const pad of pads) {
+    const dot = pad.element.querySelector('.dot') as HTMLElement;
+    const horizontal = (pad.getHorizontal() - pad.horizontalRange[0]) /
+      (pad.horizontalRange[1] - pad.horizontalRange[0]);
+    const vertical = (pad.verticalRange[1] - pad.getVertical()) /
+      (pad.verticalRange[1] - pad.verticalRange[0]);
+    dot.style.left = `${Math.min(100, Math.max(0, horizontal * 100))}%`;
+    dot.style.top = `${Math.min(100, Math.max(0, vertical * 100))}%`;
   }
   el('lxz-val').textContent = `${lighting.x.toFixed(1)}, ${lighting.z.toFixed(1)}`;
   el('lyz-val').textContent = `${lighting.y.toFixed(1)}, ${lighting.z.toFixed(1)}`;
-  el('pxy-val').textContent = `${pet.x.toFixed(1)}, ${pet.y.toFixed(1)}`;
-  el('pzy-val').textContent = `${pet.z.toFixed(1)}, ${pet.y.toFixed(1)}`;
+  el('pxy-val').textContent = `${petState.x.toFixed(1)}, ${petState.y.toFixed(1)}`;
+  el('pzy-val').textContent = `${petState.z.toFixed(1)}, ${petState.y.toFixed(1)}`;
 }
 
-/* ---------- 重置 ---------- */
 el('reset').addEventListener('click', () => {
+  if (!selectedPetId) return;
   lighting = { ...DEFAULT_LIGHTING };
   sway = { ...DEFAULT_SWAY };
-  pet = { ...DEFAULT_STATE };
-  window.pet.setLighting(lighting);
-  window.pet.setSway(sway);
-  window.pet.setPetState(pet);
+  petState = { ...DEFAULT_STATE };
+  window.pet.setLighting(selectedPetId, lighting);
+  window.pet.setSway(selectedPetId, sway);
+  window.pet.setPetState(selectedPetId, petState);
   for (const key of Object.keys(wardrobeStates)) {
-    if (wardrobeStates[key] === false) window.pet.setWardrobe(key, true);
+    if (wardrobeStates[key] === false) window.pet.setWardrobe(selectedPetId, key, true);
     wardrobeStates[key] = true;
   }
-  window.pet.getWardrobe().then(({ list }) => renderWardrobe(list));
+  void window.pet.getWardrobe(selectedPetId).then(({ list }) => renderWardrobe(list));
   render();
 });
 
-/* ---------- 原點小人(目前載入角色的實拍) ---------- */
-window.pet.onAvatarIcons(({ front, side }) => {
-  const fx = el('origin-xz');
-  fx.innerHTML = `<img src="${front}" alt="">`;
-  const fy = el('origin-yz');
-  fy.classList.remove('origin-side');
-  fy.innerHTML = `<img src="${side}" alt="">`;
+window.pet.getPetCollection().then((collection) => {
+  selectedPetId = collection.selectedPetId;
+  syncProfiles(collection.pets, collection.selectedPetId);
 });
-
-/* ---------- 初始值與同步 ---------- */
-window.pet.getLighting().then((l) => {
-  lighting = { ...DEFAULT_LIGHTING, ...l };
-  render();
-});
-window.pet.getSway().then((s) => {
-  sway = { ...DEFAULT_SWAY, ...s };
-  render();
-});
-window.pet.getState().then((s) => {
-  pet = { ...DEFAULT_STATE, ...s };
-  render();
-});
-window.pet.onState((s) => {
-  pet = { ...DEFAULT_STATE, ...s };
-  render();
-});
-window.pet.getWardrobe().then(({ list, states }) => {
-  wardrobeStates = { ...states };
-  renderWardrobe(list);
-});
-window.pet.onWardrobeList((list) => renderWardrobe(list));
-
 render();
