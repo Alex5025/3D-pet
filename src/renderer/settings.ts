@@ -47,6 +47,26 @@ function renderPetSelector(): void {
   (el('remove-pet') as HTMLButtonElement).disabled = profiles.length <= 1;
 }
 
+/** 預設姿勢下拉(角色分頁):清單來自 motions/,即選即播(與右鍵選單同一條 main 端邏輯)。 */
+let motionList: string[] | null = null;
+
+async function renderDefaultPose(): Promise<void> {
+  const select = el('default-pose') as HTMLSelectElement;
+  motionList ??= await window.pet.getMotionList();
+  const current = selectedProfile()?.defaultPose ?? '';
+  select.innerHTML = '';
+  select.append(new Option('（無）', ''));
+  for (const file of motionList) select.append(new Option(file.replace(/\.vrma$/i, ''), file));
+  if (current && !motionList.includes(current)) select.append(new Option(`${current}（檔案不存在）`, current));
+  select.value = current;
+}
+
+el('default-pose').addEventListener('change', () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  window.pet.setDefaultPose(profile.id, (el('default-pose') as HTMLSelectElement).value || null);
+});
+
 function renderWorkSettings(): void {
   const profile = selectedProfile();
   input('pet-name').value = profile?.name ?? '';
@@ -72,6 +92,7 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
   wardrobeStates = { ...(profile.wardrobe ?? {}) };
   renderPetSelector();
   renderWorkSettings();
+  void renderDefaultPose();
   render();
   const front = el('origin-xz');
   const side = el('origin-yz');

@@ -121,6 +121,9 @@ const api = {
     const bytes: Uint8Array | null = await ipcRenderer.invoke('get-default-pose', petId);
     return bytes ? toArrayBuffer(bytes) : null;
   },
+  getMotionList: (): Promise<string[]> => ipcRenderer.invoke('motion-list'),
+  setDefaultPose: (petId: string, file: string | null) =>
+    ipcRenderer.send('set-default-pose', petId, file),
 
   getSway: (petId: string): Promise<Partial<Sway> | null> => ipcRenderer.invoke('get-sway', petId),
   setSway: (petId: string, sway: Sway) => ipcRenderer.send('set-sway', petId, sway),

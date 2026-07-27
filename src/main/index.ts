@@ -367,17 +367,27 @@ function motionMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
   }));
 }
 
+/** 設定預設姿勢(選單與設定面板共用):即選即播 + 存檔 + 同步 UI。file=null 清除。 */
+async function setDefaultPose(petId: string, file: string | null): Promise<void> {
+  if (file && !motionFiles.includes(file)) return; // 白名單:只接受 motions/ 裡的檔名
+  updatePet(petId, { defaultPose: file ?? undefined });
+  refreshTray();
+  sendPetProfiles(); // 設定面板的下拉跟著同步
+  if (!file) return;
+  try {
+    win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+  } catch (error) {
+    console.log('[main] default pose read failed', error);
+  }
+}
+
 function defaultPoseMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
-  const dir = join(dataDir(), 'motions');
   const current = getPet(petId)?.defaultPose;
   const none: Electron.MenuItemConstructorOptions = {
     label: '(無)',
     type: 'radio',
     checked: !current,
-    click: () => {
-      updatePet(petId, { defaultPose: undefined });
-      refreshTray();
-    }
+    click: () => void setDefaultPose(petId, null)
   };
   if (motionsDirMissing) return [none];
   return [
@@ -386,15 +396,7 @@ function defaultPoseMenuItems(petId: string): Electron.MenuItemConstructorOption
       label: file.replace(/\.vrma$/i, ''),
       type: 'radio',
       checked: file === current,
-      click: async () => {
-        updatePet(petId, { defaultPose: file });
-        refreshTray();
-        try {
-          win?.webContents.send('vrma-play', petId, await readFile(join(dir, file)));
-        } catch (error) {
-          console.log('[main] default pose read failed', error);
-        }
-      }
+      click: () => void setDefaultPose(petId, file)
     }))
   ];
 }
@@ -611,6 +613,15 @@ app.whenReady().then(async () => {
     const list = (await bridge?.listModels(kind)) ?? [];
     if (list.length) modelListCache.set(kind, list);
     return list;
+  });
+
+  ipcMain.handle('motion-list', async () => {
+    await refreshMotions(); // 面板打開時可能剛放了新檔,跟 popup 前刷新同一個保險
+    return motionFiles;
+  });
+  ipcMain.on('set-default-pose', (_event, petId: string, file: string | null) => {
+    if (!pets.has(petId)) return;
+    void setDefaultPose(petId, typeof file === 'string' ? file : null);
   });
 
   ipcMain.on('chat-send', (event, petId: string, text: string) => {
