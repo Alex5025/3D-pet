@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,7 @@ import type { AgentEvent } from './types';
 import type { AgentPetProfile } from './bridge';
 import { createAgentBridge } from './bridge';
 import { createClaudeProvider } from './claudeProvider';
+import { createCodexProvider } from './codexProvider';
 import { createMockProvider } from './mockProvider';
 
 /**
@@ -96,6 +98,60 @@ export async function runClaudeE2E(): Promise<boolean> {
   await h.bridge.dispose();
   const pass = failures.length === 0;
   console.log(`[agent-e2e:claude] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
+  return pass;
+}
+
+/** 真 codex app-server 的 e2e(VRM_PET_AGENT_SELFTEST=codex;會耗訂閱額度,顯式觸發才跑)。 */
+export async function runCodexE2E(): Promise<boolean> {
+  const failures: string[] = [];
+  const check = (name: string, ok: boolean): void => {
+    console.log(`[agent-e2e:codex] ${ok ? 'ok' : 'FAIL'} - ${name}`);
+    if (!ok) failures.push(name);
+  };
+  const h = makeHarness('codex', createCodexProvider());
+
+  // 1. 一問一答 + threadId 回存
+  h.bridge.chatSend('e2e', '請只回答數字,不要其他文字:8+8=?');
+  await h.waitTerminal(1);
+  check('回覆含 16', h.textOf().includes('16'));
+  check('done ok', h.events.some((e) => e.kind === 'done' && e.ok));
+  const tid = h.profile.agent?.sessionId;
+  check('threadId 回存(uuid 形)', typeof tid === 'string' && tid.length > 20);
+
+  // 2. resume:第二問引用第一問
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '我上一句問的算式是什麼?請只回答算式本身。');
+  await h.waitTerminal(1);
+  check('resume 上下文(答出 8+8)', h.textOf().includes('8+8'));
+
+  // 3. cancel = turn/interrupt:等第一個 text 增量後取消 → done ok:false;thread 可續用
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請從 1 慢慢數到 500,每個數字單獨一行。');
+  {
+    const deadline = Date.now() + 60_000;
+    while (!h.events.some((e) => e.kind === 'text') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  h.bridge.chatCancel('e2e');
+  await h.waitTerminal(1, 30_000);
+  check('interrupt → done ok:false', h.events.some((e) => e.kind === 'done' && !e.ok));
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '不用數了。請只回答:OK');
+  await h.waitTerminal(1);
+  check('interrupt 後 thread 仍可用', h.textOf().includes('OK'));
+
+  // 4. crash 重連:外部殺掉 app-server → 下次對話自動重啟 + resume
+  await new Promise<void>((resolve) => execFile('pkill', ['-f', 'codex app-server'], () => resolve()));
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '我最開始問的算式是什麼?請只回答算式本身。');
+  await h.waitTerminal(1);
+  check('crash 後自動重啟 + resume(答出 8+8)', h.textOf().includes('8+8'));
+
+  await h.bridge.dispose();
+  const pass = failures.length === 0;
+  console.log(`[agent-e2e:codex] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
   return pass;
 }
 

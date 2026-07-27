@@ -7,7 +7,7 @@ import type { AgentBinding } from '../shared/agentEvents';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
 import { createProviders } from './agent/providers';
-import { runAgentSelftest, runClaudeE2E } from './agent/selftest';
+import { runAgentSelftest, runClaudeE2E, runCodexE2E } from './agent/selftest';
 
 interface PetState {
   x: number;
@@ -532,7 +532,9 @@ app.whenReady().then(async () => {
   // =1 → MockProvider 全鏈;=claude / =codex → 真 CLI e2e(耗額度,顯式觸發才跑)
   const selftestMode = process.env['VRM_PET_AGENT_SELFTEST'];
   if (selftestMode) {
-    const pass = selftestMode === 'claude' ? await runClaudeE2E() : await runAgentSelftest();
+    const pass = selftestMode === 'claude' ? await runClaudeE2E()
+      : selftestMode === 'codex' ? await runCodexE2E()
+      : await runAgentSelftest();
     app.exit(pass ? 0 : 1);
     return;
   }
