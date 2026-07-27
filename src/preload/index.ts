@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
+
+export type { AgentBinding, AgentEvent };
 
 export interface PetState {
   x: number;
@@ -35,7 +38,9 @@ export interface PetProfile {
   name: string;
   enabled: boolean;
   workspacePath?: string;
+  /** 舊欄位,已遷移為 agent。 */
   codexSessionId?: string;
+  agent?: AgentBinding;
   vrmPath?: string;
   state?: PetState;
   lighting?: Lighting;
@@ -83,6 +88,11 @@ const api = {
 
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
+
+  chatSend: (petId: string, text: string) => ipcRenderer.send('chat-send', petId, text),
+  chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
+  onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
+    ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent) => callback(petId, agentEvent)),
 
   onVrm: (callback: (petId: string, buffer: ArrayBuffer) => void) =>
     ipcRenderer.on('vrm-buffer', (_event, petId, bytes: Uint8Array) =>

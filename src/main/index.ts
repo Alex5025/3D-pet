@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
+import type { AgentBinding } from '../shared/agentEvents';
+import type { AgentBridge } from './agent/bridge';
+import { createAgentBridge } from './agent/bridge';
+import { createProviders } from './agent/providers';
+import { runAgentSelftest } from './agent/selftest';
 
 interface PetState {
   x: number;
@@ -34,7 +39,9 @@ interface PetProfile {
   name: string;
   enabled: boolean;
   workspacePath?: string;
+  /** 舊欄位,已遷移為 agent(保留不刪,循遷移慣例)。 */
   codexSessionId?: string;
+  agent?: AgentBinding;
   vrmPath?: string;
   state?: PetState;
   lighting?: Lighting;
@@ -67,6 +74,7 @@ const pets = new Map<string, PetProfile>();
 const avatarIcons = new Map<string, { front: string; side: string }>();
 const wardrobeLists = new Map<string, { key: string; label: string }[]>();
 let configFlush: NodeJS.Timeout | null = null;
+let bridge: AgentBridge | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -205,9 +213,12 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
   const profile = pets.get(id);
   if (!profile) return null;
   Object.assign(profile, patch, { id: profile.id });
-  // 「休息 → 釋放快取」是 disable 的固有副作用:集中在這唯一變更點,
+  // 「休息 → 釋放快取 + 關 agent session」是 disable 的固有副作用:集中在這唯一變更點,
   // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
-  if (patch.enabled === false) releasePetCaches(id);
+  if (patch.enabled === false) {
+    releasePetCaches(id);
+    void bridge?.closePetSession(id);
+  }
   scheduleConfigFlush();
   return profile;
 }
@@ -305,6 +316,7 @@ function removePet(id: string): boolean {
   } catch { /* 尚未落盤的新寵物沒有檔案可搬 */ }
   pets.delete(id);
   releasePetCaches(id);
+  void bridge?.closePetSession(id);
   registry.petIds = registry.petIds.filter((petId) => petId !== id);
   if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
   persistConfigSync();
@@ -425,7 +437,8 @@ function petMenu(requestedId?: string): Menu {
         openSettings('project', created.id);
       }
     },
-    { label: '結束', click: () => { persistConfigSync(); app.exit(0); } }
+    // app.exit 不觸發 before-quit,清理要在這裡自己做(已知坑,見 DEVLOG §22)
+    { label: '結束', click: () => { bridge?.shutdownSync(); persistConfigSync(); app.exit(0); } }
   ]);
 }
 
@@ -510,8 +523,20 @@ const TRAY_ICON =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAZklEQVR4nGNgoAFQAOIEIJ4PxPeheD5UTAGfRpiG/wQwzEAMQIxmZEMwnE2sZhhG8U4CGQYkoPufVANQwoEU/2MNB4oNoNgLFAeiAhkGKDCgAYoSEiwciDHkPrr/0YECA5mZiSwAANJTnOH5R44LAAAAAElFTkSuQmCC';
 
 app.whenReady().then(async () => {
+  // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)
+  if (process.env['VRM_PET_AGENT_SELFTEST']) {
+    const pass = await runAgentSelftest();
+    app.exit(pass ? 0 : 1);
+    return;
+  }
   if (process.platform === 'darwin') app.dock?.hide();
   loadConfigSync();
+  bridge = createAgentBridge({
+    getPet: (id) => pets.get(id) ?? null,
+    updatePet,
+    send: (petId, event) => win?.webContents.send('chat-event-apply', petId, event),
+    providers: createProviders()
+  });
   await refreshMotions();
   try {
     watch(join(dataDir(), 'motions'), () => void refreshMotions().then(refreshTray));
@@ -554,6 +579,15 @@ app.whenReady().then(async () => {
     return updated;
   });
   ipcMain.handle('choose-workspace', (_event, id: string) => chooseWorkspace(id));
+
+  ipcMain.on('chat-send', (event, petId: string, text: string) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    bridge?.chatSend(petId, String(text));
+  });
+  ipcMain.on('chat-cancel', (event, petId: string) => {
+    if (!win || event.sender !== win.webContents) return;
+    bridge?.chatCancel(petId);
+  });
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);
   ipcMain.on('save-state', (event, id: string, state: PetState) => {
@@ -655,4 +689,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { /* 常駐 */ });
-app.on('before-quit', persistConfigSync);
+app.on('before-quit', () => {
+  bridge?.shutdownSync();
+  persistConfigSync();
+});
