@@ -1,5 +1,5 @@
 import { DEFAULT_LIGHTING, DEFAULT_SWAY, type Lighting, type Sway } from './viewer';
-import type { PetProfile, PetState, WardrobeItem } from '../preload/index';
+import type { AgentKind, AgentModelInfo, PetProfile, PetState, WardrobeItem } from '../preload/index';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 const el = (id: string): HTMLElement => document.getElementById(id)!;
@@ -51,8 +51,7 @@ function renderWorkSettings(): void {
   const profile = selectedProfile();
   input('pet-name').value = profile?.name ?? '';
   (el('agent-kind') as HTMLSelectElement).value = profile?.agent?.kind ?? 'codex';
-  input('agent-model').value = profile?.agent?.model ?? '';
-  (el('agent-effort') as HTMLSelectElement).value = profile?.agent?.effort ?? '';
+  void renderAgentModelOptions(profile?.agent?.model ?? '', profile?.agent?.effort ?? '');
   input('agent-session-id').value = profile?.agent?.sessionId ?? '';
   input('pet-enabled').checked = profile?.enabled !== false;
   const path = el('workspace-path');
@@ -127,12 +126,57 @@ input('pet-name').addEventListener('change', async () => {
   await window.pet.updatePetMeta(profile.id, { name: input('pet-name').value });
 });
 
+/** 各家模型清單快取(main 端另有一層;這層省 IPC)。 */
+const modelLists: Partial<Record<AgentKind, AgentModelInfo[]>> = {};
+
+function selectedKind(): AgentKind {
+  return (el('agent-kind') as HTMLSelectElement).value === 'claude' ? 'claude' : 'codex';
+}
+
+/** 依所選模型重建力度選項(codex 由 model/list 逐模型回報,含 ultra;沒資料退回通用清單)。 */
+function rebuildEffortOptions(keep: string): void {
+  const effortSelect = el('agent-effort') as HTMLSelectElement;
+  const list = modelLists[selectedKind()] ?? [];
+  const model = list.find((m) => m.id === (el('agent-model') as HTMLSelectElement).value);
+  const efforts = model?.efforts.length
+    ? model.efforts
+    : [...new Set(list.flatMap((m) => m.efforts))];
+  const options = efforts.length ? efforts : ['low', 'medium', 'high', 'xhigh', 'max'];
+  effortSelect.innerHTML = '';
+  effortSelect.append(new Option('預設', ''));
+  for (const effort of options) effortSelect.append(new Option(effort, effort));
+  effortSelect.value = options.includes(keep) ? keep : '';
+}
+
+/** 抓清單填模型下拉;清單還沒到手前先放目前值,避免面板空白。 */
+async function renderAgentModelOptions(keepModel: string, keepEffort: string): Promise<void> {
+  const kind = selectedKind();
+  const modelSelect = el('agent-model') as HTMLSelectElement;
+  const fill = (list: AgentModelInfo[]): void => {
+    modelSelect.innerHTML = '';
+    modelSelect.append(new Option('預設（CLI 全域設定）', ''));
+    for (const m of list) modelSelect.append(new Option(m.isDefault ? `${m.label}（CLI 預設）` : m.label, m.id));
+    if (keepModel && !list.some((m) => m.id === keepModel)) {
+      modelSelect.append(new Option(`${keepModel}（自訂）`, keepModel));
+    }
+    modelSelect.value = keepModel;
+    rebuildEffortOptions(keepEffort);
+  };
+  fill(modelLists[kind] ?? []);
+  if (!modelLists[kind]) {
+    const list = await window.pet.listAgentModels(kind);
+    if (list.length) modelLists[kind] = list;
+    if (selectedKind() !== kind) return; // 等待期間使用者換了家
+    fill(list);
+  }
+}
+
 async function submitAgentBinding(): Promise<void> {
   const profile = selectedProfile();
   if (!profile) return;
-  const kind = (el('agent-kind') as HTMLSelectElement).value === 'claude' ? 'claude' : 'codex';
+  const kind = selectedKind();
   const sessionId = input('agent-session-id').value.trim();
-  const model = input('agent-model').value.trim();
+  const model = (el('agent-model') as HTMLSelectElement).value;
   const effort = (el('agent-effort') as HTMLSelectElement).value;
   await window.pet.updatePetMeta(profile.id, {
     agent: {
@@ -144,8 +188,15 @@ async function submitAgentBinding(): Promise<void> {
   });
 }
 
-el('agent-kind').addEventListener('change', () => void submitAgentBinding());
-input('agent-model').addEventListener('change', () => void submitAgentBinding());
+el('agent-kind').addEventListener('change', async () => {
+  // 換家:舊模型名對新家無效,模型/力度歸回預設再送出
+  await renderAgentModelOptions('', '');
+  await submitAgentBinding();
+});
+el('agent-model').addEventListener('change', () => {
+  rebuildEffortOptions((el('agent-effort') as HTMLSelectElement).value);
+  void submitAgentBinding();
+});
 el('agent-effort').addEventListener('change', () => void submitAgentBinding());
 input('agent-session-id').addEventListener('change', () => void submitAgentBinding());
 

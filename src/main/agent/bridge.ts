@@ -1,5 +1,5 @@
 import type { AgentBinding, AgentEvent, AgentKind } from '../../shared/agentEvents';
-import type { AgentProvider } from './types';
+import type { AgentModelInfo, AgentProvider } from './types';
 
 /** bridge 需要的 profile 子集(依賴注入,避免與 index.ts 循環引用)。 */
 export interface AgentPetProfile {
@@ -19,6 +19,8 @@ export interface AgentBridgeDeps {
 export interface AgentBridge {
   chatSend(petId: string, text: string): void;
   chatCancel(petId: string): void;
+  /** 設定面板下拉用;provider 不支援或失敗回空清單。 */
+  listModels(kind: AgentKind): Promise<AgentModelInfo[]>;
   /** 寵物休眠/刪除/換 agent 種類時關閉 session。 */
   closePetSession(petId: string): Promise<void>;
   dispose(): Promise<void>;
@@ -149,6 +151,14 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       const state = states.get(petId);
       if (!state?.running || !state.sessionId) return;
       void deps.providers[state.kind].cancel(state.sessionId);
+    },
+    async listModels(kind) {
+      try {
+        return (await deps.providers[kind].listModels?.()) ?? [];
+      } catch (error) {
+        console.log(`[agent] ${kind} model/list 失敗:`, error);
+        return [];
+      }
     },
     async closePetSession(petId) {
       const state = states.get(petId);

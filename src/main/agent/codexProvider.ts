@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import type { AgentEvent, AgentProvider } from './types';
+import type { AgentEvent, AgentModelInfo, AgentProvider } from './types';
 
 /**
  * CodexProvider:長駐 `codex app-server`(NDJSON JSON-RPC over stdio,官方給自訂 client 的介面)。
@@ -236,6 +236,26 @@ export function createCodexProvider(): AgentProvider {
       const proc = child;
       child = null;
       proc?.kill('SIGTERM');
+    },
+    async listModels(): Promise<AgentModelInfo[]> {
+      await ensureServer();
+      const res = await request('model/list', {});
+      if (res.error) throw new Error(res.error.message ?? 'model/list 失敗');
+      const data = (res.result?.['data'] ?? []) as Array<{
+        id?: string;
+        displayName?: string;
+        hidden?: boolean;
+        isDefault?: boolean;
+        supportedReasoningEfforts?: Array<{ reasoningEffort?: string }>;
+      }>;
+      return data
+        .filter((m) => m.id && !m.hidden)
+        .map((m) => ({
+          id: m.id!,
+          label: m.displayName ?? m.id!,
+          efforts: (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort!).filter(Boolean),
+          isDefault: m.isDefault === true
+        }));
     }
   };
 }

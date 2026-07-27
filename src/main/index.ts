@@ -586,7 +586,7 @@ app.whenReady().then(async () => {
       const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
       const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
       const effort = typeof patch.agent.effort === 'string' &&
-        ['low', 'medium', 'high', 'xhigh', 'max'].includes(patch.agent.effort) ? patch.agent.effort : '';
+        ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(patch.agent.effort) ? patch.agent.effort : '';
       next.agent = {
         kind: patch.agent.kind,
         ...(sessionId ? { sessionId } : {}),
@@ -601,6 +601,17 @@ app.whenReady().then(async () => {
     return updated;
   });
   ipcMain.handle('choose-workspace', (_event, id: string) => chooseWorkspace(id));
+
+  // 模型清單:codex 要跟 app-server 要(首次會 lazy 啟動),成功才快取(失敗可能只是還沒登入,下次再試)
+  const modelListCache = new Map<string, unknown[]>();
+  ipcMain.handle('agent-models', async (_event, kind: string) => {
+    if (kind !== 'codex' && kind !== 'claude') return [];
+    const cached = modelListCache.get(kind);
+    if (cached) return cached;
+    const list = (await bridge?.listModels(kind)) ?? [];
+    if (list.length) modelListCache.set(kind, list);
+    return list;
+  });
 
   ipcMain.on('chat-send', (event, petId: string, text: string) => {
     if (!win || event.sender !== win.webContents || !pets.has(petId)) return;

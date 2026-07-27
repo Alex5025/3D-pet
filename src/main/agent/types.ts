@@ -2,6 +2,15 @@ import type { AgentEvent, AgentKind } from '../../shared/agentEvents';
 
 export type { AgentEvent, AgentKind };
 
+/** 設定面板下拉選單用的模型資訊。 */
+export interface AgentModelInfo {
+  id: string;
+  label: string;
+  /** 該模型支援的推理力度(codex 由 model/list 逐模型回報;claude 為固定清單)。 */
+  efforts: string[];
+  isDefault?: boolean;
+}
+
 /**
  * Provider 抽象(docs/AGENT-BRIDGE-DESIGN.md §3):消費端(bridge/IPC/泡泡)只依賴這個介面,
  * 各家後端(codex app-server / claude -p spawn)可獨立演進、互換。
@@ -30,4 +39,6 @@ export interface AgentProvider {
   dispose(): Promise<void>;
   /** 同步殺掉所有子行程——app.exit 前用(await 不到 async dispose);session 都在磁碟,粗暴殺不丟資料。 */
   shutdownSync(): void;
+  /** 可選:回報可用模型清單(設定面板下拉用)。失敗丟例外,由呼叫端退回空清單。 */
+  listModels?(): Promise<AgentModelInfo[]>;
 }

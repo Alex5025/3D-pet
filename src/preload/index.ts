@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
+import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
 
-export type { AgentBinding, AgentEvent };
+export type { AgentBinding, AgentEvent, AgentKind };
+
+export interface AgentModelInfo {
+  id: string;
+  label: string;
+  efforts: string[];
+  isDefault?: boolean;
+}
 
 export interface PetState {
   x: number;
@@ -89,6 +96,8 @@ const api = {
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
 
+  listAgentModels: (kind: AgentKind): Promise<AgentModelInfo[]> =>
+    ipcRenderer.invoke('agent-models', kind),
   chatSend: (petId: string, text: string) => ipcRenderer.send('chat-send', petId, text),
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
   onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>

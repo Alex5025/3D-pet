@@ -180,6 +180,16 @@ export function createClaudeProvider(): AgentProvider {
     shutdownSync() {
       for (const child of new Set(running.values())) child.kill('SIGTERM');
       running.clear();
+    },
+    async listModels() {
+      // claude CLI 沒有機器可讀的模型清單指令;別名穩定(--help 明載),haiku 實測可用(2026-07)
+      const efforts = ['low', 'medium', 'high', 'xhigh', 'max'];
+      return [
+        { id: 'fable', label: 'Fable(最強)', efforts },
+        { id: 'opus', label: 'Opus', efforts, isDefault: true },
+        { id: 'sonnet', label: 'Sonnet(均衡)', efforts },
+        { id: 'haiku', label: 'Haiku(最快)', efforts }
+      ];
     }
   };
 }

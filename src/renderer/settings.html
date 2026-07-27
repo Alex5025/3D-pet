@@ -293,19 +293,12 @@
             </select>
           </label>
           <label class="field">
-            <span>模型（空 = CLI 全域預設）</span>
-            <input class="text-input" id="agent-model" type="text" maxlength="80" placeholder="例如：gpt-5.6-sol / claude-fable-5 / opus" spellcheck="false" />
+            <span>模型</span>
+            <select class="text-input" id="agent-model"></select>
           </label>
           <label class="field">
             <span>推理力度</span>
-            <select class="text-input" id="agent-effort">
-              <option value="">預設</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="xhigh">xhigh</option>
-              <option value="max">max（僅 Claude）</option>
-            </select>
+            <select class="text-input" id="agent-effort"></select>
           </label>
           <label class="field">
             <span>Session ID（對話後自動回存；手動填寫為進階用途）</span>
