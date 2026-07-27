@@ -1,107 +1,144 @@
-# 對話泡泡 ⇄ Agent CLI 串接機制設計
+# 對話泡泡 ⇄ Agent 串接機制設計(v2)
 
-狀態:**設計定稿,尚未實作**(2026-07-24)。
-目標:泡泡輸入框送出的訊息,依每隻寵物的設定交給 **Codex CLI**(`codex`)或 **Claude Code CLI**(`claude`)執行,回覆與過程狀態串流回泡泡顯示;session 延續、可中斷、與寵物生命週期(休眠/刪除)整合。
+狀態:**設計定稿,尚未實作**(2026-07-24;v2 改版 2026-07-27)。
+目標:泡泡輸入框送出的訊息,依每隻寵物的設定交給 **Codex** 或 **Claude Code** 的 agent runtime 執行,回覆與過程狀態串流回泡泡;多寵物長對話、可中斷、審批(approval)、重啟後恢復、與寵物生命週期(休眠/刪除)整合。
+
+> v2 相對 v1 的核心改變:v1 是「每個 turn spawn 一次 CLI + 解析 JSONL」;v2 承認那條路撐不起終局需求——多寵物 Thread、雙向審批、原生 cancel、對話恢復,自己做到最後就是重造一個簡化版 client。改為 **AgentProvider 抽象 + 各家最適後端**:Codex 走 **app-server(JSON-RPC 長駐)**,Claude 走 **Agent SDK(in-process library)**。`codex exec --json` / `claude -p` 降級為 fallback 與除錯工具。
 
 ---
 
-## 1. 現況地基(設計立足點)
+## 1. 兩種整合哲學(選型依據)
 
-- `PetProfile` 已有 `workspacePath`(工作目錄)與 `codexSessionId`(手填欄位,尚無人消費)。
-- 泡泡(`speechBubble.ts`)有輸入框與 focus 管理,但 **Enter 送出尚未接任何後端**(只有 Escape blur)。
-- 專案內沒有任何 `child_process` 程式碼——乾淨起點。
-- 慣例:profile 變更走 `updatePet` 單一入口;設定即時 IPC 雙向同步;資料存 `runtime-data/pets/<UUID>.json`。
+| | 單發 CLI(`codex exec --json` / `claude -p --output-format stream-json`) | 長駐 runtime(`codex app-server` / Claude Agent SDK) |
+|---|---|---|
+| 定位(官方) | scripts / CI / 單次任務 | 自訂 GUI client 深度整合 |
+| 多輪對話 | resume 旗標,自己管理 | Thread/Session 原生模型 |
+| 多寵物並行 | 自己管 process 池 | 原生(Codex: Thread;Claude: 並行 query) |
+| Cancel | 殺 process | 原生(`turn/interrupt` / `q.interrupt()`) |
+| Approval(工具執行前確認) | ❌ 非互動模式,不適合 | ✅ 原生(app-server approval request / SDK `canUseTool` callback) |
+| 工程複雜度 | ⭐⭐ | ⭐⭐⭐⭐(Codex 要管 JSON-RPC id map、重連;Claude SDK 較低,library 直嵌) |
+| 適合本專案 | v0 煙霧測試、fallback、mock | **正式架構** |
+
+判斷:桌寵的終局需求(多寵各自 workspace + 持續對話 + streaming + cancel + approval + 重啟恢復)**全部落在長駐 runtime 的使用場景**。若先做 exec 版再重構,會先自己堆出 ProcessManager/SessionManager/CancellationManager/ApprovalManager 然後全部丟掉。因此:**介面直接按 session 模型設計**,provider 內部實作可以分期(見 §8),消費端(泡泡/IPC/持久化)永不重寫。
 
 ## 2. 架構
 
 ```
-┌─ renderer(泡泡)─┐        ┌─ main(AgentManager)─┐        ┌─ 子行程 ─┐
-│ Enter 送出        │─chat-send→ 每寵一個 AgentSession │─spawn→ codex exec --json …
-│ 顯示回覆/狀態/錯誤 │←chat-event─ (狀態機 + adapter 解析) │        claude -p --output-format stream-json …
-└──────────────────┘        └──────────────────────┘        └──────────┘
+Renderer(泡泡)                Electron Main                        Agent Runtime
+┌────────────────┐   IPC    ┌──────────────────────┐
+│ Enter 送出      │─chat-send→│ AgentBridge           │
+│ 串流回覆/狀態    │←chat-event│  ├ CodexProvider ─────┼─ stdio JSON-RPC → codex app-server(長駐)
+│ 審批 UI(v2)    │─approval─→│  │                     │      ├ Thread A ← 🐱 寵物A(/project/foo)
+│ Esc 中斷        │─cancel──→│  └ ClaudeProvider ────┼─ in-process → Claude Agent SDK
+└────────────────┘           └──────────────────────┘      ├ Session B ← 🦊 寵物B(/project/bar)
 ```
 
-- 子行程一律由 **main** spawn(renderer 無 node 權限),`cwd = profile.workspacePath`。
-- **每寵物同時至多一個進行中 turn**(狀態機 `idle → running → idle | error`);不同寵物可並行,全域 running 上限 4,超過拒絕並提示。
+- 一切 agent 邏輯在 **main**(renderer 無 node 權限);泡泡只認統一事件。
+- 每寵物 → 一個 provider session(Codex Thread 或 Claude SDK session),互不干擾;`cwd = profile.workspacePath`。
 
-## 3. Adapter 層(統一兩種 CLI)
+## 3. AgentProvider 抽象(消費端唯一依賴)
 
 ```ts
-interface AgentAdapter {
-  kind: 'codex' | 'claude';
-  buildCommand(req: { prompt: string; workdir: string; sessionId?: string }): { cmd: string; args: string[] };
-  parseLine(line: string): AgentEvent[];   // JSONL → 統一事件
+interface AgentProvider {
+  readonly kind: 'codex' | 'claude';
+  /** 開新對話或恢復既有對話;回傳 provider 端 session/thread id */
+  startSession(opts: { workdir: string; resumeId?: string }): Promise<string>;
+  /** 送一句話,串流回統一事件;一個 session 同時只允許一個進行中 turn */
+  sendMessage(sessionId: string, text: string): AsyncIterable<AgentEvent>;
+  /** 中斷該 session 進行中的 turn */
+  cancel(sessionId: string): Promise<void>;
+  /** 回覆 approval 請求(v2) */
+  respondApproval(sessionId: string, requestId: string, allow: boolean): Promise<void>;
+  /** 釋放單一 session(寵物休眠/刪除) */
+  closeSession(sessionId: string): Promise<void>;
+  /** 整個 provider 收攤(app 退出) */
+  dispose(): Promise<void>;
 }
 
 type AgentEvent =
-  | { kind: 'session'; sessionId: string }   // 首個帶 session id 的事件 → 回存 profile
-  | { kind: 'thinking' }                     // 泡泡:「思考中…」
-  | { kind: 'tool'; name: string }           // 泡泡:「正在執行 ○○」
-  | { kind: 'text'; text: string }           // 助手回覆文字
+  | { kind: 'session'; sessionId: string }                    // 回存 profile.agent.sessionId
+  | { kind: 'thinking' }
+  | { kind: 'tool'; name: string }                            // 「正在執行 ○○」
+  | { kind: 'text'; text: string }                            // 增量或整段回覆文字
+  | { kind: 'approval'; requestId: string; description: string } // v2:泡泡顯示 允許/拒絕
   | { kind: 'done'; ok: boolean }
   | { kind: 'error'; message: string };
 ```
 
-### codex adapter
+泡泡、IPC、session 持久化、審批 UI 全部只依賴這個介面——**加第三家、或把某家內部從 CLI 換成 server,消費端零改動**。
 
-- 指令:`codex exec --json --skip-git-repo-check <prompt>`;有 sessionId 時改走 resume 形式(**確切旗標以實作期煙霧測試為準**,resume 失敗自動退回開新 session)。
-- 已實證的坑(舊專案 spike,必須寫進 adapter):
-  1. **spawn 後立即 `child.stdin.end()`** —— codex 會等 stdin EOF,不關會永久卡死;
-  2. 事件形狀:`thread.started` / `item.started|completed`(item.type = `agent_message`/`command_execution`/`reasoning`…)/ `turn.completed` / `turn.failed`——實作前重新抓一次真實輸出校對(版本可能已變)。
+## 4. 兩個 Provider 規格
 
-### claude adapter(Claude Code CLI)
+### CodexProvider
 
-- 指令:`claude -p <prompt> --output-format stream-json --verbose`,resume 用 `--resume <sessionId>`。
-- 事件對映:`{"type":"system","subtype":"init","session_id"}` → `session`;`{"type":"assistant", message.content[].text}` → `text`;`{"type":"result"}` → `done`(帶 is_error)。
-- v1 純問答:以 `--allowedTools`(空/最小集)限制不執行工具;v2 再開放並設計權限策略。
+**目標形態:`codex app-server --listen stdio://`(雙向 JSON-RPC,官方給自訂 client 的介面)**
 
-### 共通
+- Bridge 啟動一個長駐 app-server 子行程(lazy:第一隻 codex 寵物開口才啟動);`initialize` 交握。
+- 對映:`startSession` → `thread/start`(或 resume 既有 threadId);`sendMessage` → `turn/start` + 訂閱 `item/agentMessage/delta` 等通知 → 統一事件;`cancel` → `turn/interrupt`;approval request ↔ `respondApproval`。
+- 要管理:JSON-RPC request id ↔ response 對應、notification 路由(threadId → 寵物)、**crash 偵測 → 重啟 → thread resume**(對映我們 §10 的 render-process-gone 保險絲精神)。
+- 協定屬進階整合、升版面較大 → 全部 JSON-RPC 細節封在 `CodexProvider` 內,版本相容問題不外洩。
 
-- Prompt 一律作為**單一 argv 參數**傳遞(不經 shell,無注入面)。
-- stdout 按行切割餵 `parseLine`;stderr 收尾附進 `error`;非 JSON 行忽略但記 log。
+**v1 過渡形態:`codex exec --json`(介面不變,內部先用單發 process 撐)**
 
-## 4. 資料模型(v2 → 小幅擴充)
+- `codex exec --json --skip-git-repo-check <prompt>`,resume 走 sessionId(確切旗標以 v0 煙霧測試為準;resume 失敗自動開新 session)。
+- 已實證的坑(舊 spike,必須寫進實作):**spawn 後立即 `child.stdin.end()`**(codex 等 stdin EOF,不關永久卡死);事件形狀 `thread.started`/`item.*`/`turn.completed` 以實測輸出校對。
+- 此形態沒有 approval(`AgentEvent.approval` 不會發生)、cancel = 殺 process——**介面允許降級,行為文件化**。
+- exec 永久保留為:除錯工具、整合測試、app-server 掛掉時的 fallback。
+
+### ClaudeProvider
+
+**目標形態:Claude Agent SDK(`@anthropic-ai/claude-agent-sdk`,in-process,TS 原生)** —— 不需要 spawn/stdio/JSON-RPC 那一層,對 Electron main(Node)是最自然的整合。
+
+已查證的官方 API(2026-07 查證,實作前以 v0 再驗一次):
+
+- `query({ prompt, options })` 回傳 `Query`(AsyncGenerator);options:`cwd`、`resume: <sessionId>`、`allowedTools`/`disallowedTools`、`permissionMode`、`maxTurns`、`systemPrompt`、`model`。
+- 訊息形狀:`{type:'system', subtype:'init', session_id}` → `session` 事件;`{type:'assistant', message.content[]}` → `text`/`tool`;`{type:'result', subtype:'success'|'error_*', result, session_id}` → `done`。
+- **中斷**:`q.interrupt()`(Query 物件原生方法)→ `cancel` 直接對映。
+- **審批**:`canUseTool(toolName, input) → {behavior:'allow'|'deny', ...}` callback = 官方的「工具執行前經使用者確認」途徑 → 發 `approval` 事件、等泡泡回覆後 resolve。v1 純問答用 `allowedTools` 最小集即可。
+- **並行**:多個 query 並行 = 官方支援(每寵一個,無記載上限)。
+- **In-process MCP(v3 的殺手鐧)**:`createSdkMcpServer` + `tool()` 可以把「宿主 app 的功能」直接做成 agent 可呼叫的工具——例如 `pet_change_pose` / `pet_play_motion` / `pet_show_expression`,Claude 呼叫 → main → IPC → renderer 播 VRMA/表情。桌寵從「顯示回覆的殼」變成 agent 可操縱的化身。
+
+**⚠️ 認證疑點(v0 必驗,影響選型)**:官方文件明載 SDK **獨立認證、需 `ANTHROPIC_API_KEY`**(API 計費),**不沿用** Claude Code CLI 的訂閱登入。而 spawn `claude -p --output-format stream-json` 走 CLI 本體 = 直接用本機已登入的訂閱帳號。若 v0 實測證實 SDK 無法吃訂閱憑證,則 ClaudeProvider 的 v1 內部改走 **CLI spawn 形態**(事件對映同 v1 設計:init/assistant/result),SDK 形態(含 in-process MCP)留給願意用 API key 的情境或等官方支援訂閱認證——**這正是 provider 抽象存在的理由:內部實作可換,外面不動**。
+
+## 5. 資料模型
 
 ```ts
 agent?: { kind: 'codex' | 'claude'; sessionId?: string }
 ```
 
-- 遷移:既有 `codexSessionId` → `agent: { kind: 'codex', sessionId }`(舊欄位保留,遵循既有遷移慣例)。
-- 設定面板:「Codex Session ID」欄升級為 **agent 種類下拉(codex/claude)+ session ID 欄**(ID 通常由系統自動回存,手填為進階用途)。
-- 收到 `session` 事件 → `updatePet(id, { agent: {...} })` 自動回存(單一變更點慣例)。
+- 遷移:既有 `codexSessionId` → `agent: { kind: 'codex', sessionId }`(舊欄位保留,循 v2 格式遷移慣例)。
+- `session` 事件 → `updatePet(id, { agent })` 自動回存(單一變更點慣例);重啟後以 `resumeId` 恢復對話。
+- 設定面板:「Codex Session ID」欄升級為 **agent 種類下拉(codex/claude)+ session ID 欄**(通常自動回存,手填為進階用途)。
 
-## 5. IPC 契約
+## 6. IPC 契約與泡泡 UI
 
 | 通道 | 方向 | 內容 |
 |---|---|---|
-| `chat-send(petId, text)` | renderer→main | 泡泡送出;main 檢查:profile 存在、workspacePath 已設、該寵非 running、全域上限 |
-| `chat-abort(petId)` | renderer→main | 中斷(kill child) |
+| `chat-send(petId, text)` | renderer→main | main 檢查:profile 存在、workspacePath 已設、該寵無進行中 turn、全域 running 上限(4) |
+| `chat-cancel(petId)` | renderer→main | 中斷 |
+| `chat-approval(petId, requestId, allow)` | renderer→main | 審批回覆(v2) |
 | `chat-event(petId, AgentEvent)` | main→renderer | 串流回泡泡 |
 
-## 6. 泡泡 UI 變更(speechBubble.ts)
-
-- **Enter 送出** → 輸入框 disabled;泡泡上方新增**回覆區**(可滾動,顯示最近一則回覆,狀態列輪播 thinking/tool 名)。
-- `done` → 解鎖輸入框;`error` → 紅字;running 中 **Esc 或停止鈕 = chat-abort**。
-- 未設 `workspacePath` 就送出 → 泡泡就地提示「先到工作設定選擇工作目錄」,不 spawn。
-- 泡泡 hover 顯示/隱藏邏輯不變;running 時泡泡**不因移開游標而消失**(有進行中對話則保持顯示)。
+泡泡(speechBubble.ts):**Enter 送出** → 輸入框 disabled、新增回覆區(可滾動)+ 狀態列(thinking/tool 名輪播);`done` 解鎖、`error` 紅字;running 中 **Esc = cancel**;`approval` 事件 → 泡泡內顯示描述 + 允許/拒絕鈕;未設 workspacePath 就送出 → 就地提示,不進 provider;running 時泡泡不因移開游標而消失。
 
 ## 7. 生命週期與保險絲
 
-- **休眠/刪除寵物 → kill 其 child**:掛在 `updatePet` 的 disable 副作用旁(與快取釋放同一單一入口);kill 流程 SIGTERM → 1 秒 → SIGKILL。
-- **app 退出**:`before-quit` 清全部子行程;Tray「結束」按鈕(走 `app.exit`,**不觸發 before-quit**——已知坑)在 `flushConfigSync()` 旁一併清理。
-- 子行程 30 秒無輸出 → 泡泡顯示「仍在執行…」;5 分鐘硬上限 kill + error(可日後做成設定)。
+- **寵物休眠/刪除** → `provider.closeSession(sessionId)`:掛在 `updatePet` 的 disable 副作用旁(與快取釋放同一單一入口)。
+- **app 退出** → `provider.dispose()`(app-server 子行程 SIGTERM → 1s → SIGKILL):`before-quit` + Tray「結束」的 `flushConfigSync()` 旁(app.exit 不觸發 before-quit——已知坑)。
+- **app-server crash** → CodexProvider 偵測 exit,標記所有 codex session 斷線、發 `error` 事件,下次 sendMessage 自動重啟 + resume。
+- 30 秒無輸出 → 泡泡顯示「仍在執行…」;5 分鐘硬上限 → cancel + error。
 
 ## 8. 分期
 
 | 期 | 範圍 |
 |---|---|
-| **v0(實作首日必做)** | 煙霧測試:兩個 CLI 各跑真實命令,JSONL 樣本存 scratchpad,校對事件形狀後才寫 parser(舊 spike 教訓:猜格式必錯) |
-| **v1** | 純問答:adapter ×2、AgentManager、IPC、泡泡回覆區、session 回存與 resume、中斷、生命週期整合 |
-| **v2** | 工具執行 + 權限策略(自動允許清單、危險操作確認 UI) |
-| **v3** | 狀態連動角色表演:thinking 播思考動作、done 播開心表情(VRMA/表情系統現成) |
+| **v0(實作首日)** | 三項查證,樣本存 scratchpad:(a) `codex exec --json` 真實 JSONL 形狀 + resume 旗標;(b) `codex app-server` 是否可用、initialize/thread/turn 的實際 RPC 形狀;(c) **Agent SDK 在本機是否能用訂閱憑證跑通一問一答**(決定 ClaudeProvider v1 內部形態) |
+| **v1** | `AgentProvider` 介面 + AgentBridge + IPC + 泡泡回覆區;ClaudeProvider(SDK 或 CLI,依 v0 結論);CodexProvider **exec 形態**;session 回存/resume;cancel;生命週期整合。純問答(claude `allowedTools` 最小集 / codex 唯讀) |
+| **v2** | CodexProvider 內部升級 **app-server 形態**(消費端零改動);approval 事件 + 泡泡審批 UI(SDK `canUseTool` / app-server approval);開放工具執行 |
+| **v3** | **in-process MCP 寵物工具**:`pet_change_pose`/`pet_play_motion`/`pet_show_expression` 等,agent 驅動桌寵表演;狀態連動(thinking 播思考動作、done 播開心) |
 
 ## 9. 驗證方法
 
-1. **v0 煙霧測試**先行(見上)。
-2. **mock adapter**(echo JSONL 的 shell 腳本)headless 驗整條鏈:chat-send → 事件 → 泡泡渲染 → session 回存,不依賴真 CLI、不消耗 API 額度。
-3. 真 CLI 端到端:各問一題;驗 resume(連續兩問同 session);驗中斷;驗「休眠寵物時 child 被 kill」;`npm run typecheck` + `npm run build`。
+1. **v0 查證先行**(上表)——猜格式必錯,是舊 spike 用真金白銀買來的教訓。
+2. **MockProvider**(實作 `AgentProvider`、照腳本吐事件)headless 驗整條鏈:chat-send → 事件 → 泡泡渲染 → session 回存 → cancel → approval UI,不依賴真 runtime、不耗額度;也是日後回歸測試的基座。
+3. 真 runtime 端到端:各問一題;resume(連兩問同 session + 重啟 app 後再問);中斷;休眠寵物時 session 被關;`npm run typecheck` + `npm run build`。
