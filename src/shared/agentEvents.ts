@@ -5,6 +5,9 @@
 
 export type AgentKind = 'codex' | 'claude';
 
+/** 權限等級:readonly=唯讀只回答(預設)/ ask=可寫工作目錄、危險操作經泡泡核准 / auto=可寫且不詢問 */
+export type AgentPermission = 'readonly' | 'ask' | 'auto';
+
 export interface AgentBinding {
   kind: AgentKind;
   sessionId?: string;
@@ -12,6 +15,8 @@ export interface AgentBinding {
   model?: string;
   /** 推理力度(空 = 預設):low / medium / high / xhigh / max(max 僅 claude 支援) */
   effort?: string;
+  /** 權限等級(空 = readonly)。 */
+  permission?: AgentPermission;
 }
 
 export type AgentEvent =

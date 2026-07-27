@@ -1,6 +1,14 @@
-import type { AgentEvent, AgentKind } from '../../shared/agentEvents';
+import type { AgentEvent, AgentKind, AgentPermission } from '../../shared/agentEvents';
 
-export type { AgentEvent, AgentKind };
+export type { AgentEvent, AgentKind, AgentPermission };
+
+/** provider.sendMessage 的每 turn 選項(全部來自 profile,空 = 預設)。 */
+export interface TurnOptions {
+  model?: string;
+  effort?: string;
+  persona?: string;
+  permission?: AgentPermission;
+}
 
 /** 設定面板下拉選單用的模型資訊。 */
 export interface AgentModelInfo {
@@ -28,11 +36,12 @@ export interface AgentProvider {
    * 若 provider 因故無法保證(如行程被殺),bridge 會補發。
    * opts.model / opts.effort 為每寵設定(空 = CLI 預設);兩家都支援逐 turn 指定。
    * opts.persona = 角色個性(claude 逐 turn 注入 --append-system-prompt;codex 在 thread 建立/恢復時吃 developerInstructions)。
+   * opts.permission = 權限等級(見 AgentPermission;codex 對映 sandbox/approvalPolicy、claude 對映旗標)。
    */
-  sendMessage(sessionId: string, text: string, opts?: { model?: string; effort?: string; persona?: string }): AsyncIterable<AgentEvent>;
+  sendMessage(sessionId: string, text: string, opts?: TurnOptions): AsyncIterable<AgentEvent>;
   /** 中斷該 session 進行中的 turn(codex: turn/interrupt;claude: 殺該 turn 的行程)。 */
   cancel(sessionId: string): Promise<void>;
-  /** v2:回覆 approval 請求。v1 的 provider 可丟 not implemented。 */
+  /** 回覆 approval 事件(requestId 來自該事件);只在 permission=ask 時會發生。 */
   respondApproval(sessionId: string, requestId: string, allow: boolean): Promise<void>;
   /** 釋放單一 session(寵物休眠/刪除)。 */
   closeSession(sessionId: string): Promise<void>;

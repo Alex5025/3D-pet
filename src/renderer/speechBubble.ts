@@ -19,6 +19,8 @@ export interface SpeechBubble {
   setStatus: (status: string | null) => void;
   /** turn 結束:解鎖輸入框;失敗時紅字顯示訊息。 */
   endTurn: (ok: boolean, errorMessage?: string) => void;
+  /** 顯示審批請求(描述 + 允許/拒絕);使用者按鈕後觸發 onApproval 並收合。 */
+  showApproval: (requestId: string, description: string) => void;
 }
 
 export interface SpeechBubbleAvoidRect {
@@ -40,6 +42,8 @@ interface SpeechBubbleOptions {
   onSend?: (text: string) => void;
   /** 停止鈕/Esc 中斷進行中的 turn。 */
   onCancel?: () => void;
+  /** 審批按鈕(允許/拒絕)的回覆。 */
+  onApproval?: (requestId: string, allow: boolean) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -73,6 +77,34 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   // 回覆區 + 狀態列(含停止鈕):agent 對話的顯示面;泡泡是笨元件,事件對映由 main.ts 做。
   const reply = document.createElement('div');
   reply.className = 'bubble-reply';
+  // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
+  const approvalBox = document.createElement('div');
+  approvalBox.className = 'bubble-approval';
+  const approvalText = document.createElement('div');
+  approvalText.className = 'approval-text';
+  const approvalButtons = document.createElement('div');
+  approvalButtons.className = 'approval-buttons';
+  const allowButton = document.createElement('button');
+  allowButton.type = 'button';
+  allowButton.className = 'approval-allow';
+  allowButton.textContent = '允許';
+  const denyButton = document.createElement('button');
+  denyButton.type = 'button';
+  denyButton.className = 'approval-deny';
+  denyButton.textContent = '拒絕';
+  approvalButtons.append(allowButton, denyButton);
+  approvalBox.append(approvalText, approvalButtons);
+  let approvalRequestId: string | null = null;
+  const answerApproval = (allow: boolean): void => {
+    if (!approvalRequestId) return;
+    const requestId = approvalRequestId;
+    approvalRequestId = null;
+    approvalBox.classList.remove('open');
+    options.onApproval?.(requestId, allow);
+  };
+  allowButton.addEventListener('click', () => answerApproval(true));
+  denyButton.addEventListener('click', () => answerApproval(false));
+
   const statusRow = document.createElement('div');
   statusRow.className = 'bubble-status-row';
   const status = document.createElement('div');
@@ -83,7 +115,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   stop.textContent = '停止';
   statusRow.append(status, stop);
 
-  element.append(label, reply, statusRow, input);
+  element.append(label, reply, approvalBox, statusRow, input);
   document.body.appendChild(element);
 
   let busy = false;
@@ -212,6 +244,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       status.textContent = '';
       statusRow.classList.add('open');
     },
+    showApproval: (requestId, description) => {
+      approvalRequestId = requestId;
+      approvalText.textContent = description;
+      approvalBox.classList.add('open');
+    },
     appendText: (chunk) => {
       reply.classList.add('open');
       reply.append(document.createTextNode(chunk));
@@ -225,6 +262,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       input.disabled = false;
       statusRow.classList.remove('open');
       status.textContent = '';
+      approvalRequestId = null;
+      approvalBox.classList.remove('open');
       if (!ok && errorMessage) {
         reply.classList.add('open');
         const line = document.createElement('div');

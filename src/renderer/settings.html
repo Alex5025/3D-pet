@@ -309,6 +309,14 @@
             <select class="text-input" id="agent-effort"></select>
           </label>
           <label class="field">
+            <span>權限</span>
+            <select class="text-input" id="agent-permission">
+              <option value="readonly">唯讀（只回答，不動檔案）</option>
+              <option value="ask">可寫工作目錄（每次操作需我核准）</option>
+              <option value="auto">全自動（不詢問，請小心）</option>
+            </select>
+          </label>
+          <label class="field">
             <span>Session ID（對話後自動回存；手動填寫為進階用途）</span>
             <input class="text-input" id="agent-session-id" type="text" maxlength="160" placeholder="例如：019f…" spellcheck="false" />
           </label>

@@ -244,3 +244,52 @@
     transition: none;
   }
 }
+
+/* 審批區塊(agent 想做危險操作,等使用者點頭) */
+.pet-speech-bubble .bubble-approval {
+  display: none;
+  margin: 0 2px 8px;
+  padding: 9px 11px;
+  background: rgba(255, 244, 214, 0.95);
+  border: 1px solid rgba(198, 149, 55, 0.45);
+  border-radius: 11px;
+}
+
+.pet-speech-bubble .bubble-approval.open {
+  display: block;
+}
+
+.pet-speech-bubble .approval-text {
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #5d4a1e;
+}
+
+.pet-speech-bubble .approval-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.pet-speech-bubble .approval-buttons button {
+  flex: 1;
+  padding: 5px 0;
+  font: inherit;
+  font-size: 12.5px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.pet-speech-bubble .approval-allow {
+  color: #fff;
+  background: #4c9e62;
+  border: 1px solid #3f8452;
+}
+
+.pet-speech-bubble .approval-deny {
+  color: #6f5d80;
+  background: rgba(146, 114, 176, 0.12);
+  border: 1px solid rgba(111, 93, 128, 0.28);
+}

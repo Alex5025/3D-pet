@@ -20,6 +20,8 @@ export interface AgentBridgeDeps {
 export interface AgentBridge {
   chatSend(petId: string, text: string): void;
   chatCancel(petId: string): void;
+  /** 泡泡審批按鈕的回覆(requestId 來自 approval 事件)。 */
+  respondApproval(petId: string, requestId: string, allow: boolean): void;
   /** 設定面板下拉用;provider 不支援或失敗回空清單。 */
   listModels(kind: AgentKind): Promise<AgentModelInfo[]>;
   /** 寵物休眠/刪除/換 agent 種類時關閉 session。 */
@@ -37,6 +39,10 @@ interface PetAgentState {
   kind: AgentKind;
   sessionId: string | null;
   running: boolean;
+  /** 有審批請求掛著等使用者點頭:看門狗暫停計時(等人不是卡死)。 */
+  awaitingApproval: boolean;
+  /** 最後一次事件時間(看門狗依據;回覆審批時重置)。 */
+  lastActivity: number;
 }
 
 /** 未設定 agent 的寵物預設走 codex(與舊 codexSessionId 欄位的血緣一致;設定面板可改)。 */
@@ -50,7 +56,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
   function stateFor(petId: string, kind: AgentKind): PetAgentState {
     let state = states.get(petId);
     if (!state || state.kind !== kind) {
-      state = { kind, sessionId: null, running: false };
+      state = { kind, sessionId: null, running: false, awaitingApproval: false, lastActivity: Date.now() };
       states.set(petId, state);
     }
     return state;
@@ -87,11 +93,12 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       send(event);
     };
 
-    // 看門狗:30s 無輸出提示、5min 硬中斷
-    let lastOutput = Date.now();
+    // 看門狗:30s 無輸出提示、5min 硬中斷;等待審批時暫停(等人點頭不算卡死)
+    state.lastActivity = Date.now();
     let noticed = false;
     const watchdog = setInterval(() => {
-      const idle = Date.now() - lastOutput;
+      if (state.awaitingApproval) return;
+      const idle = Date.now() - state.lastActivity;
       if (!noticed && idle >= STALL_NOTICE_MS) {
         noticed = true;
         send({ kind: 'tool', name: '仍在執行…' });
@@ -111,7 +118,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
           if (resumeId) {
             // resume 失敗策略:清掉舊 id、開全新 session(設計 §8 定案)
             console.log(`[agent] resume 失敗,改開新 session:${String(error)}`);
-            deps.updatePet(petId, { agent: { kind } });
+            deps.updatePet(petId, { agent: { ...profile.agent, kind, sessionId: undefined } });
             state.sessionId = await provider.startSession({ workdir: profile.workspacePath, persona: profile.persona });
           } else {
             throw error;
@@ -119,14 +126,21 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         }
       }
       // startSession 回傳的是 handle,不持久化;真 id 只從 session 事件回存
-      const turnOpts = { model: profile.agent?.model, effort: profile.agent?.effort, persona: profile.persona };
+      const turnOpts = {
+        model: profile.agent?.model,
+        effort: profile.agent?.effort,
+        persona: profile.persona,
+        permission: profile.agent?.permission
+      };
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
-        lastOutput = Date.now();
+        state.lastActivity = Date.now();
         noticed = false;
+        if (event.kind === 'approval') state.awaitingApproval = true;
         if (event.kind === 'session') {
           state.sessionId = event.sessionId;
           if (profile.agent?.kind !== kind || profile.agent?.sessionId !== event.sessionId) {
-            deps.updatePet(petId, { agent: { kind, sessionId: event.sessionId } });
+            // 展開既有 agent 設定再蓋 sessionId:回存不可洗掉 model/effort/permission
+            deps.updatePet(petId, { agent: { ...profile.agent, kind, sessionId: event.sessionId } });
           }
         }
         emit(event);
@@ -139,6 +153,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
     } finally {
       clearInterval(watchdog);
       state.running = false;
+      state.awaitingApproval = false;
     }
   }
 
@@ -152,6 +167,15 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       const state = states.get(petId);
       if (!state?.running || !state.sessionId) return;
       void deps.providers[state.kind].cancel(state.sessionId);
+    },
+    respondApproval(petId, requestId, allow) {
+      const state = states.get(petId);
+      if (!state?.sessionId) return;
+      state.awaitingApproval = false;
+      state.lastActivity = Date.now();
+      void deps.providers[state.kind].respondApproval(state.sessionId, requestId, allow).catch((error) =>
+        console.log('[agent] respondApproval 失敗:', error)
+      );
     },
     async listModels(kind) {
       try {

@@ -78,6 +78,7 @@ function renderWorkSettings(): void {
   const profile = selectedProfile();
   input('pet-name').value = profile?.name ?? '';
   (el('agent-kind') as HTMLSelectElement).value = profile?.agent?.kind ?? 'codex';
+  (el('agent-permission') as HTMLSelectElement).value = profile?.agent?.permission ?? 'readonly';
   void renderAgentModelOptions(profile?.agent?.model ?? '', profile?.agent?.effort ?? '');
   input('agent-session-id').value = profile?.agent?.sessionId ?? '';
   el('pet-enabled-toggle').textContent = profile?.enabled !== false
@@ -209,12 +210,15 @@ async function submitAgentBinding(): Promise<void> {
   const sessionId = input('agent-session-id').value.trim();
   const model = (el('agent-model') as HTMLSelectElement).value;
   const effort = (el('agent-effort') as HTMLSelectElement).value;
+  const permissionValue = (el('agent-permission') as HTMLSelectElement).value;
+  const permission = permissionValue === 'ask' || permissionValue === 'auto' ? permissionValue : undefined;
   await window.pet.updatePetMeta(profile.id, {
     agent: {
       kind,
       ...(sessionId ? { sessionId } : {}),
       ...(model ? { model } : {}),
-      ...(effort ? { effort } : {})
+      ...(effort ? { effort } : {}),
+      ...(permission ? { permission } : {})
     }
   });
 }
@@ -229,6 +233,7 @@ el('agent-model').addEventListener('change', () => {
   void submitAgentBinding();
 });
 el('agent-effort').addEventListener('change', () => void submitAgentBinding());
+el('agent-permission').addEventListener('change', () => void submitAgentBinding());
 input('agent-session-id').addEventListener('change', () => void submitAgentBinding());
 
 el('pet-enabled-toggle').addEventListener('click', async () => {

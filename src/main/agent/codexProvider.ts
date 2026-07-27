@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import type { AgentEvent, AgentModelInfo, AgentProvider } from './types';
+import type { AgentEvent, AgentModelInfo, AgentPermission, AgentProvider } from './types';
 
 /**
  * CodexProvider:長駐 `codex app-server`(NDJSON JSON-RPC over stdio,官方給自訂 client 的介面)。
@@ -29,8 +29,10 @@ export function createCodexProvider(): AgentProvider {
   let initialized: Promise<void> | null = null;
   let nextId = 1;
   const pending = new Map<number, { resolve: (msg: JsonRpcMessage) => void; timer: NodeJS.Timeout }>();
-  /** threadId → { workdir, persona }(crash 後 resume 用)。 */
-  const sessions = new Map<string, { workdir: string; persona?: string }>();
+  /** threadId → { workdir, persona, permission }(crash 後 resume 與權限變更重載用)。 */
+  const sessions = new Map<string, { workdir: string; persona?: string; permission: AgentPermission }>();
+  /** requestId → 待回覆的審批 ServerRequest(rpc id + method,回覆形狀依 method 而異)。 */
+  const pendingApprovals = new Map<string, { rpcId: number; method: string }>();
   /** 本世代 server 已載入(start/resume 過)的 thread;server 重啟後清空。 */
   const loadedThreads = new Set<string>();
   /** threadId → 進行中 turn 的通知處理器(單寵單 turn,一 thread 至多一個)。 */
@@ -50,6 +52,7 @@ export function createCodexProvider(): AgentProvider {
     turnHandlers.clear();
     activeTurns.clear();
     loadedThreads.clear();
+    pendingApprovals.clear();
     child = null;
     initialized = null;
   }
@@ -71,6 +74,10 @@ export function createCodexProvider(): AgentProvider {
       } catch {
         return;
       }
+      if (msg.method !== undefined && msg.id !== undefined) {
+        handleServerRequest(msg);
+        return;
+      }
       if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
         const waiter = pending.get(msg.id);
         if (waiter) {
@@ -83,7 +90,6 @@ export function createCodexProvider(): AgentProvider {
       if (msg.method && msg.params) {
         const threadId = msg.params['threadId'];
         if (typeof threadId === 'string') turnHandlers.get(threadId)?.(msg.method, msg.params);
-        // ServerRequest(approval 類)在 read-only+never 下不會出現(v0 實證);v2 再接
       }
     });
     initialized = request('initialize', {
@@ -109,22 +115,66 @@ export function createCodexProvider(): AgentProvider {
     });
   }
 
-  /** v1 純問答的 thread 參數(唯讀沙箱、永不 approval)。 */
-  const READONLY = { sandbox: 'read-only', approvalPolicy: 'never' } as const;
+  function respondToServer(rpcId: number, result: Record<string, unknown>): void {
+    child?.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id: rpcId, result }) + '\n');
+  }
 
-  async function loadThread(threadId: string | null, workdir: string, persona?: string): Promise<string> {
+  /** 審批類 ServerRequest(v2.0 煙霧測試實證:item/commandExecution/requestApproval,params 帶現成中文 reason)。 */
+  function handleServerRequest(msg: JsonRpcMessage): void {
+    const params = msg.params ?? {};
+    const threadId = (params['threadId'] ?? params['conversationId']) as string | undefined;
+    const handler = threadId ? turnHandlers.get(threadId) : undefined;
+    const known = [
+      'item/commandExecution/requestApproval',
+      'item/fileChange/requestApproval',
+      'execCommandApproval',
+      'applyPatchApproval'
+    ].includes(msg.method!);
+    if (!handler || !known || msg.id === undefined) {
+      // 沒有進行中 turn 或未知請求:decline 防呆,絕不讓 server 掛著等
+      if (msg.id !== undefined) respondToServer(msg.id, { decision: 'decline' });
+      console.log('[codex] 未處理的 ServerRequest,已自動拒絕:', msg.method);
+      return;
+    }
+    const requestId = `appr-${msg.id}`;
+    pendingApprovals.set(requestId, { rpcId: msg.id, method: msg.method! });
+    const command = params['command'];
+    const files = isRecordLike(params['fileChanges']) ? Object.keys(params['fileChanges'] as object).join('、') : '';
+    const description = [
+      typeof params['reason'] === 'string' ? params['reason'] : '',
+      typeof command === 'string' ? `$ ${command}` : Array.isArray(command) ? `$ ${command.join(' ')}` : '',
+      files ? `修改檔案:${files}` : ''
+    ].filter(Boolean).join('\n') || msg.method!;
+    handler('__approval__', { requestId, description });
+  }
+
+  const isRecordLike = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+
+  /** 權限等級 → thread 參數。ask 用 untrusted 而非 on-request:
+   *  on-request 是「模型自行判斷」,workspace 內寫入常直接做(e2e 實測不穩);
+   *  untrusted 只放行安全唯讀指令,其餘一律發審批(實測 allow/deny 兩向都保證詢問)。 */
+  const permissionParams = (permission: AgentPermission): Record<string, string> =>
+    permission === 'ask'
+      ? { sandbox: 'workspace-write', approvalPolicy: 'untrusted' }
+      : permission === 'auto'
+        ? { sandbox: 'workspace-write', approvalPolicy: 'never' }
+        : { sandbox: 'read-only', approvalPolicy: 'never' };
+
+  async function loadThread(threadId: string | null, workdir: string, persona: string | undefined, permission: AgentPermission): Promise<string> {
     await ensureServer();
+    const perm = permissionParams(permission);
     // 角色個性:官方 developerInstructions 欄位(thread 建立/恢復時注入;改個性後重啟或 crash-resume 生效)
     const dev = persona
       ? { developerInstructions: `你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${persona}` }
       : {};
     if (threadId) {
-      const res = await request('thread/resume', { threadId, cwd: workdir, ...READONLY, ...dev });
+      const res = await request('thread/resume', { threadId, cwd: workdir, ...perm, ...dev });
       if (res.error) throw new Error(`thread/resume 失敗:${res.error.message ?? '未知'}`);
       loadedThreads.add(threadId);
       return threadId;
     }
-    const res = await request('thread/start', { cwd: workdir, ...READONLY, ...dev });
+    const res = await request('thread/start', { cwd: workdir, ...perm, ...dev });
     if (res.error) throw new Error(`thread/start 失敗:${res.error.message ?? '未知'}`);
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
     if (!id) throw new Error('thread/start 未回傳 thread id');
@@ -135,15 +185,31 @@ export function createCodexProvider(): AgentProvider {
   return {
     kind: 'codex',
     async startSession(opts) {
-      const threadId = await loadThread(opts.resumeId ?? null, opts.workdir, opts.persona);
-      sessions.set(threadId, { workdir: opts.workdir, persona: opts.persona });
+      // 先以唯讀開 thread;實際權限在首個 turn 由 sendMessage 對齊(權限變更走 re-resume)
+      const permission: AgentPermission = 'readonly';
+      const threadId = await loadThread(opts.resumeId ?? null, opts.workdir, opts.persona, permission);
+      sessions.set(threadId, { workdir: opts.workdir, persona: opts.persona, permission });
       return threadId;
     },
     async *sendMessage(threadId, text, opts): AsyncIterable<AgentEvent> {
-      // crash 後的 lazy 重啟:thread 不在本世代 server 裡就先 resume
-      if (!loadedThreads.has(threadId)) {
-        const saved = sessions.get(threadId);
-        await loadThread(threadId, saved?.workdir ?? process.cwd(), saved?.persona ?? opts?.persona);
+      // crash 後的 lazy 重啟,或權限變更。
+      // 實測(v2 煙霧):同 server 內對已載入 thread 重新 resume「不會」換 sandbox/approval;
+      // 全新 server 的 resume 才會套新參數 → 權限變更 = 重啟 app-server 再 resume(context 保留)。
+      // 代價:其他 codex 寵物進行中的 turn 會收到 error(權限切換是罕見操作,可接受)。
+      const saved = sessions.get(threadId);
+      const permission: AgentPermission = opts?.permission ?? 'readonly';
+      if (loadedThreads.has(threadId) && saved?.permission !== permission) {
+        const proc = child;
+        teardown('權限變更,重啟 app-server');
+        proc?.kill('SIGTERM');
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      if (!loadedThreads.has(threadId) || saved?.permission !== permission) {
+        const workdir = saved?.workdir ?? process.cwd();
+        const persona = saved?.persona ?? opts?.persona;
+        loadedThreads.delete(threadId);
+        await loadThread(threadId, workdir, persona, permission);
+        sessions.set(threadId, { workdir, persona, permission });
       }
 
       const buffer: AgentEvent[] = [];
@@ -162,6 +228,10 @@ export function createCodexProvider(): AgentProvider {
         if (method === '__crash__') {
           push({ kind: 'error', message: String(params['message'] ?? 'codex app-server 中斷') });
           end();
+          return;
+        }
+        if (method === '__approval__') {
+          push({ kind: 'approval', requestId: String(params['requestId']), description: String(params['description']) });
           return;
         }
         if (method === 'turn/started') {
@@ -217,8 +287,15 @@ export function createCodexProvider(): AgentProvider {
       const turnId = activeTurns.get(threadId);
       if (turnId) await request('turn/interrupt', { threadId, turnId });
     },
-    async respondApproval() {
-      throw new Error('codex provider:approval 是 v2');
+    async respondApproval(_threadId, requestId, allow) {
+      const pending = pendingApprovals.get(requestId);
+      if (!pending) return;
+      pendingApprovals.delete(requestId);
+      const legacy = pending.method === 'execCommandApproval' || pending.method === 'applyPatchApproval';
+      const decision = legacy
+        ? (allow ? 'approved' : { denied: { rejection: '使用者拒絕' } })
+        : (allow ? 'accept' : 'decline');
+      respondToServer(pending.rpcId, { decision });
     },
     async closeSession(threadId) {
       // thread 在磁碟($CODEX_HOME),清掉本地載入狀態即可;下次以 resume 恢復

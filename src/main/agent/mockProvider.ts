@@ -15,6 +15,7 @@ export function createMockProvider(kind: AgentKind): MockProvider {
   const log: string[] = [];
   let seq = 0;
   const cancelled = new Set<string>();
+  const approvals = new Map<string, (allow: boolean) => void>();
 
   return {
     kind,
@@ -33,6 +34,22 @@ export function createMockProvider(kind: AgentKind): MockProvider {
         yield { kind: 'error', message: 'mock error' };
         return;
       }
+      if (text.includes('APPROVAL')) {
+        // 審批腳本:發 approval 事件 → 等 respondApproval → 依決定收尾
+        const requestId = `mock-appr-${++seq}`;
+        const decision = new Promise<boolean>((resolve) => approvals.set(requestId, resolve));
+        yield { kind: 'approval', requestId, description: 'mock 想執行 $ touch mock.txt' };
+        const allowed = await decision;
+        log.push(`approval:${requestId}:${allowed}`);
+        if (allowed) {
+          yield { kind: 'text', text: '已執行' };
+          yield { kind: 'done', ok: true };
+        } else {
+          yield { kind: 'text', text: '好的,不執行' };
+          yield { kind: 'done', ok: true };
+        }
+        return;
+      }
       const slow = text.includes('SLOW');
       const chunks = ['這是', 'Mock 的', `回覆:${text}`];
       for (const chunk of chunks) {
@@ -49,8 +66,9 @@ export function createMockProvider(kind: AgentKind): MockProvider {
       cancelled.add(sessionId);
       log.push(`cancelled:${sessionId}`);
     },
-    async respondApproval() {
-      throw new Error('mock: approval 是 v2');
+    async respondApproval(_sessionId, requestId, allow) {
+      approvals.get(requestId)?.(allow);
+      approvals.delete(requestId);
     },
     async closeSession(sessionId) {
       cancelled.add(sessionId);

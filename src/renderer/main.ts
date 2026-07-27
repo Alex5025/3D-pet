@@ -307,7 +307,8 @@ function addRuntime(profile: PetProfile): void {
         current.bubble.setStatus('連線中…');
         window.pet.chatSend(profile.id, text);
       },
-      onCancel: () => window.pet.chatCancel(profile.id)
+      onCancel: () => window.pet.chatCancel(profile.id),
+      onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow)
     })
   };
   runtimes.set(profile.id, runtime);
@@ -402,7 +403,8 @@ window.pet.onChatEvent((petId, event) => {
       bubble.appendText(event.text);
       break;
     case 'approval':
-      bubble.setStatus(`等待授權:${event.description}`); // v2 才有審批 UI,先顯示不擋
+      bubble.setStatus('等待你的核准…');
+      bubble.showApproval(event.requestId, event.description);
       break;
     case 'done':
       bubble.endTurn(event.ok, event.ok ? undefined : '已中斷');

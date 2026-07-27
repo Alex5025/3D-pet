@@ -102,6 +102,8 @@ const api = {
     ipcRenderer.invoke('agent-models', kind),
   chatSend: (petId: string, text: string) => ipcRenderer.send('chat-send', petId, text),
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
+  chatApproval: (petId: string, requestId: string, allow: boolean) =>
+    ipcRenderer.send('chat-approval', petId, requestId, allow),
   onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
     ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent) => callback(petId, agentEvent)),
 

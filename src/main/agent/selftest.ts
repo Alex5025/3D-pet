@@ -95,10 +95,53 @@ export async function runClaudeE2E(): Promise<boolean> {
   await h.waitTerminal(1);
   check('cancel 後 session 仍可用', h.textOf().includes('OK'));
 
+  // 4. 審批流(permission=ask;permission-prompt MCP 腳本 + socket 回連)
+  await runApprovalE2E('審批', h, check);
+
   await h.bridge.dispose();
   const pass = failures.length === 0;
   console.log(`[agent-e2e:claude] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
   return pass;
+}
+
+/** 審批流 e2e(兩家共用):permission=ask → 要求建檔 → 泡泡事件 → 允許/拒絕 → 驗檔案。 */
+async function runApprovalE2E(
+  label: string,
+  h: ReturnType<typeof makeHarness>,
+  check: (name: string, ok: boolean) => void
+): Promise<void> {
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  h.profile.agent = { ...h.profile.agent!, permission: 'ask' };
+
+  const waitApproval = async (): Promise<Extract<AgentEvent, { kind: 'approval' }> | undefined> => {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      const found = h.events.find((e): e is Extract<AgentEvent, { kind: 'approval' }> => e.kind === 'approval');
+      if (found) return found;
+      if (h.events.some((e) => e.kind === 'done' || e.kind === 'error')) return undefined;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return undefined;
+  };
+
+  // 允許
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請用 shell 指令 `touch approved.txt` 在目前工作目錄建立檔案。需要權限就向我請求。');
+  const allowRequest = await waitApproval();
+  check(`${label}:收到審批事件`, !!allowRequest);
+  if (allowRequest) h.bridge.respondApproval('e2e', allowRequest.requestId, true);
+  await h.waitTerminal(1);
+  check(`${label}:允許後檔案存在`, existsSync(join(h.profile.workspacePath!, 'approved.txt')));
+
+  // 拒絕
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請用 shell 指令 `touch denied.txt` 在目前工作目錄建立檔案。需要權限就向我請求。');
+  const denyRequest = await waitApproval();
+  check(`${label}:拒絕案收到審批事件`, !!denyRequest);
+  if (denyRequest) h.bridge.respondApproval('e2e', denyRequest.requestId, false);
+  await h.waitTerminal(1);
+  check(`${label}:拒絕後無檔案`, !existsSync(join(h.profile.workspacePath!, 'denied.txt')));
 }
 
 /** 真 codex app-server 的 e2e(VRM_PET_AGENT_SELFTEST=codex;會耗訂閱額度,顯式觸發才跑)。 */
@@ -148,6 +191,9 @@ export async function runCodexE2E(): Promise<boolean> {
   h.bridge.chatSend('e2e', '我最開始問的算式是什麼?請只回答算式本身。');
   await h.waitTerminal(1);
   check('crash 後自動重啟 + resume(答出 8+8)', h.textOf().includes('8+8'));
+
+  // 5. 審批流(permission=ask;權限變更會觸發 thread re-resume,一併驗證)
+  await runApprovalE2E('審批', h, check);
 
   await h.bridge.dispose();
   const pass = failures.length === 0;
@@ -210,6 +256,38 @@ export async function runAgentSelftest(): Promise<boolean> {
   await waitTerminal(1, 5000);
   check('cancel → done ok=false', events.some((e) => e.kind === 'done' && !e.ok));
   check('mock 收到 cancel', mockClaude.log.some((l) => l.startsWith('cancelled:')));
+
+  // 3.5 審批流:approval 事件 → respondApproval(允許/拒絕)→ mock 收到決定
+  events.length = 0;
+  profile.agent = { ...profile.agent!, model: 'mock-model', permission: 'ask' }; // 順便驗回存不洗設定
+  bridge.chatSend('p1', 'APPROVAL 請建檔');
+  {
+    const deadline = Date.now() + 3000;
+    while (!events.some((e) => e.kind === 'approval') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  const approvalEvent = events.find((e): e is Extract<AgentEvent, { kind: 'approval' }> => e.kind === 'approval');
+  check('收到 approval 事件(含描述)', !!approvalEvent && approvalEvent.description.includes('touch'));
+  bridge.respondApproval('p1', approvalEvent?.requestId ?? '', true);
+  await waitTerminal(1, 3000);
+  check('允許後 turn 完成', events.some((e) => e.kind === 'done' && e.ok));
+  check('mock 收到允許決定', mockClaude.log.some((l) => l.endsWith(':true')));
+  check('sessionId 回存不洗掉 model/permission', profile.agent?.model === 'mock-model' && profile.agent?.permission === 'ask');
+
+  events.length = 0;
+  bridge.chatSend('p1', 'APPROVAL 再建一次');
+  {
+    const deadline = Date.now() + 3000;
+    while (!events.some((e) => e.kind === 'approval') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  const denyEvent = events.find((e): e is Extract<AgentEvent, { kind: 'approval' }> => e.kind === 'approval');
+  bridge.respondApproval('p1', denyEvent?.requestId ?? '', false);
+  await waitTerminal(1, 3000);
+  check('拒絕後 mock 收到 deny', mockClaude.log.some((l) => l.endsWith(':false')));
+  profile.agent = { kind: 'claude', sessionId: profile.agent?.sessionId };
 
   // 4. closePetSession:mock 被關
   await bridge.closePetSession('p1');

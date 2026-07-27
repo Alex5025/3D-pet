@@ -592,11 +592,14 @@ app.whenReady().then(async () => {
       const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
       const effort = typeof patch.agent.effort === 'string' &&
         ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(patch.agent.effort) ? patch.agent.effort : '';
+      const permission = patch.agent.permission === 'ask' || patch.agent.permission === 'auto'
+        ? patch.agent.permission : undefined;
       next.agent = {
         kind: patch.agent.kind,
         ...(sessionId ? { sessionId } : {}),
         ...(model ? { model } : {}),
-        ...(effort ? { effort } : {})
+        ...(effort ? { effort } : {}),
+        ...(permission ? { permission } : {})
       };
       // 換 agent 種類 = 換家,不共享 session:關掉舊的
       if (profile.agent?.kind && profile.agent.kind !== patch.agent.kind) void bridge?.closePetSession(id);
@@ -634,6 +637,10 @@ app.whenReady().then(async () => {
   ipcMain.on('chat-cancel', (event, petId: string) => {
     if (!win || event.sender !== win.webContents) return;
     bridge?.chatCancel(petId);
+  });
+  ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean) => {
+    if (!win || event.sender !== win.webContents) return;
+    bridge?.respondApproval(petId, String(requestId), allow === true);
   });
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);
