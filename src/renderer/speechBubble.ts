@@ -9,6 +9,16 @@ export interface SpeechBubble {
   showAt: (anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect) => void;
   hide: () => void;
   destroy: () => void;
+  /** 對話進行中(泡泡不因移開游標而隱藏;Enter 送出被擋)。 */
+  isBusy: () => boolean;
+  /** turn 開始:鎖輸入框、清回覆區、顯示狀態列。 */
+  beginTurn: () => void;
+  /** 回覆文字增量(自動展開回覆區並捲到底)。 */
+  appendText: (chunk: string) => void;
+  /** 狀態列文字(思考中…/正在執行 ○○);null 清空。 */
+  setStatus: (status: string | null) => void;
+  /** turn 結束:解鎖輸入框;失敗時紅字顯示訊息。 */
+  endTurn: (ok: boolean, errorMessage?: string) => void;
 }
 
 export interface SpeechBubbleAvoidRect {
@@ -26,6 +36,10 @@ interface SpeechBubbleOptions {
   /** Electron 疊層預設不可聚焦；按輸入框時由主程序暫時開放鍵盤焦點。 */
   requestInputFocus?: () => Promise<void>;
   releaseInputFocus?: () => void;
+  /** Enter 送出(非 busy 且非空白時觸發)。 */
+  onSend?: (text: string) => void;
+  /** 停止鈕/Esc 中斷進行中的 turn。 */
+  onCancel?: () => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -50,8 +64,23 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   label.htmlFor = inputId;
   input.id = inputId;
 
-  element.append(label, input);
+  // 回覆區 + 狀態列(含停止鈕):agent 對話的顯示面;泡泡是笨元件,事件對映由 main.ts 做。
+  const reply = document.createElement('div');
+  reply.className = 'bubble-reply';
+  const statusRow = document.createElement('div');
+  statusRow.className = 'bubble-status-row';
+  const status = document.createElement('div');
+  status.className = 'bubble-status';
+  const stop = document.createElement('button');
+  stop.className = 'bubble-stop';
+  stop.type = 'button';
+  stop.textContent = '停止';
+  statusRow.append(status, stop);
+
+  element.append(label, reply, statusRow, input);
   document.body.appendChild(element);
+
+  let busy = false;
 
   input.addEventListener('pointerdown', (event) => {
     if (!options.requestInputFocus || document.activeElement === input) return;
@@ -64,8 +93,14 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   });
   input.addEventListener('blur', () => options.releaseInputFocus?.());
   input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !busy && input.value.trim()) {
+      options.onSend?.(input.value.trim());
+      return;
+    }
+    // busy 中 input 已 disabled 收不到 Esc,中斷以停止鈕為主;這裡保留非 busy 的收合行為。
     if (event.key === 'Escape') input.blur();
   });
+  stop.addEventListener('click', () => options.onCancel?.());
 
   function showAt(anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect): void {
     const width = element.offsetWidth;
@@ -156,6 +191,38 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     destroy: () => {
       hide();
       element.remove();
+    },
+    isBusy: () => busy,
+    beginTurn: () => {
+      busy = true;
+      input.value = '';
+      input.disabled = true; // 會觸發 blur → releaseInputFocus,running 中不需要鍵盤
+      reply.textContent = '';
+      reply.classList.remove('open');
+      status.textContent = '';
+      statusRow.classList.add('open');
+    },
+    appendText: (chunk) => {
+      reply.classList.add('open');
+      reply.append(document.createTextNode(chunk));
+      reply.scrollTop = reply.scrollHeight;
+    },
+    setStatus: (text) => {
+      status.textContent = text ?? '';
+    },
+    endTurn: (ok, errorMessage) => {
+      busy = false;
+      input.disabled = false;
+      statusRow.classList.remove('open');
+      status.textContent = '';
+      if (!ok && errorMessage) {
+        reply.classList.add('open');
+        const line = document.createElement('div');
+        line.className = 'reply-error';
+        line.textContent = errorMessage;
+        reply.append(line);
+        reply.scrollTop = reply.scrollHeight;
+      }
     },
   };
 }

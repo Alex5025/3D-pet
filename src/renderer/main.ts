@@ -294,7 +294,20 @@ function addRuntime(profile: PetProfile): void {
       petId: profile.id,
       petName: profile.name,
       requestInputFocus: () => window.pet.setInputMode(true),
-      releaseInputFocus: () => { void window.pet.setInputMode(false); }
+      releaseInputFocus: () => { void window.pet.setInputMode(false); },
+      onSend: (text) => {
+        const current = runtimes.get(profile.id);
+        if (!current) return;
+        // workspacePath 就地提示(main 端仍二次把關)
+        if (!current.profile.workspacePath) {
+          current.bubble.endTurn(false, '請先在「工作設定」選擇工作目錄');
+          return;
+        }
+        current.bubble.beginTurn();
+        current.bubble.setStatus('連線中…');
+        window.pet.chatSend(profile.id, text);
+      },
+      onCancel: () => window.pet.chatCancel(profile.id)
     })
   };
   runtimes.set(profile.id, runtime);
@@ -371,6 +384,34 @@ window.pet.onWardrobe((petId, states) => {
   runtime.wardrobeStates = states;
   applyWardrobe(runtime);
 });
+window.pet.onChatEvent((petId, event) => {
+  const bubble = runtimes.get(petId)?.bubble;
+  if (!bubble) return;
+  // AgentEvent → 泡泡方法的對映(泡泡是笨元件,不認識事件型別)
+  switch (event.kind) {
+    case 'session':
+      break; // main 已回存 sessionId,renderer 不需處理
+    case 'thinking':
+      bubble.setStatus('思考中…');
+      break;
+    case 'tool':
+      bubble.setStatus(`正在執行 ${event.name}`);
+      break;
+    case 'text':
+      bubble.setStatus(null);
+      bubble.appendText(event.text);
+      break;
+    case 'approval':
+      bubble.setStatus(`等待授權:${event.description}`); // v2 才有審批 UI,先顯示不擋
+      break;
+    case 'done':
+      bubble.endTurn(event.ok, event.ok ? undefined : '已中斷');
+      break;
+    case 'error':
+      bubble.endTurn(false, event.message);
+      break;
+  }
+});
 
 function scheduleSave(runtime: PetRuntime): void {
   const previous = saveTimers.get(runtime.profile.id);
@@ -414,6 +455,11 @@ function scheduleBubbleHide(): void {
   if (bubbleHideTimer) return;
   bubbleHideTimer = setTimeout(() => {
     bubbleHideTimer = null;
+    // 160ms 間可能剛開始 turn:busy 中泡泡不藏(對話進行中),只釋放互動
+    if (visiblePetId && runtimes.get(visiblePetId)?.bubble.isBusy()) {
+      setInteractive(false);
+      return;
+    }
     hideVisibleBubble();
     setInteractive(false);
   }, 160);
@@ -424,7 +470,8 @@ function updateHover(x: number, y: number): void {
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
   if (hit) {
     cancelBubbleHide();
-    if (visible && visible !== hit) visible.bubble.hide();
+    // busy 中的泡泡不因切換到別隻而藏(其 turn 仍進行);只在非 busy 時換泡泡
+    if (visible && visible !== hit && !visible.bubble.isBusy()) visible.bubble.hide();
     visiblePetId = hit.profile.id;
     positionSpeechBubble(hit, true);
     setInteractive(true);
@@ -432,8 +479,15 @@ function updateHover(x: number, y: number): void {
     cancelBubbleHide();
     setInteractive(true);
   } else if (visible) {
-    scheduleBubbleHide();
-    setInteractive(true);
+    if (visible.bubble.isBusy()) {
+      // running 中移開游標:泡泡留著看進度,但 overlay 轉穿透讓底下視窗可點;
+      // 游標回到泡泡上時 containsPoint 分支恢復互動,可按「停止」。
+      cancelBubbleHide();
+      setInteractive(false);
+    } else {
+      scheduleBubbleHide();
+      setInteractive(true);
+    }
   } else {
     setInteractive(false);
   }

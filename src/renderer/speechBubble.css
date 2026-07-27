@@ -166,6 +166,74 @@
   box-shadow: 0 0 0 3px rgba(146, 114, 176, 0.18);
 }
 
+.pet-speech-bubble input:disabled {
+  color: #8d8496;
+  background: rgba(240, 238, 244, 0.9);
+}
+
+/* 回覆區:內容只往下長、可捲動;預設收合 */
+.pet-speech-bubble .bubble-reply {
+  display: none;
+  max-height: 200px;
+  margin: 0 2px 8px;
+  padding: 9px 11px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  background: rgba(248, 246, 251, 0.96);
+  border: 1px solid rgba(111, 93, 128, 0.2);
+  border-radius: 11px;
+}
+
+.pet-speech-bubble .bubble-reply.open {
+  display: block;
+}
+
+.pet-speech-bubble .bubble-reply .reply-error {
+  color: #c03b45;
+}
+
+/* 狀態列 + 停止鈕(running 中才顯示) */
+.pet-speech-bubble .bubble-status-row {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 8px;
+}
+
+.pet-speech-bubble .bubble-status-row.open {
+  display: flex;
+}
+
+.pet-speech-bubble .bubble-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #8d8496;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pet-speech-bubble .bubble-stop {
+  flex: none;
+  padding: 3px 10px;
+  color: #6f5d80;
+  font: inherit;
+  font-size: 12px;
+  background: rgba(146, 114, 176, 0.12);
+  border: 1px solid rgba(111, 93, 128, 0.28);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.pet-speech-bubble .bubble-stop:hover {
+  background: rgba(146, 114, 176, 0.22);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pet-speech-bubble,
   .pet-speech-bubble input {
