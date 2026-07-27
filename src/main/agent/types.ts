@@ -8,7 +8,11 @@ export type { AgentEvent, AgentKind };
  */
 export interface AgentProvider {
   readonly kind: AgentKind;
-  /** 開新對話或恢復既有對話;回傳 provider 端 session/thread id。resume 失敗應丟例外,由 bridge 清 id 重開。 */
+  /**
+   * 開新對話或恢復既有對話;回傳 provider 端的 session handle(bridge 之後的呼叫都用它)。
+   * handle 不持久化——可持久化的真 id 由 sendMessage 的 `session` 事件給(codex 的 handle 即真 threadId;
+   * claude 新 session 在首 turn 才拿得到 id,handle 是暫時代號)。resume 失敗應丟例外,由 bridge 清 id 重開。
+   */
   startSession(opts: { workdir: string; resumeId?: string }): Promise<string>;
   /**
    * 送一句話,串流回統一事件。契約:結尾必須恰好 yield 一個終結事件(done 或 error);

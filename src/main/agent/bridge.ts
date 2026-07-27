@@ -115,18 +115,15 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
           }
         }
       }
-      const sessionId = state.sessionId;
-      if (profile.agent?.sessionId !== sessionId || profile.agent?.kind !== kind) {
-        deps.updatePet(petId, { agent: { kind, sessionId } });
-      }
-
-      for await (const event of provider.sendMessage(sessionId, text)) {
+      // startSession 回傳的是 handle,不持久化;真 id 只從 session 事件回存
+      for await (const event of provider.sendMessage(state.sessionId, text)) {
         lastOutput = Date.now();
         noticed = false;
-        if (event.kind === 'session' && event.sessionId !== sessionId) {
-          // provider 中途換了 id(如 claude 新 session)→ 回存
+        if (event.kind === 'session') {
           state.sessionId = event.sessionId;
-          deps.updatePet(petId, { agent: { kind, sessionId: event.sessionId } });
+          if (profile.agent?.kind !== kind || profile.agent?.sessionId !== event.sessionId) {
+            deps.updatePet(petId, { agent: { kind, sessionId: event.sessionId } });
+          }
         }
         emit(event);
         if (terminated && (event.kind === 'done' || event.kind === 'error')) break;

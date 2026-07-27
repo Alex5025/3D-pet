@@ -1,4 +1,5 @@
 import type { AgentKind, AgentProvider } from './types';
+import { createClaudeProvider } from './claudeProvider';
 import { createMockProvider } from './mockProvider';
 
 /** 真 provider 實作前的占位:一開口就回報未實作,不會靜默失敗。 */
@@ -26,5 +27,5 @@ export function createProviders(): Record<AgentKind, AgentProvider> {
   if (process.env['VRM_PET_AGENT_MOCK']) {
     return { codex: createMockProvider('codex'), claude: createMockProvider('claude') };
   }
-  return { codex: createStubProvider('codex'), claude: createStubProvider('claude') };
+  return { codex: createStubProvider('codex'), claude: createClaudeProvider() };
 }

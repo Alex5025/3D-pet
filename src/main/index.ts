@@ -7,7 +7,7 @@ import type { AgentBinding } from '../shared/agentEvents';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
 import { createProviders } from './agent/providers';
-import { runAgentSelftest } from './agent/selftest';
+import { runAgentSelftest, runClaudeE2E } from './agent/selftest';
 
 interface PetState {
   x: number;
@@ -528,9 +528,11 @@ const TRAY_ICON =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAZklEQVR4nGNgoAFQAOIEIJ4PxPeheD5UTAGfRpiG/wQwzEAMQIxmZEMwnE2sZhhG8U4CGQYkoPufVANQwoEU/2MNB4oNoNgLFAeiAhkGKDCgAYoSEiwciDHkPrr/0YECA5mZiSwAANJTnOH5R44LAAAAAElFTkSuQmCC';
 
 app.whenReady().then(async () => {
-  // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)
-  if (process.env['VRM_PET_AGENT_SELFTEST']) {
-    const pass = await runAgentSelftest();
+  // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)。
+  // =1 → MockProvider 全鏈;=claude / =codex → 真 CLI e2e(耗額度,顯式觸發才跑)
+  const selftestMode = process.env['VRM_PET_AGENT_SELFTEST'];
+  if (selftestMode) {
+    const pass = selftestMode === 'claude' ? await runClaudeE2E() : await runAgentSelftest();
     app.exit(pass ? 0 : 1);
     return;
   }
