@@ -3,7 +3,7 @@
 狀態:**設計定稿,尚未實作**(2026-07-24;v2 改版 2026-07-27)。
 目標:泡泡輸入框送出的訊息,依每隻寵物的設定交給 **Codex** 或 **Claude Code** 的 agent runtime 執行,回覆與過程狀態串流回泡泡;多寵物長對話、可中斷、審批(approval)、重啟後恢復、與寵物生命週期(休眠/刪除)整合。
 
-> v2 相對 v1 的核心改變:引入 **AgentProvider 抽象**——消費端(泡泡/IPC/持久化)只依賴統一介面,各家後端可獨立演進。Codex 目標走 **app-server(JSON-RPC 長駐)**、exec 為過渡/fallback;Claude 受「**不使用計費 API**」硬性約束(使用者定案),走 **`claude -p` CLI spawn**(訂閱認證),Agent SDK(需 API key)排除。
+> v2 相對 v1 的核心改變:引入 **AgentProvider 抽象**——消費端(泡泡/IPC/持久化)只依賴統一介面,各家後端可獨立演進。Codex **v1 直接走 app-server(JSON-RPC 長駐)**,exec 僅為 fallback、預設不實作(exec 與 app-server 內部零共用,過渡工是白工;風險由 v0 gate 把關);Claude 受「**不使用計費 API**」硬性約束(使用者定案),走 **`claude -p` CLI spawn**(訂閱認證),Agent SDK(需 API key)排除。
 
 ---
 
@@ -80,12 +80,12 @@ type AgentEvent =
 - 要管理:JSON-RPC request id ↔ response 對應、notification 路由(threadId → 寵物)、**crash 偵測 → 重啟 → thread resume**(對映我們 §10 的 render-process-gone 保險絲精神)。
 - 協定屬進階整合、升版面較大 → 全部 JSON-RPC 細節封在 `CodexProvider` 內,版本相容問題不外洩。
 
-**v1 過渡形態:`codex exec --json`(介面不變,內部先用單發 process 撐)**
+**v1 直接做 app-server,不經 exec 過渡**(使用者定案 2026-07-27):X1(exec)與 X2(app-server)的 provider 內部幾乎零共用——單發 process + JSONL vs 長駐 JSON-RPC(id 對應、通知路由、重連),先做 exec 的工都是丟掉的,且 approval/cancel 語意 v2 還要再換一次。app-server 的協定風險由 **v0 煙霧測試把關**:v0 驗證通過 → v1 直上 X2;v0 發現 app-server 不可用/形狀差太多 → 才退回 exec 形態並回報重新決策。
 
-- `codex exec --json --skip-git-repo-check <prompt>`,resume 走 sessionId(確切旗標以 v0 煙霧測試為準;resume 失敗自動開新 session)。
-- 已實證的坑(舊 spike,必須寫進實作):**spawn 後立即 `child.stdin.end()`**(codex 等 stdin EOF,不關永久卡死);事件形狀 `thread.started`/`item.*`/`turn.completed` 以實測輸出校對。
-- 此形態沒有 approval(`AgentEvent.approval` 不會發生)、cancel = 殺 process——**介面允許降級,行為文件化**。
-- exec 永久保留為:除錯工具、整合測試、app-server 掛掉時的 fallback。
+**exec 形態(fallback,預設不實作)**
+
+- 僅當 app-server 不可用時的退路,以及手動除錯工具(`codex exec --json --skip-git-repo-check <prompt>`)。
+- 若真要實作,舊 spike 的坑:**spawn 後立即 `child.stdin.end()`**(codex 等 stdin EOF,不關永久卡死);事件形狀以實測輸出校對。此形態無 approval、cancel = 殺 process。
 
 ### ClaudeProvider
 
@@ -133,9 +133,9 @@ agent?: { kind: 'codex' | 'claude'; sessionId?: string }
 
 | 期 | 範圍 |
 |---|---|
-| **v0(實作首日)** | 三項查證,樣本存 scratchpad:(a) `codex exec --json` 真實 JSONL 形狀 + resume 旗標;(b) `codex app-server` 是否可用、initialize/thread/turn 的實際 RPC 形狀;(c) `claude -p --output-format stream-json` 真實輸出形狀 + `--resume` 實測(確認走訂閱、不需 API key) |
-| **v1** | `AgentProvider` 介面 + AgentBridge + IPC + 泡泡回覆區;ClaudeProvider **CLI spawn 形態**;CodexProvider **exec 形態**;session 回存/resume;cancel;生命週期整合。純問答(claude `--allowedTools` 最小集 / codex 唯讀) |
-| **v2** | CodexProvider 內部升級 **app-server 形態**(消費端零改動);approval 事件 + 泡泡審批 UI(claude `--permission-prompt-tool` / codex app-server approval);開放工具執行 |
+| **v0(實作首日,gate)** | 兩項查證,樣本存 scratchpad:(a) **`codex app-server`**:啟動、initialize 交握、thread/start + turn/start 一問一答、turn/interrupt 的實際 RPC 形狀——**此項是 v1 的 gate**,不可用則退回 exec 形態並重新決策;(b) `claude -p --output-format stream-json` 真實輸出形狀 + `--resume` 實測(確認走訂閱、不需 API key) |
+| **v1** | `AgentProvider` 介面 + AgentBridge + IPC + 泡泡回覆區;ClaudeProvider **CLI spawn 形態(C1)**;CodexProvider **直接 app-server 形態(X2)**:長駐子行程、RPC id 對應、通知路由、crash 重連;session 回存/resume;cancel(claude 殺 process / codex `turn/interrupt`);生命週期整合。純問答(claude `--allowedTools` 最小集 / codex 唯讀) |
+| **v2** | approval 事件 + 泡泡審批 UI(claude `--permission-prompt-tool` / codex app-server approval);開放工具執行 + 權限策略 |
 | **v3** | **in-process MCP 寵物工具**:`pet_change_pose`/`pet_play_motion`/`pet_show_expression` 等,agent 驅動桌寵表演;狀態連動(thinking 播思考動作、done 播開心) |
 
 ## 9. 驗證方法
