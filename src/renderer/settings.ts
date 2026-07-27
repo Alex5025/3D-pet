@@ -171,6 +171,13 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button
   });
 }
 
+input('point-diameter').addEventListener('input', () => {
+  if (!selectedPetId) return;
+  lighting.pointDiameter = Number(input('point-diameter').value);
+  window.pet.setLighting(selectedPetId, lighting);
+  render();
+});
+
 const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;
 const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
 for (const key of LIGHT_KEYS) {
@@ -313,6 +320,12 @@ function render(): void {
       ? lighting[key].toFixed(2)
       : `${(lighting[key] / Math.PI).toFixed(2)} π`;
   }
+  // 照射直徑只對點光源有意義,平行光時整列收起
+  el('point-diameter-row').hidden = lighting.type !== 'point';
+  input('point-diameter').value = String(lighting.pointDiameter);
+  el('point-diameter-val').textContent = lighting.pointDiameter > 0
+    ? `${lighting.pointDiameter.toFixed(1)} m`
+    : '無限遠';
   for (const key of SWAY_KEYS) {
     input(key).value = String(sway[key]);
     el(`${key}-val`).textContent = `× ${sway[key].toFixed(2)}`;

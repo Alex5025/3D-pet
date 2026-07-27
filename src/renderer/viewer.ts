@@ -62,6 +62,7 @@ export interface Lighting {
   y: number;
   z: number; // +Z = 螢幕這側
   shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
+  pointDiameter: number; // 點光源照射直徑(公尺;0 = 無限遠不截斷)。只影響點光源
 }
 
 /** 晃動強度(0..2,1 = 模型原廠):依 spring 骨骼名稱分類各自控制 */
@@ -81,7 +82,8 @@ export const DEFAULT_LIGHTING: Lighting = {
   x: 0,
   y: 1,
   z: 2,
-  shade: 0.35
+  shade: 0.35,
+  pointDiameter: 0
 };
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
@@ -241,6 +243,8 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     const isPoint = lighting.type === 'point';
     dirLight.intensity = isPoint ? 0 : lighting.directional;
     pointLight.intensity = isPoint ? lighting.directional : 0;
+    // 照射直徑 → three.js 的 distance(半徑,衰減到零的範圍);0 = 不截斷
+    pointLight.distance = lighting.pointDiameter > 0 ? lighting.pointDiameter / 2 : 0;
     anchorLight();
     if (lighting.shade !== prevShade) applyShade(); // 只調亮度/位置時不必整棵材質樹重走
     wake();
