@@ -239,7 +239,7 @@ function makePad(spec: PadSpec): void {
 }
 
 makePad({
-  element: el('light-xz'), horizontalRange: [-20, 20], verticalRange: [20, -20],
+  element: el('light-xz'), horizontalRange: [-100, 100], verticalRange: [100, -100],
   getHorizontal: () => lighting.x, getVertical: () => lighting.z,
   set: (horizontal, vertical) => {
     lighting.x = horizontal; lighting.z = vertical;
@@ -247,7 +247,7 @@ makePad({
   }
 });
 makePad({
-  element: el('light-yz'), horizontalRange: [-20, 20], verticalRange: [-20, 20],
+  element: el('light-yz'), horizontalRange: [-100, 100], verticalRange: [-100, 100],
   getHorizontal: () => lighting.z, getVertical: () => lighting.y,
   set: (horizontal, vertical) => {
     lighting.z = horizontal; lighting.y = vertical;
