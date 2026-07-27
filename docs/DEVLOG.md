@@ -386,3 +386,27 @@ VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = �
 2. **讀使用者的實際資料檔是最快的診斷**:三輪猜測不如一次 `cat runtime-data/pets/*.json`——光源 13.3m + 截斷 0.35 一眼看穿「打不到」;後續「亮度不夠」也是同一份檔案裡的 `directional: 5.3`(頂著舊上限)洩的底。
 3. **參數之間會互相鎖死**:截斷範圍(≤6m)× 位置墊(±20m)兩個各自合理的範圍組合出「怎麼調都沒反應」;範圍類參數要一起設計,上限要互相蓋得住。
 4. 退回用 `git revert` 保留過程——commit 訊息記下為什麼錯,比假裝沒發生過有價值。
+
+---
+
+## 27. v2:工具執行與審批(2026-07-28)
+
+agent 從「唯讀問答」升級為「可動手改檔案、危險操作經泡泡核准」。每寵三檔權限:唯讀(預設)/ 可寫需核准 / 全自動。
+
+### 審批管線
+
+- **codex**:app-server 的審批是 **ServerRequest**(`item/commandExecution/requestApproval`,有 id 必須回覆)——stdout 分派器加第三類處理(先前只有 response/notification)。params 自帶 codex 寫好的中文 `reason` + 完整 `command`,泡泡描述零加工。回 `{decision:"accept"|"decline"}`。未知的 ServerRequest 一律自動 decline,絕不讓 server 掛著等。
+- **claude**:`--permission-prompt-tool` 把權限詢問導向隨 app 附帶的 MCP 腳本(`permPromptServer.mjs`),腳本經本機 unix socket(隨機路徑+token)回連 main;每 turn 一份 mcp-config(env 帶 turnKey 做路由)。回 `{"behavior":"allow"|"deny"}`。
+- **bridge**:`respondApproval(petId, requestId, allow)`;**等審批時看門狗暫停**(等人點頭不是卡死,5 分鐘硬中斷不可誤殺);泡泡新增審批區塊(黃底描述 + 允許/拒絕鈕)。
+
+### 三個實測打臉的假設(全靠 e2e 抓)
+
+1. **同 server 內 re-resume 換不了權限**:對已載入 thread 重新 `thread/resume` 帶新 sandbox,回應顯示 sandbox 仍是舊值——參數被靜默忽略。**全新 server 的 resume 才會套新參數**(sandbox/approval 都換、context 保留)→ 權限變更 = 重啟 app-server 再 resume(~1 秒,罕見操作可接受)。
+2. **`on-request` 不保證詢問**:它是「模型自行判斷」,workspace 內的寫入常直接做(同 prompt 一次會問一次不問)。`ask` 的語意要保證詢問 → 改用 **`untrusted`**(只放行安全唯讀指令,其餘一律審批),allow/deny 兩向實測穩定。
+3. **bridge 回存 sessionId 會洗掉 agent 設定**:session 事件的持久化整包覆寫 `agent`,model/effort/permission 全丟——自 model 功能上線就潛伏,selftest 加了「回存不洗設定」斷言後修正(展開既有設定再蓋 sessionId)。
+
+### 驗證
+
+mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 項 + claude e2e 11 項(各含審批 allow→檔案存在、deny→無檔案)全 PASS;無殭屍行程;typecheck/build 過。
+
+**教訓**:官方枚舉值的「字面意思」不等於「行為保證」——`on-request` 聽起來像會問,實際是模型裁量。安全語意(必問)要選有硬保證的選項(`untrusted`),並用 e2e 把保證釘死。
