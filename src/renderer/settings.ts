@@ -53,7 +53,9 @@ function renderWorkSettings(): void {
   (el('agent-kind') as HTMLSelectElement).value = profile?.agent?.kind ?? 'codex';
   void renderAgentModelOptions(profile?.agent?.model ?? '', profile?.agent?.effort ?? '');
   input('agent-session-id').value = profile?.agent?.sessionId ?? '';
-  input('pet-enabled').checked = profile?.enabled !== false;
+  el('pet-enabled-toggle').textContent = profile?.enabled !== false
+    ? '😴 讓這隻寵物休息（釋放資源）'
+    : '⏰ 喚醒這隻寵物';
   const path = el('workspace-path');
   path.textContent = profile?.workspacePath ?? '尚未選擇工作目錄';
   path.classList.toggle('empty', !profile?.workspacePath);
@@ -200,10 +202,11 @@ el('agent-model').addEventListener('change', () => {
 el('agent-effort').addEventListener('change', () => void submitAgentBinding());
 input('agent-session-id').addEventListener('change', () => void submitAgentBinding());
 
-input('pet-enabled').addEventListener('change', async () => {
+el('pet-enabled-toggle').addEventListener('click', async () => {
   const profile = selectedProfile();
   if (!profile) return;
-  await window.pet.updatePetMeta(profile.id, { enabled: input('pet-enabled').checked });
+  await window.pet.updatePetMeta(profile.id, { enabled: profile.enabled === false });
+  // 按鈕文字由 onPetProfiles → syncProfiles → renderWorkSettings 自動更新
 });
 
 el('change-workspace').addEventListener('click', async () => {
