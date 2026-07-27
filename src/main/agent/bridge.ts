@@ -6,6 +6,7 @@ export interface AgentPetProfile {
   id: string;
   workspacePath?: string;
   agent?: AgentBinding;
+  persona?: string;
 }
 
 export interface AgentBridgeDeps {
@@ -105,20 +106,20 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       if (!state.sessionId) {
         const resumeId = profile.agent?.kind === kind ? profile.agent?.sessionId : undefined;
         try {
-          state.sessionId = await provider.startSession({ workdir: profile.workspacePath, resumeId });
+          state.sessionId = await provider.startSession({ workdir: profile.workspacePath, resumeId, persona: profile.persona });
         } catch (error) {
           if (resumeId) {
             // resume 失敗策略:清掉舊 id、開全新 session(設計 §8 定案)
             console.log(`[agent] resume 失敗,改開新 session:${String(error)}`);
             deps.updatePet(petId, { agent: { kind } });
-            state.sessionId = await provider.startSession({ workdir: profile.workspacePath });
+            state.sessionId = await provider.startSession({ workdir: profile.workspacePath, persona: profile.persona });
           } else {
             throw error;
           }
         }
       }
       // startSession 回傳的是 handle,不持久化;真 id 只從 session 事件回存
-      const turnOpts = { model: profile.agent?.model, effort: profile.agent?.effort };
+      const turnOpts = { model: profile.agent?.model, effort: profile.agent?.effort, persona: profile.persona };
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
         lastOutput = Date.now();
         noticed = false;

@@ -29,8 +29,8 @@ export function createCodexProvider(): AgentProvider {
   let initialized: Promise<void> | null = null;
   let nextId = 1;
   const pending = new Map<number, { resolve: (msg: JsonRpcMessage) => void; timer: NodeJS.Timeout }>();
-  /** threadId → workdir(crash 後 resume 用)。 */
-  const sessions = new Map<string, string>();
+  /** threadId → { workdir, persona }(crash 後 resume 用)。 */
+  const sessions = new Map<string, { workdir: string; persona?: string }>();
   /** 本世代 server 已載入(start/resume 過)的 thread;server 重啟後清空。 */
   const loadedThreads = new Set<string>();
   /** threadId → 進行中 turn 的通知處理器(單寵單 turn,一 thread 至多一個)。 */
@@ -112,15 +112,19 @@ export function createCodexProvider(): AgentProvider {
   /** v1 純問答的 thread 參數(唯讀沙箱、永不 approval)。 */
   const READONLY = { sandbox: 'read-only', approvalPolicy: 'never' } as const;
 
-  async function loadThread(threadId: string | null, workdir: string): Promise<string> {
+  async function loadThread(threadId: string | null, workdir: string, persona?: string): Promise<string> {
     await ensureServer();
+    // 角色個性:官方 developerInstructions 欄位(thread 建立/恢復時注入;改個性後重啟或 crash-resume 生效)
+    const dev = persona
+      ? { developerInstructions: `你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${persona}` }
+      : {};
     if (threadId) {
-      const res = await request('thread/resume', { threadId, cwd: workdir, ...READONLY });
+      const res = await request('thread/resume', { threadId, cwd: workdir, ...READONLY, ...dev });
       if (res.error) throw new Error(`thread/resume 失敗:${res.error.message ?? '未知'}`);
       loadedThreads.add(threadId);
       return threadId;
     }
-    const res = await request('thread/start', { cwd: workdir, ...READONLY });
+    const res = await request('thread/start', { cwd: workdir, ...READONLY, ...dev });
     if (res.error) throw new Error(`thread/start 失敗:${res.error.message ?? '未知'}`);
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
     if (!id) throw new Error('thread/start 未回傳 thread id');
@@ -131,14 +135,15 @@ export function createCodexProvider(): AgentProvider {
   return {
     kind: 'codex',
     async startSession(opts) {
-      const threadId = await loadThread(opts.resumeId ?? null, opts.workdir);
-      sessions.set(threadId, opts.workdir);
+      const threadId = await loadThread(opts.resumeId ?? null, opts.workdir, opts.persona);
+      sessions.set(threadId, { workdir: opts.workdir, persona: opts.persona });
       return threadId;
     },
     async *sendMessage(threadId, text, opts): AsyncIterable<AgentEvent> {
       // crash 後的 lazy 重啟:thread 不在本世代 server 裡就先 resume
       if (!loadedThreads.has(threadId)) {
-        await loadThread(threadId, sessions.get(threadId) ?? process.cwd());
+        const saved = sessions.get(threadId);
+        await loadThread(threadId, saved?.workdir ?? process.cwd(), saved?.persona ?? opts?.persona);
       }
 
       const buffer: AgentEvent[] = [];

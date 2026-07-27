@@ -76,6 +76,8 @@ export function createClaudeProvider(): AgentProvider {
       ];
       if (opts?.model) args.push('--model', opts.model);
       if (opts?.effort) args.push('--effort', opts.effort);
+      // 角色個性:附加到 system prompt(逐 turn 注入,設定面板改完下一句就生效)
+      if (opts?.persona) args.push('--append-system-prompt', `你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${opts.persona}`);
       const isRealId = !sessionId.startsWith('pending-');
       if (isRealId) args.push('--resume', sessionId);
 

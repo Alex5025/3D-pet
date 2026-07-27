@@ -42,6 +42,8 @@ interface PetProfile {
   /** 舊欄位,已遷移為 agent(保留不刪,循遷移慣例)。 */
   codexSessionId?: string;
   agent?: AgentBinding;
+  /** 角色個性設定(自由文字):注入 agent 對話的 system prompt;v3 的表演風格也會用它。 */
+  persona?: string;
   vrmPath?: string;
   state?: PetState;
   lighting?: Lighting;
@@ -584,6 +586,7 @@ app.whenReady().then(async () => {
     const next: Partial<PetProfile> = {};
     if (typeof patch.name === 'string') next.name = patch.name.trim() || profile.name;
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
+    if (typeof patch.persona === 'string') next.persona = patch.persona.trim().slice(0, 4000) || undefined;
     if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude')) {
       const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
       const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';

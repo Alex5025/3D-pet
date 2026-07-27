@@ -48,6 +48,8 @@ export interface PetProfile {
   /** 舊欄位,已遷移為 agent。 */
   codexSessionId?: string;
   agent?: AgentBinding;
+  /** 角色個性設定(自由文字):注入 agent 對話的 system prompt;v3 的表演風格也會用它。 */
+  persona?: string;
   vrmPath?: string;
   state?: PetState;
   lighting?: Lighting;
@@ -76,7 +78,7 @@ const api = {
   selectPet: (petId: string): Promise<PetProfile | null> => ipcRenderer.invoke('select-pet', petId),
   updatePetMeta: (
     petId: string,
-    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent'>
+    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent' | 'persona'>
   ): Promise<PetProfile | null> => ipcRenderer.invoke('update-pet-meta', petId, patch),
   onPetProfiles: (callback: (pets: PetProfile[], selectedPetId: string) => void) =>
     ipcRenderer.on('pet-profiles-apply', (_event, pets, selectedPetId) => callback(pets, selectedPetId)),

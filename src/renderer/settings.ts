@@ -47,6 +47,13 @@ function renderPetSelector(): void {
   (el('remove-pet') as HTMLButtonElement).disabled = profiles.length <= 1;
 }
 
+/* 角色設定(個性):自由文字,注入 agent 對話的 system prompt(claude 逐 turn;codex 於 thread 建立/恢復)。 */
+el('pet-persona').addEventListener('change', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  await window.pet.updatePetMeta(profile.id, { persona: (el('pet-persona') as HTMLTextAreaElement).value });
+});
+
 /** 預設姿勢下拉(角色分頁):清單來自 motions/,即選即播(與右鍵選單同一條 main 端邏輯)。 */
 let motionList: string[] | null = null;
 
@@ -92,6 +99,7 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
   wardrobeStates = { ...(profile.wardrobe ?? {}) };
   renderPetSelector();
   renderWorkSettings();
+  (el('pet-persona') as HTMLTextAreaElement).value = profile.persona ?? '';
   void renderDefaultPose();
   render();
   const front = el('origin-xz');

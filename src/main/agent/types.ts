@@ -22,13 +22,14 @@ export interface AgentProvider {
    * handle 不持久化——可持久化的真 id 由 sendMessage 的 `session` 事件給(codex 的 handle 即真 threadId;
    * claude 新 session 在首 turn 才拿得到 id,handle 是暫時代號)。resume 失敗應丟例外,由 bridge 清 id 重開。
    */
-  startSession(opts: { workdir: string; resumeId?: string }): Promise<string>;
+  startSession(opts: { workdir: string; resumeId?: string; persona?: string }): Promise<string>;
   /**
    * 送一句話,串流回統一事件。契約:結尾必須恰好 yield 一個終結事件(done 或 error);
    * 若 provider 因故無法保證(如行程被殺),bridge 會補發。
    * opts.model / opts.effort 為每寵設定(空 = CLI 預設);兩家都支援逐 turn 指定。
+   * opts.persona = 角色個性(claude 逐 turn 注入 --append-system-prompt;codex 在 thread 建立/恢復時吃 developerInstructions)。
    */
-  sendMessage(sessionId: string, text: string, opts?: { model?: string; effort?: string }): AsyncIterable<AgentEvent>;
+  sendMessage(sessionId: string, text: string, opts?: { model?: string; effort?: string; persona?: string }): AsyncIterable<AgentEvent>;
   /** 中斷該 session 進行中的 turn(codex: turn/interrupt;claude: 殺該 turn 的行程)。 */
   cancel(sessionId: string): Promise<void>;
   /** v2:回覆 approval 請求。v1 的 provider 可丟 not implemented。 */
