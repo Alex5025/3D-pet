@@ -162,10 +162,18 @@ window.pet.onSelectedPet((petId) => {
 });
 
 /* ---------- 光源與晃動 ---------- */
+/* 點光源是線性衰減(intensity/距離),光源拉遠時 2π 上限根本不夠亮——
+ * 點光源模式把強度滑桿上限放大到 12π;切回平行光時上限復原並夾回(平行光 12π 會過曝)。 */
+const DIR_INTENSITY_MAX = Math.PI * 2;
+const POINT_INTENSITY_MAX = Math.PI * 12;
+
 for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
   button.addEventListener('click', () => {
     if (!selectedPetId) return;
     lighting.type = button.dataset['t'] as 'directional' | 'point';
+    if (lighting.type === 'directional' && lighting.directional > DIR_INTENSITY_MAX) {
+      lighting.directional = DIR_INTENSITY_MAX;
+    }
     window.pet.setLighting(selectedPetId, lighting);
     render();
   });
@@ -307,6 +315,8 @@ function render(): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
     button.classList.toggle('active', button.dataset['t'] === lighting.type);
   }
+  // 主光強度上限依光源類型切換(點光源要抵銷距離衰減,需要大得多的上限)
+  input('directional').max = String(lighting.type === 'point' ? POINT_INTENSITY_MAX : DIR_INTENSITY_MAX);
   for (const key of LIGHT_KEYS) {
     input(key).value = String(lighting[key]);
     el(`${key}-val`).textContent = key === 'shade'
