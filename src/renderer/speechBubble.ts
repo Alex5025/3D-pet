@@ -2,7 +2,7 @@ import './speechBubble.css';
 
 export interface SpeechBubble {
   element: HTMLElement;
-  input: HTMLInputElement;
+  input: HTMLTextAreaElement;
   isVisible: () => boolean;
   containsPoint: (x: number, y: number) => boolean;
   setPetName: (name: string) => void;
@@ -55,14 +55,20 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const label = document.createElement('label');
   label.textContent = `${options.petName ?? '寵物'}：想對我說什麼？`;
 
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = '輸入訊息…';
-  input.maxLength = 120;
+  // textarea 才能承載多行(Shift+Enter 換行);高度隨內容自動增長,上限由 CSS max-height 管
+  const input = document.createElement('textarea');
+  input.rows = 1;
+  input.placeholder = '輸入訊息…(Shift+Enter 換行)';
+  input.maxLength = 1000;
   input.autocomplete = 'off';
   const inputId = `pet-speech-input-${options.petId ?? 'default'}`;
   label.htmlFor = inputId;
   input.id = inputId;
+  const autosize = (): void => {
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`; // CSS max-height 封頂,超過轉捲動
+  };
+  input.addEventListener('input', autosize);
 
   // 回覆區 + 狀態列(含停止鈕):agent 對話的顯示面;泡泡是笨元件,事件對映由 main.ts 做。
   const reply = document.createElement('div');
@@ -93,8 +99,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   });
   input.addEventListener('blur', () => options.releaseInputFocus?.());
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !busy && input.value.trim()) {
-      options.onSend?.(input.value.trim());
+    if (event.key === 'Enter') {
+      // Shift+Enter = 換行(交給 textarea 預設行為);IME 選字的 Enter(注音/日文)不可觸發送出
+      if (event.shiftKey || event.isComposing) return;
+      event.preventDefault();
+      if (!busy && input.value.trim()) options.onSend?.(input.value.trim());
       return;
     }
     // busy 中 input 已 disabled 收不到 Esc,中斷以停止鈕為主;這裡保留非 busy 的收合行為。
@@ -196,6 +205,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     beginTurn: () => {
       busy = true;
       input.value = '';
+      input.style.height = 'auto'; // 多行送出後收回單行高度
       input.disabled = true; // 會觸發 blur → releaseInputFocus,running 中不需要鍵盤
       reply.textContent = '';
       reply.classList.remove('open');

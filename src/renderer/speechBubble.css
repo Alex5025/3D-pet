@@ -139,34 +139,38 @@
   letter-spacing: 0.02em;
 }
 
-.pet-speech-bubble input {
+.pet-speech-bubble textarea {
   box-sizing: border-box;
+  display: block;
   width: 100%;
   min-width: 0;
+  max-height: 108px; /* 約 5 行,超過轉捲動(autosize 以此封頂) */
   padding: 10px 12px;
+  overflow-y: auto;
   color: #2f2a38;
   font: inherit;
   font-size: 14px;
-  line-height: 1.2;
+  line-height: 1.4;
   background: rgba(248, 246, 251, 0.96);
   border: 1px solid rgba(111, 93, 128, 0.28);
   border-radius: 11px;
   outline: none;
+  resize: none;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease;
 }
 
-.pet-speech-bubble input::placeholder {
+.pet-speech-bubble textarea::placeholder {
   color: #8d8496;
 }
 
-.pet-speech-bubble input:focus {
+.pet-speech-bubble textarea:focus {
   border-color: #9272b0;
   box-shadow: 0 0 0 3px rgba(146, 114, 176, 0.18);
 }
 
-.pet-speech-bubble input:disabled {
+.pet-speech-bubble textarea:disabled {
   color: #8d8496;
   background: rgba(240, 238, 244, 0.9);
 }
@@ -236,7 +240,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pet-speech-bubble,
-  .pet-speech-bubble input {
+  .pet-speech-bubble textarea {
     transition: none;
   }
 }
