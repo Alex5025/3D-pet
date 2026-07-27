@@ -584,7 +584,15 @@ app.whenReady().then(async () => {
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
     if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude')) {
       const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
-      next.agent = sessionId ? { kind: patch.agent.kind, sessionId } : { kind: patch.agent.kind };
+      const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
+      const effort = typeof patch.agent.effort === 'string' &&
+        ['low', 'medium', 'high', 'xhigh', 'max'].includes(patch.agent.effort) ? patch.agent.effort : '';
+      next.agent = {
+        kind: patch.agent.kind,
+        ...(sessionId ? { sessionId } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {})
+      };
       // 換 agent 種類 = 換家,不共享 session:關掉舊的
       if (profile.agent?.kind && profile.agent.kind !== patch.agent.kind) void bridge?.closePetSession(id);
     }

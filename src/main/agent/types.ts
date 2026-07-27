@@ -17,8 +17,9 @@ export interface AgentProvider {
   /**
    * 送一句話,串流回統一事件。契約:結尾必須恰好 yield 一個終結事件(done 或 error);
    * 若 provider 因故無法保證(如行程被殺),bridge 會補發。
+   * opts.model / opts.effort 為每寵設定(空 = CLI 預設);兩家都支援逐 turn 指定。
    */
-  sendMessage(sessionId: string, text: string): AsyncIterable<AgentEvent>;
+  sendMessage(sessionId: string, text: string, opts?: { model?: string; effort?: string }): AsyncIterable<AgentEvent>;
   /** 中斷該 session 進行中的 turn(codex: turn/interrupt;claude: 殺該 turn 的行程)。 */
   cancel(sessionId: string): Promise<void>;
   /** v2:回覆 approval 請求。v1 的 provider 可丟 not implemented。 */

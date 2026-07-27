@@ -116,7 +116,8 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         }
       }
       // startSession 回傳的是 handle,不持久化;真 id 只從 session 事件回存
-      for await (const event of provider.sendMessage(state.sessionId, text)) {
+      const turnOpts = { model: profile.agent?.model, effort: profile.agent?.effort };
+      for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
         lastOutput = Date.now();
         noticed = false;
         if (event.kind === 'session') {

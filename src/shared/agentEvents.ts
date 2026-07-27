@@ -8,6 +8,10 @@ export type AgentKind = 'codex' | 'claude';
 export interface AgentBinding {
   kind: AgentKind;
   sessionId?: string;
+  /** 模型名(空 = 該 CLI 的全域預設)。codex 例:gpt-5.6-sol;claude 例:claude-fable-5 或別名 opus */
+  model?: string;
+  /** 推理力度(空 = 預設):low / medium / high / xhigh / max(max 僅 claude 支援) */
+  effort?: string;
 }
 
 export type AgentEvent =

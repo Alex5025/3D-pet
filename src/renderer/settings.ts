@@ -51,6 +51,8 @@ function renderWorkSettings(): void {
   const profile = selectedProfile();
   input('pet-name').value = profile?.name ?? '';
   (el('agent-kind') as HTMLSelectElement).value = profile?.agent?.kind ?? 'codex';
+  input('agent-model').value = profile?.agent?.model ?? '';
+  (el('agent-effort') as HTMLSelectElement).value = profile?.agent?.effort ?? '';
   input('agent-session-id').value = profile?.agent?.sessionId ?? '';
   input('pet-enabled').checked = profile?.enabled !== false;
   const path = el('workspace-path');
@@ -130,10 +132,21 @@ async function submitAgentBinding(): Promise<void> {
   if (!profile) return;
   const kind = (el('agent-kind') as HTMLSelectElement).value === 'claude' ? 'claude' : 'codex';
   const sessionId = input('agent-session-id').value.trim();
-  await window.pet.updatePetMeta(profile.id, { agent: sessionId ? { kind, sessionId } : { kind } });
+  const model = input('agent-model').value.trim();
+  const effort = (el('agent-effort') as HTMLSelectElement).value;
+  await window.pet.updatePetMeta(profile.id, {
+    agent: {
+      kind,
+      ...(sessionId ? { sessionId } : {}),
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {})
+    }
+  });
 }
 
 el('agent-kind').addEventListener('change', () => void submitAgentBinding());
+input('agent-model').addEventListener('change', () => void submitAgentBinding());
+el('agent-effort').addEventListener('change', () => void submitAgentBinding());
 input('agent-session-id').addEventListener('change', () => void submitAgentBinding());
 
 input('pet-enabled').addEventListener('change', async () => {

@@ -135,7 +135,7 @@ export function createCodexProvider(): AgentProvider {
       sessions.set(threadId, opts.workdir);
       return threadId;
     },
-    async *sendMessage(threadId, text): AsyncIterable<AgentEvent> {
+    async *sendMessage(threadId, text, opts): AsyncIterable<AgentEvent> {
       // crash 後的 lazy 重啟:thread 不在本世代 server 裡就先 resume
       if (!loadedThreads.has(threadId)) {
         await loadThread(threadId, sessions.get(threadId) ?? process.cwd());
@@ -188,11 +188,11 @@ export function createCodexProvider(): AgentProvider {
       try {
         // threadId 即真 session id:每 turn 開頭補 session 事件,bridge 據此持久化(去重後只落盤一次)
         push({ kind: 'session', sessionId: threadId });
-        const res = await request(
-          'turn/start',
-          { threadId, input: [{ type: 'text', text, text_elements: [] }] },
-          120_000
-        );
+        // model / effort 是官方 TurnStartParams 欄位(v0 generate-ts 產物),逐 turn 指定、免重開 thread
+        const turnParams: Record<string, unknown> = { threadId, input: [{ type: 'text', text, text_elements: [] }] };
+        if (opts?.model) turnParams['model'] = opts.model;
+        if (opts?.effort) turnParams['effort'] = opts.effort;
+        const res = await request('turn/start', turnParams, 120_000);
         if (res.error) {
           push({ kind: 'error', message: `turn/start 失敗:${res.error.message ?? '未知'}` });
           end();

@@ -62,7 +62,7 @@ export function createClaudeProvider(): AgentProvider {
       sessions.set(handle, opts.workdir);
       return handle;
     },
-    async *sendMessage(sessionId, text): AsyncIterable<AgentEvent> {
+    async *sendMessage(sessionId, text, opts): AsyncIterable<AgentEvent> {
       const queue = new EventQueue();
       const workdir = sessions.get(sessionId);
       const env = { ...process.env };
@@ -74,6 +74,8 @@ export function createClaudeProvider(): AgentProvider {
         '--include-partial-messages',
         '--disallowedTools', '*' // v1 純問答
       ];
+      if (opts?.model) args.push('--model', opts.model);
+      if (opts?.effort) args.push('--effort', opts.effort);
       const isRealId = !sessionId.startsWith('pending-');
       if (isRealId) args.push('--resume', sessionId);
 
