@@ -6,6 +6,8 @@ import { readFile, readdir } from 'node:fs/promises';
 import type { AgentBinding } from '../shared/agentEvents';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
+import { PET_EXPRESSIONS, createPetToolsHub } from './agent/petToolsHub';
+import type { PetToolsHub } from './agent/petToolsHub';
 import { createProviders } from './agent/providers';
 import { runAgentSelftest, runClaudeE2E, runCodexE2E } from './agent/selftest';
 
@@ -77,6 +79,7 @@ const avatarIcons = new Map<string, { front: string; side: string }>();
 const wardrobeLists = new Map<string, { key: string; label: string }[]>();
 let configFlush: NodeJS.Timeout | null = null;
 let bridge: AgentBridge | null = null;
+let petToolsHub: PetToolsHub | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -447,7 +450,7 @@ function petMenu(requestedId?: string): Menu {
       }
     },
     // app.exit 不觸發 before-quit,清理要在這裡自己做(已知坑,見 DEVLOG §22)
-    { label: '結束', click: () => { bridge?.shutdownSync(); persistConfigSync(); app.exit(0); } }
+    { label: '結束', click: () => { bridge?.shutdownSync(); petToolsHub?.dispose(); persistConfigSync(); app.exit(0); } }
   ]);
 }
 
@@ -544,11 +547,35 @@ app.whenReady().then(async () => {
   }
   if (process.platform === 'darwin') app.dock?.hide();
   loadConfigSync();
+  // 寵物工具中樞(v3):agent 經 MCP 呼叫 → socket 回連這裡 → 操縱桌寵
+  petToolsHub = createPetToolsHub({
+    playMotion: async (petId, file) => {
+      if (!pets.has(petId) || !motionFiles.includes(file)) return false;
+      try {
+        win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    showExpression: (petId, name) => {
+      if (!pets.has(petId) || !(PET_EXPRESSIONS as readonly string[]).includes(name)) return false;
+      win?.webContents.send('expression-apply', petId, name);
+      return true;
+    },
+    speak: (petId, text) => {
+      const trimmed = text.trim();
+      if (!pets.has(petId) || !trimmed) return false;
+      win?.webContents.send('chat-event-apply', petId, { kind: 'text', text: `\n${trimmed.slice(0, 200)}\n` });
+      return true;
+    },
+    listMotions: () => motionFiles
+  });
   bridge = createAgentBridge({
     getPet: (id) => pets.get(id) ?? null,
     updatePet,
     send: (petId, event) => win?.webContents.send('chat-event-apply', petId, event),
-    providers: createProviders()
+    providers: createProviders(petToolsHub)
   });
   await refreshMotions();
   try {
@@ -745,5 +772,6 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => { /* 常駐 */ });
 app.on('before-quit', () => {
   bridge?.shutdownSync();
+  petToolsHub?.dispose();
   persistConfigSync();
 });

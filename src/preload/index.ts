@@ -121,6 +121,8 @@ const api = {
     ),
   onVRMAStop: (callback: (petId: string) => void) =>
     ipcRenderer.on('vrma-stop', (_event, petId) => callback(petId)),
+  onExpression: (callback: (petId: string, name: string) => void) =>
+    ipcRenderer.on('expression-apply', (_event, petId, name) => callback(petId, name)),
   getDefaultPose: async (petId: string): Promise<ArrayBuffer | null> => {
     const bytes: Uint8Array | null = await ipcRenderer.invoke('get-default-pose', petId);
     return bytes ? toArrayBuffer(bytes) : null;

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { app } from 'electron';
 import type { AgentEvent, AgentProvider } from './types';
+import type { PetToolsHub } from './petToolsHub';
 
 /**
  * ClaudeProvider:每 turn spawn `claude -p`(stream-json),吃本機 Claude Code CLI 的訂閱登入。
@@ -51,7 +52,7 @@ function killGracefully(child: ChildProcess): void {
   child.once('exit', () => clearTimeout(hardKill));
 }
 
-export function createClaudeProvider(): AgentProvider {
+export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvider {
   /** handle → workdir(spawn 每 turn 都要 cwd;handle 是 resume 的真 id 或新 session 的暫時代號)。 */
   const sessions = new Map<string, string>();
   /** 進行中 turn 的子行程,鍵 = handle;init 拿到真 id 後補別名(cancel 用哪個 id 都找得到)。 */
@@ -85,6 +86,11 @@ export function createClaudeProvider(): AgentProvider {
         let payload: Record<string, unknown>;
         try { payload = JSON.parse(buffer.slice(0, nl)) as Record<string, unknown>; } catch { socket.destroy(); return; }
         if (payload['token'] !== permToken) { socket.destroy(); return; }
+        // 寵物工具(我們自己的 MCP)的權限詢問直接放行,不打擾使用者
+        if (String(payload['toolName'] ?? '').startsWith('mcp__pettools__')) {
+          socket.write(JSON.stringify({ behavior: 'allow', updatedInput: (payload['input'] ?? {}) }) + '\n');
+          return;
+        }
         const queue = approvalQueues.get(String(payload['turnKey']));
         if (!queue) {
           socket.write(JSON.stringify({ behavior: 'deny', message: '對話已結束' }) + '\n');
@@ -105,19 +111,26 @@ export function createClaudeProvider(): AgentProvider {
     permServer.listen(permSocketPath);
   }
 
-  /** 每 turn 一份 mcp-config(env 帶 turnKey 做審批路由)。 */
-  function writePermConfig(turnKey: string): string {
-    const script = join(app.getAppPath(), 'src/main/agent/permPromptServer.mjs');
-    const path = join(permDir, `${turnKey}.json`);
-    writeFileSync(path, JSON.stringify({
-      mcpServers: {
-        vrmpet: {
-          command: 'node',
-          args: [script],
-          env: { VRM_PET_PERM_SOCKET: permSocketPath, VRM_PET_PERM_TOKEN: permToken, VRM_PET_TURN_KEY: turnKey }
-        }
-      }
-    }));
+  /** 每 turn 一份 mcp-config:審批 server(ask 模式)+ 寵物工具 server(hub 存在時)。 */
+  function writeMcpConfig(turnKey: string | null, petId: string | undefined): string | null {
+    const servers: Record<string, unknown> = {};
+    if (turnKey) {
+      servers['vrmpet'] = {
+        command: 'node',
+        args: [join(app.getAppPath(), 'src/main/agent/permPromptServer.mjs')],
+        env: { VRM_PET_PERM_SOCKET: permSocketPath, VRM_PET_PERM_TOKEN: permToken, VRM_PET_TURN_KEY: turnKey }
+      };
+    }
+    if (hub && petId) {
+      servers['pettools'] = {
+        command: 'node',
+        args: [hub.scriptPath],
+        env: { VRM_PET_TOOLS_SOCKET: hub.socketPath, VRM_PET_TOOLS_TOKEN: hub.token, VRM_PET_PET_ID: petId }
+      };
+    }
+    if (!Object.keys(servers).length) return null;
+    const path = join(permDir, `${turnKey ?? `plain-${++permSeq}`}.json`);
+    writeFileSync(path, JSON.stringify({ mcpServers: servers }));
     return path;
   }
 
@@ -146,16 +159,26 @@ export function createClaudeProvider(): AgentProvider {
       if (permission === 'ask') {
         ensurePermServer();
         turnKey = `turn-${++turnSeq}`;
-        args.push('--permission-prompt-tool', 'mcp__vrmpet__approve', '--mcp-config', writePermConfig(turnKey));
+        args.push('--permission-prompt-tool', 'mcp__vrmpet__approve');
       } else if (permission === 'auto') {
         args.push('--permission-mode', 'bypassPermissions');
+      } else if (hub && opts?.petId) {
+        // 唯讀但保留寵物工具:dontAsk 靜默拒絕其他工具,白名單放行 pettools
+        args.push('--permission-mode', 'dontAsk', '--allowedTools', 'mcp__pettools__*', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
       } else {
         args.push('--disallowedTools', '*'); // 唯讀:純問答
       }
+      const mcpConfig = writeMcpConfig(turnKey, opts?.petId);
+      if (mcpConfig) args.push('--mcp-config', mcpConfig);
       if (opts?.model) args.push('--model', opts.model);
       if (opts?.effort) args.push('--effort', opts.effort);
-      // 角色個性:附加到 system prompt(逐 turn 注入,設定面板改完下一句就生效)
-      if (opts?.persona) args.push('--append-system-prompt', `你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${opts.persona}`);
+      // 角色個性 + 寵物工具提示:附加到 system prompt(逐 turn 注入,設定面板改完下一句就生效)
+      {
+        const parts: string[] = [];
+        if (opts?.persona) parts.push(`你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${opts.persona}`);
+        if (hub && opts?.petId) parts.push('你可以呼叫 pet_play_motion(播全身動作)、pet_show_expression(切臉部表情)、pet_speak(在泡泡說話)配合情緒表演,不必等使用者要求。');
+        if (parts.length) args.push('--append-system-prompt', parts.join('\n'));
+      }
       const isRealId = !sessionId.startsWith('pending-');
       if (isRealId) args.push('--resume', sessionId);
 

@@ -113,13 +113,13 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       if (!state.sessionId) {
         const resumeId = profile.agent?.kind === kind ? profile.agent?.sessionId : undefined;
         try {
-          state.sessionId = await provider.startSession({ workdir: profile.workspacePath, resumeId, persona: profile.persona });
+          state.sessionId = await provider.startSession({ workdir: profile.workspacePath, resumeId, persona: profile.persona, petId });
         } catch (error) {
           if (resumeId) {
             // resume 失敗策略:清掉舊 id、開全新 session(設計 §8 定案)
             console.log(`[agent] resume 失敗,改開新 session:${String(error)}`);
             deps.updatePet(petId, { agent: { ...profile.agent, kind, sessionId: undefined } });
-            state.sessionId = await provider.startSession({ workdir: profile.workspacePath, persona: profile.persona });
+            state.sessionId = await provider.startSession({ workdir: profile.workspacePath, persona: profile.persona, petId });
           } else {
             throw error;
           }
@@ -130,7 +130,8 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         model: profile.agent?.model,
         effort: profile.agent?.effort,
         persona: profile.persona,
-        permission: profile.agent?.permission
+        permission: profile.agent?.permission,
+        petId
       };
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
         state.lastActivity = Date.now();

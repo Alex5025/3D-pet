@@ -371,6 +371,7 @@ window.pet.onVRMA((petId, buffer) => {
   );
 });
 window.pet.onVRMAStop((petId) => runtimes.get(petId)?.viewer.stopVRMA());
+window.pet.onExpression((petId, name) => runtimes.get(petId)?.viewer.setExpression(name));
 window.pet.onState((petId, state) => {
   const runtime = runtimes.get(petId);
   if (!runtime) return;

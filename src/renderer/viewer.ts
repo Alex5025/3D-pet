@@ -46,6 +46,8 @@ export interface Viewer {
   alphaMax: (pts: Array<[number, number]>) => number;
   /** 喚醒渲染:外部狀態變更(拖曳/縮放/面板改位置)時呼叫,恢復全速;idle 會自動節流省電 */
   wake: () => void;
+  /** 切換情緒表情(官方 expressionManager,VRM 標準 preset:happy/angry/sad/relaxed/surprised;neutral=清除) */
+  setExpression: (name: string) => void;
   /** 播放 VRMA 動作(官方 three-vrm-animation);播一次,播完停在最後一幀,不循環 */
   playVRMA: (buf: ArrayBuffer) => Promise<void>;
   /** 停止動作,回到靜止姿勢 */
@@ -634,5 +636,15 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.domElement.remove();
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, enableRootMotionSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, playVRMA, stopVRMA, dispose };
+  /** 情緒表情(官方 VRMExpressionManager.setValue;vrm.update 每幀套用)。互斥:設新情緒時清掉其他情緒 preset。 */
+  function setExpression(name: string): void {
+    const manager = vrm?.expressionManager;
+    if (!manager) return;
+    const emotions = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
+    if (name !== 'neutral' && !emotions.includes(name)) return;
+    for (const emotion of emotions) manager.setValue(emotion, emotion === name ? 1.0 : 0.0);
+    wake();
+  }
+
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, enableRootMotionSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, setExpression, playVRMA, stopVRMA, dispose };
 }

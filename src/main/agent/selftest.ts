@@ -8,6 +8,7 @@ import { createAgentBridge } from './bridge';
 import { createClaudeProvider } from './claudeProvider';
 import { createCodexProvider } from './codexProvider';
 import { createMockProvider } from './mockProvider';
+import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
 
 /**
  * Headless 回歸自驗(VRM_PET_AGENT_SELFTEST=1 觸發,不開視窗):
@@ -59,7 +60,8 @@ export async function runClaudeE2E(): Promise<boolean> {
     console.log(`[agent-e2e:claude] ${ok ? 'ok' : 'FAIL'} - ${name}`);
     if (!ok) failures.push(name);
   };
-  const h = makeHarness('claude', createClaudeProvider());
+  const { hub, calls } = makeRecordingHub();
+  const h = makeHarness('claude', createClaudeProvider(hub));
 
   // 1. 一問一答 + session 回存
   h.bridge.chatSend('e2e', '請只回答數字,不要其他文字:7+7=?');
@@ -98,10 +100,40 @@ export async function runClaudeE2E(): Promise<boolean> {
   // 4. 審批流(permission=ask;permission-prompt MCP 腳本 + socket 回連)
   await runApprovalE2E('審批', h, check);
 
+  // 5. 寵物工具(readonly 下 dontAsk+白名單放行 pettools)
+  await runPetToolsE2E(h, calls, check);
+
   await h.bridge.dispose();
+  hub.dispose();
   const pass = failures.length === 0;
   console.log(`[agent-e2e:claude] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
   return pass;
+}
+
+/** 記錄型寵物工具 hub(e2e 用):工具呼叫只記錄不真的動桌寵。 */
+function makeRecordingHub(): { hub: PetToolsHub; calls: string[] } {
+  const calls: string[] = [];
+  const hub = createPetToolsHub({
+    playMotion: async (_petId, file) => { calls.push(`motion:${file}`); return true; },
+    showExpression: (_petId, name) => { calls.push(`expr:${name}`); return true; },
+    speak: (_petId, text) => { calls.push(`speak:${text}`); return true; },
+    listMotions: () => ['01-全身展示.vrma', '04-揮手.vrma']
+  });
+  return { hub, calls };
+}
+
+/** 寵物工具 e2e(兩家共用):readonly 權限下請 agent 切表情 → hub 收到呼叫。 */
+async function runPetToolsE2E(
+  h: ReturnType<typeof makeHarness>,
+  calls: string[],
+  check: (name: string, ok: boolean) => void
+): Promise<void> {
+  h.profile.agent = { ...h.profile.agent!, permission: undefined } as typeof h.profile.agent; // 回到 readonly
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請呼叫 pet_show_expression 工具把你的表情切換成 happy,完成後告訴我結果。');
+  await h.waitTerminal(1);
+  check('寵物工具:hub 收到表情呼叫', calls.some((c) => c === 'expr:happy'));
+  check('寵物工具:turn 正常完成', h.events.some((e) => e.kind === 'done' && e.ok));
 }
 
 /** 審批流 e2e(兩家共用):permission=ask → 要求建檔 → 泡泡事件 → 允許/拒絕 → 驗檔案。 */
@@ -151,7 +183,8 @@ export async function runCodexE2E(): Promise<boolean> {
     console.log(`[agent-e2e:codex] ${ok ? 'ok' : 'FAIL'} - ${name}`);
     if (!ok) failures.push(name);
   };
-  const h = makeHarness('codex', createCodexProvider());
+  const { hub, calls } = makeRecordingHub();
+  const h = makeHarness('codex', createCodexProvider(hub));
 
   // 1. 一問一答 + threadId 回存
   h.bridge.chatSend('e2e', '請只回答數字,不要其他文字:8+8=?');
@@ -192,10 +225,14 @@ export async function runCodexE2E(): Promise<boolean> {
   await h.waitTerminal(1);
   check('crash 後自動重啟 + resume(答出 8+8)', h.textOf().includes('8+8'));
 
-  // 5. 審批流(permission=ask;權限變更會觸發 thread re-resume,一併驗證)
+  // 5. 審批流(permission=ask;權限變更會觸發重啟+resume,一併驗證)
   await runApprovalE2E('審批', h, check);
 
+  // 6. 寵物工具(thread config 掛 MCP + elicitation 自動放行)
+  await runPetToolsE2E(h, calls, check);
+
   await h.bridge.dispose();
+  hub.dispose();
   const pass = failures.length === 0;
   console.log(`[agent-e2e:codex] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
   return pass;

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { AgentEvent, AgentModelInfo, AgentPermission, AgentProvider } from './types';
+import type { PetToolsHub } from './petToolsHub';
 
 /**
  * CodexProvider:長駐 `codex app-server`(NDJSON JSON-RPC over stdio,官方給自訂 client 的介面)。
@@ -24,13 +25,13 @@ interface JsonRpcMessage {
 
 type NotificationHandler = (method: string, params: Record<string, unknown>) => void;
 
-export function createCodexProvider(): AgentProvider {
+export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvider {
   let child: ChildProcess | null = null;
   let initialized: Promise<void> | null = null;
   let nextId = 1;
   const pending = new Map<number, { resolve: (msg: JsonRpcMessage) => void; timer: NodeJS.Timeout }>();
-  /** threadId → { workdir, persona, permission }(crash 後 resume 與權限變更重載用)。 */
-  const sessions = new Map<string, { workdir: string; persona?: string; permission: AgentPermission }>();
+  /** threadId → { workdir, persona, permission, petId }(crash 後 resume 與權限變更重載用)。 */
+  const sessions = new Map<string, { workdir: string; persona?: string; permission: AgentPermission; petId?: string }>();
   /** requestId → 待回覆的審批 ServerRequest(rpc id + method,回覆形狀依 method 而異)。 */
   const pendingApprovals = new Map<string, { rpcId: number; method: string }>();
   /** 本世代 server 已載入(start/resume 過)的 thread;server 重啟後清空。 */
@@ -124,6 +125,22 @@ export function createCodexProvider(): AgentProvider {
     const params = msg.params ?? {};
     const threadId = (params['threadId'] ?? params['conversationId']) as string | undefined;
     const handler = threadId ? turnHandlers.get(threadId) : undefined;
+    // 寵物工具的 MCP 呼叫核准(mcpServer/elicitation/request)自動放行——那是我們自己的工具
+    if (msg.method === 'mcpServer/elicitation/request') {
+      if (params['serverName'] === 'pettools') {
+        respondToServer(msg.id!, { action: 'accept', content: {}, _meta: null });
+        return;
+      }
+      // 使用者自己在 config.toml 掛的其他 MCP server → 轉泡泡審批(message 是人話)
+      if (handler && msg.id !== undefined) {
+        const requestId = `appr-${msg.id}`;
+        pendingApprovals.set(requestId, { rpcId: msg.id, method: msg.method });
+        handler('__approval__', { requestId, description: String(params['message'] ?? 'MCP 工具呼叫請求') });
+      } else if (msg.id !== undefined) {
+        respondToServer(msg.id, { action: 'decline', content: null, _meta: null });
+      }
+      return;
+    }
     const known = [
       'item/commandExecution/requestApproval',
       'item/fileChange/requestApproval',
@@ -161,20 +178,27 @@ export function createCodexProvider(): AgentProvider {
         ? { sandbox: 'workspace-write', approvalPolicy: 'never' }
         : { sandbox: 'read-only', approvalPolicy: 'never' };
 
-  async function loadThread(threadId: string | null, workdir: string, persona: string | undefined, permission: AgentPermission): Promise<string> {
+  async function loadThread(threadId: string | null, workdir: string, persona: string | undefined, permission: AgentPermission, petId?: string): Promise<string> {
     await ensureServer();
     const perm = permissionParams(permission);
-    // 角色個性:官方 developerInstructions 欄位(thread 建立/恢復時注入;改個性後重啟或 crash-resume 生效)
-    const dev = persona
-      ? { developerInstructions: `你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${persona}` }
+    // 角色個性 + 寵物工具提示:官方 developerInstructions 欄位(thread 建立/恢復時注入)
+    const parts: string[] = ['你是一隻桌面寵物。'];
+    if (persona) parts.push(`以下是你的角色設定,請以此個性回應:\n${persona}`);
+    if (hub && petId) parts.push('你可以呼叫 pet_play_motion(播全身動作)、pet_show_expression(切臉部表情)、pet_speak(在泡泡說話)配合情緒表演,不必等使用者要求。');
+    const dev = parts.length > 1 ? { developerInstructions: parts.join('\n') } : {};
+    // 寵物工具 MCP:以 thread config 覆寫掛載(v3.0 實測可行)
+    const mcp = hub && petId
+      ? { config: { mcp_servers: { pettools: { command: 'node', args: [hub.scriptPath], env: {
+          VRM_PET_TOOLS_SOCKET: hub.socketPath, VRM_PET_TOOLS_TOKEN: hub.token, VRM_PET_PET_ID: petId
+        } } } } }
       : {};
     if (threadId) {
-      const res = await request('thread/resume', { threadId, cwd: workdir, ...perm, ...dev });
+      const res = await request('thread/resume', { threadId, cwd: workdir, ...perm, ...dev, ...mcp });
       if (res.error) throw new Error(`thread/resume 失敗:${res.error.message ?? '未知'}`);
       loadedThreads.add(threadId);
       return threadId;
     }
-    const res = await request('thread/start', { cwd: workdir, ...perm, ...dev });
+    const res = await request('thread/start', { cwd: workdir, ...perm, ...dev, ...mcp });
     if (res.error) throw new Error(`thread/start 失敗:${res.error.message ?? '未知'}`);
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
     if (!id) throw new Error('thread/start 未回傳 thread id');
@@ -185,10 +209,10 @@ export function createCodexProvider(): AgentProvider {
   return {
     kind: 'codex',
     async startSession(opts) {
-      // 先以唯讀開 thread;實際權限在首個 turn 由 sendMessage 對齊(權限變更走 re-resume)
+      // 先以唯讀開 thread;實際權限在首個 turn 由 sendMessage 對齊(權限變更走重啟+resume)
       const permission: AgentPermission = 'readonly';
-      const threadId = await loadThread(opts.resumeId ?? null, opts.workdir, opts.persona, permission);
-      sessions.set(threadId, { workdir: opts.workdir, persona: opts.persona, permission });
+      const threadId = await loadThread(opts.resumeId ?? null, opts.workdir, opts.persona, permission, opts.petId);
+      sessions.set(threadId, { workdir: opts.workdir, persona: opts.persona, permission, petId: opts.petId });
       return threadId;
     },
     async *sendMessage(threadId, text, opts): AsyncIterable<AgentEvent> {
@@ -207,9 +231,10 @@ export function createCodexProvider(): AgentProvider {
       if (!loadedThreads.has(threadId) || saved?.permission !== permission) {
         const workdir = saved?.workdir ?? process.cwd();
         const persona = saved?.persona ?? opts?.persona;
+        const petId = saved?.petId ?? opts?.petId;
         loadedThreads.delete(threadId);
-        await loadThread(threadId, workdir, persona, permission);
-        sessions.set(threadId, { workdir, persona, permission });
+        await loadThread(threadId, workdir, persona, permission, petId);
+        sessions.set(threadId, { workdir, persona, permission, petId });
       }
 
       const buffer: AgentEvent[] = [];
@@ -291,6 +316,10 @@ export function createCodexProvider(): AgentProvider {
       const pending = pendingApprovals.get(requestId);
       if (!pending) return;
       pendingApprovals.delete(requestId);
+      if (pending.method === 'mcpServer/elicitation/request') {
+        respondToServer(pending.rpcId, { action: allow ? 'accept' : 'decline', content: allow ? {} : null, _meta: null });
+        return;
+      }
       const legacy = pending.method === 'execCommandApproval' || pending.method === 'applyPatchApproval';
       const decision = legacy
         ? (allow ? 'approved' : { denied: { rejection: '使用者拒絕' } })
