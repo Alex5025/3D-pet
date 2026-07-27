@@ -239,10 +239,10 @@ function makePad(spec: PadSpec): void {
 }
 
 makePad({
-  element: el('light-xz'), horizontalRange: [-100, 100], verticalRange: [100, -100],
-  getHorizontal: () => lighting.x, getVertical: () => lighting.z,
+  element: el('light-xy'), horizontalRange: [-100, 100], verticalRange: [-100, 100],
+  getHorizontal: () => lighting.x, getVertical: () => lighting.y,
   set: (horizontal, vertical) => {
-    lighting.x = horizontal; lighting.z = vertical;
+    lighting.x = horizontal; lighting.y = vertical;
     window.pet.setLighting(selectedPetId, lighting);
   }
 });
@@ -338,7 +338,7 @@ function render(): void {
     dot.style.left = `${Math.min(100, Math.max(0, horizontal * 100))}%`;
     dot.style.top = `${Math.min(100, Math.max(0, vertical * 100))}%`;
   }
-  el('lxz-val').textContent = `${lighting.x.toFixed(1)}, ${lighting.z.toFixed(1)}`;
+  el('lxy-val').textContent = `${lighting.x.toFixed(1)}, ${lighting.y.toFixed(1)}`;
   el('lyz-val').textContent = `${lighting.y.toFixed(1)}, ${lighting.z.toFixed(1)}`;
   el('pxy-val').textContent = `${petState.x.toFixed(1)}, ${petState.y.toFixed(1)}`;
   el('pzy-val').textContent = `${petState.z.toFixed(1)}, ${petState.y.toFixed(1)}`;
