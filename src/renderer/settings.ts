@@ -165,7 +165,7 @@ window.pet.onSelectedPet((petId) => {
 /* 點光源是線性衰減(intensity/距離),光源拉遠時 2π 上限根本不夠亮——
  * 點光源模式把強度滑桿上限放大到 12π;切回平行光時上限復原並夾回(平行光 12π 會過曝)。 */
 const DIR_INTENSITY_MAX = Math.PI * 2;
-const POINT_INTENSITY_MAX = Math.PI * 12;
+const POINT_INTENSITY_MAX = 500;
 
 for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
   button.addEventListener('click', () => {
@@ -321,7 +321,9 @@ function render(): void {
     input(key).value = String(lighting[key]);
     el(`${key}-val`).textContent = key === 'shade'
       ? lighting[key].toFixed(2)
-      : `${(lighting[key] / Math.PI).toFixed(2)} π`;
+      : key === 'directional' && lighting.type === 'point'
+        ? lighting[key].toFixed(1) // 點光源上限 500,π 表示法會變 159π,直接顯示原始值
+        : `${(lighting[key] / Math.PI).toFixed(2)} π`;
   }
   for (const key of SWAY_KEYS) {
     input(key).value = String(sway[key]);
