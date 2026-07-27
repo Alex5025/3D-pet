@@ -3,7 +3,7 @@
 狀態:**設計定稿,尚未實作**(2026-07-24;v2 改版 2026-07-27)。
 目標:泡泡輸入框送出的訊息,依每隻寵物的設定交給 **Codex** 或 **Claude Code** 的 agent runtime 執行,回覆與過程狀態串流回泡泡;多寵物長對話、可中斷、審批(approval)、重啟後恢復、與寵物生命週期(休眠/刪除)整合。
 
-> v2 相對 v1 的核心改變:v1 是「每個 turn spawn 一次 CLI + 解析 JSONL」;v2 承認那條路撐不起終局需求——多寵物 Thread、雙向審批、原生 cancel、對話恢復,自己做到最後就是重造一個簡化版 client。改為 **AgentProvider 抽象 + 各家最適後端**:Codex 走 **app-server(JSON-RPC 長駐)**,Claude 走 **Agent SDK(in-process library)**。`codex exec --json` / `claude -p` 降級為 fallback 與除錯工具。
+> v2 相對 v1 的核心改變:引入 **AgentProvider 抽象**——消費端(泡泡/IPC/持久化)只依賴統一介面,各家後端可獨立演進。Codex 目標走 **app-server(JSON-RPC 長駐)**、exec 為過渡/fallback;Claude 受「**不使用計費 API**」硬性約束(使用者定案),走 **`claude -p` CLI spawn**(訂閱認證),Agent SDK(需 API key)排除。
 
 ---
 
@@ -21,6 +21,8 @@
 
 判斷:桌寵的終局需求(多寵各自 workspace + 持續對話 + streaming + cancel + approval + 重啟恢復)**全部落在長駐 runtime 的使用場景**。若先做 exec 版再重構,會先自己堆出 ProcessManager/SessionManager/CancellationManager/ApprovalManager 然後全部丟掉。因此:**介面直接按 session 模型設計**,provider 內部實作可以分期(見 §8),消費端(泡泡/IPC/持久化)永不重寫。
 
+※ Claude 這邊的長駐選項(Agent SDK)因「**不使用計費 API**」的硬性約束被排除(SDK 需 `ANTHROPIC_API_KEY`,不吃 CLI 訂閱登入)——ClaudeProvider 以 `claude -p` spawn 實作,靠 `--resume` 補上 session 延續,詳見 §4。
+
 ## 2. 架構
 
 ```
@@ -29,7 +31,7 @@ Renderer(泡泡)                Electron Main                        Agent Runti
 │ Enter 送出      │─chat-send→│ AgentBridge           │
 │ 串流回覆/狀態    │←chat-event│  ├ CodexProvider ─────┼─ stdio JSON-RPC → codex app-server(長駐)
 │ 審批 UI(v2)    │─approval─→│  │                     │      ├ Thread A ← 🐱 寵物A(/project/foo)
-│ Esc 中斷        │─cancel──→│  └ ClaudeProvider ────┼─ in-process → Claude Agent SDK
+│ Esc 中斷        │─cancel──→│  └ ClaudeProvider ────┼─ spawn → claude -p(訂閱認證,--resume 續 session)
 └────────────────┘           └──────────────────────┘      ├ Session B ← 🦊 寵物B(/project/bar)
 ```
 
@@ -87,18 +89,17 @@ type AgentEvent =
 
 ### ClaudeProvider
 
-**目標形態:Claude Agent SDK(`@anthropic-ai/claude-agent-sdk`,in-process,TS 原生)** —— 不需要 spawn/stdio/JSON-RPC 那一層,對 Electron main(Node)是最自然的整合。
+**硬性約束(使用者定案 2026-07-27):不使用計費 API——Claude 整合必須走本機 Claude Code CLI 的訂閱登入。**
 
-已查證的官方 API(2026-07 查證,實作前以 v0 再驗一次):
+因此排除 Claude Agent SDK(官方文件明載需 `ANTHROPIC_API_KEY`、API 計費、不沿用 CLI 訂閱憑證)。**正式形態 = spawn `claude` CLI 本體**,直接吃已登入的訂閱帳號:
 
-- `query({ prompt, options })` 回傳 `Query`(AsyncGenerator);options:`cwd`、`resume: <sessionId>`、`allowedTools`/`disallowedTools`、`permissionMode`、`maxTurns`、`systemPrompt`、`model`。
-- 訊息形狀:`{type:'system', subtype:'init', session_id}` → `session` 事件;`{type:'assistant', message.content[]}` → `text`/`tool`;`{type:'result', subtype:'success'|'error_*', result, session_id}` → `done`。
-- **中斷**:`q.interrupt()`(Query 物件原生方法)→ `cancel` 直接對映。
-- **審批**:`canUseTool(toolName, input) → {behavior:'allow'|'deny', ...}` callback = 官方的「工具執行前經使用者確認」途徑 → 發 `approval` 事件、等泡泡回覆後 resolve。v1 純問答用 `allowedTools` 最小集即可。
-- **並行**:多個 query 並行 = 官方支援(每寵一個,無記載上限)。
-- **In-process MCP(v3 的殺手鐧)**:`createSdkMcpServer` + `tool()` 可以把「宿主 app 的功能」直接做成 agent 可呼叫的工具——例如 `pet_change_pose` / `pet_play_motion` / `pet_show_expression`,Claude 呼叫 → main → IPC → renderer 播 VRMA/表情。桌寵從「顯示回覆的殼」變成 agent 可操縱的化身。
-
-**⚠️ 認證疑點(v0 必驗,影響選型)**:官方文件明載 SDK **獨立認證、需 `ANTHROPIC_API_KEY`**(API 計費),**不沿用** Claude Code CLI 的訂閱登入。而 spawn `claude -p --output-format stream-json` 走 CLI 本體 = 直接用本機已登入的訂閱帳號。若 v0 實測證實 SDK 無法吃訂閱憑證,則 ClaudeProvider 的 v1 內部改走 **CLI spawn 形態**(事件對映同 v1 設計:init/assistant/result),SDK 形態(含 in-process MCP)留給願意用 API key 的情境或等官方支援訂閱認證——**這正是 provider 抽象存在的理由:內部實作可換,外面不動**。
+- 指令:`claude -p <prompt> --output-format stream-json --verbose`;resume 用 `--resume <sessionId>`;`cwd = workspacePath`。
+- 事件對映:`{"type":"system","subtype":"init","session_id"}` → `session`;`{"type":"assistant", message.content[]}` → `text`/`tool`;`{"type":"result", is_error}` → `done`。確切形狀以 v0 煙霧測試校對。
+- **cancel** = 殺該 turn 的 process(SIGTERM → 1s → SIGKILL);session 由 `--resume` 延續,殺 process 不丟對話。
+- v1 純問答:`--allowedTools` 最小集(不執行工具)。
+- **審批(v2)**:headless 模式的官方途徑是 `--permission-prompt-tool`——把權限詢問導向一個 MCP 工具,由我們接住轉成 `approval` 事件。確切用法列入 v2 前的煙霧測試。
+- **寵物工具(v3)仍可行,不需要 SDK**:寫一個小型 **stdio MCP server**(隨 app 附帶的 node 腳本),經 `--mcp-config` 掛給 CLI;該 server 收到 `pet_change_pose`/`pet_play_motion`/`pet_show_expression` 等呼叫時,透過本機 socket/IPC 回連 Electron main → renderer 播 VRMA/表情。比 SDK 的 in-process 版多一層,但完全走訂閱認證。
+- 若日後官方讓 Agent SDK 支援訂閱憑證,ClaudeProvider **內部**可換成 SDK(interrupt/canUseTool/in-process MCP 都更順)——provider 抽象保證外面零改動。
 
 ## 5. 資料模型
 
@@ -132,9 +133,9 @@ agent?: { kind: 'codex' | 'claude'; sessionId?: string }
 
 | 期 | 範圍 |
 |---|---|
-| **v0(實作首日)** | 三項查證,樣本存 scratchpad:(a) `codex exec --json` 真實 JSONL 形狀 + resume 旗標;(b) `codex app-server` 是否可用、initialize/thread/turn 的實際 RPC 形狀;(c) **Agent SDK 在本機是否能用訂閱憑證跑通一問一答**(決定 ClaudeProvider v1 內部形態) |
-| **v1** | `AgentProvider` 介面 + AgentBridge + IPC + 泡泡回覆區;ClaudeProvider(SDK 或 CLI,依 v0 結論);CodexProvider **exec 形態**;session 回存/resume;cancel;生命週期整合。純問答(claude `allowedTools` 最小集 / codex 唯讀) |
-| **v2** | CodexProvider 內部升級 **app-server 形態**(消費端零改動);approval 事件 + 泡泡審批 UI(SDK `canUseTool` / app-server approval);開放工具執行 |
+| **v0(實作首日)** | 三項查證,樣本存 scratchpad:(a) `codex exec --json` 真實 JSONL 形狀 + resume 旗標;(b) `codex app-server` 是否可用、initialize/thread/turn 的實際 RPC 形狀;(c) `claude -p --output-format stream-json` 真實輸出形狀 + `--resume` 實測(確認走訂閱、不需 API key) |
+| **v1** | `AgentProvider` 介面 + AgentBridge + IPC + 泡泡回覆區;ClaudeProvider **CLI spawn 形態**;CodexProvider **exec 形態**;session 回存/resume;cancel;生命週期整合。純問答(claude `--allowedTools` 最小集 / codex 唯讀) |
+| **v2** | CodexProvider 內部升級 **app-server 形態**(消費端零改動);approval 事件 + 泡泡審批 UI(claude `--permission-prompt-tool` / codex app-server approval);開放工具執行 |
 | **v3** | **in-process MCP 寵物工具**:`pet_change_pose`/`pet_play_motion`/`pet_show_expression` 等,agent 驅動桌寵表演;狀態連動(thinking 播思考動作、done 播開心) |
 
 ## 9. 驗證方法
