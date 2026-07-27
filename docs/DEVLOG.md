@@ -410,3 +410,27 @@ agent 從「唯讀問答」升級為「可動手改檔案、危險操作經泡�
 mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 項 + claude e2e 11 項(各含審批 allow→檔案存在、deny→無檔案)全 PASS;無殭屍行程;typecheck/build 過。
 
 **教訓**:官方枚舉值的「字面意思」不等於「行為保證」——`on-request` 聽起來像會問,實際是模型裁量。安全語意(必問)要選有硬保證的選項(`untrusted`),並用 e2e 把保證釘死。
+
+---
+
+## 28. v3:MCP 寵物工具——agent 操縱桌寵(2026-07-28)
+
+桌寵從「顯示回覆的殼」變成 agent 可操縱的化身:agent 對話中可自主呼叫 `pet_play_motion`(播 VRMA 動作)、`pet_show_expression`(切表情)、`pet_speak`(泡泡說話)配合情緒表演。
+
+### 架構
+
+- **petToolsHub(main)**:本機 socket 中樞(隨機路徑+token),集中執行工具呼叫(動作=既有 vrma-play 通道、表情=新 expression-apply IPC、說話=chat-event 文字)。
+- **petToolsServer.mjs**:隨 app 附帶的 stdio MCP 腳本,兩家 CLI 都掛它;開機先跟 hub 拿 manifest,**把 motions/ 實際檔名塞進工具 schema 的 enum**——agent 不會亂猜動作名。petId 由 env 帶入,多寵路由天然成立。
+- **viewer**:`setExpression()` 照官方 `VRMExpressionManager.setValue`(標準 preset:happy/angry/sad/relaxed/surprised;情緒互斥,neutral 清除)。
+- **persona 整合**:system prompt 框架加一句工具提示(「可配合情緒表演,不必等使用者要求」),與角色個性同一段注入。
+
+### 掛載路徑(v3.0 實測)
+
+- **codex**:`thread/start` 的 `config.mcp_servers` 覆寫可掛(免動使用者的 config.toml)。坑:MCP 工具呼叫的核准不是 v2 的 requestApproval,而是 **`mcpServer/elicitation/request`**(form 模式),回覆形狀是 `{action, content, _meta}`——用 `{decision}` 回會被當拒絕(v3.0 探測時「工具呼叫被拒」半天就是這個)。自家 pettools 自動放行;使用者 config.toml 裡其他 MCP server 的 elicitation 轉泡泡審批(message 欄位是現成人話)。
+- **claude**:`--mcp-config` 與 v2 審批共用一份設定檔。唯讀模式原本 `--disallowedTools "*"` 會連寵物工具一起封——改 **`--permission-mode dontAsk` + `--allowedTools mcp__pettools__*` + 黑名單內建工具**:其他工具靜默拒絕、寵物工具放行;ask 模式則在 permission 詢問處對 `mcp__pettools__` 前綴自動 allow,不打擾使用者。
+
+### 驗證
+
+兩家 e2e 各 13 項全 PASS(新增:readonly 下請 agent 切表情 → 記錄型 hub 收到 `expr:happy`、turn 正常完成);mock selftest 16 項、開機煙霧、無殭屍行程、typecheck/build 全過。
+
+**教訓**:同一個「核准」概念在 codex 協定裡有兩套完全不同的 ServerRequest(指令審批 vs MCP elicitation),form/schema 都不同——「回覆形狀錯 = 靜默拒絕」沒有任何錯誤訊息,只能靠逐請求 log 抓。
