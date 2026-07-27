@@ -19,8 +19,6 @@ export interface Lighting {
   y: number;
   z: number;
   shade: number;
-  /** 點光源照射直徑(公尺;0 = 無限遠)。只影響點光源 */
-  pointDiameter?: number;
 }
 
 export interface Sway {
