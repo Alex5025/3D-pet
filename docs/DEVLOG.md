@@ -306,3 +306,24 @@ VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = �
 三個範例模型的 Spring Bone 都把 hips/root 設為 `center`，所以角色與 center 一起平移時 Verlet 積分看不到速度。Viewer 現在使用獨立物理中心，每幀跟隨角色 94%，並限制最大平移／旋轉落後量；拖曳會帶動頭髮、衣物與尾巴，又不會因快速位移讓短骨骼翻轉。
 
 `vrmtest.html?rootMotion=1` 會等 Viewer 進入 3 秒 idle 節流後平移角色並量測 Spring Bone。回歸結果最大角度約 0.1476 rad(8.5°)，確認 `wake()` 能恢復全速且物理反應在受控範圍。另以右上角泡泡案例驗證完整位於視窗內且不與角色重疊；`npm run typecheck`、`npm run build` 均通過。
+
+---
+
+## 24. 寵物休眠與資源釋放(2026-07-24)
+
+多寵物架構下,「不顯示的寵物」不該只是隱藏——每隻角色各持一個 **WebGL context**,而瀏覽器對 context 有硬上限(~16 個)。若休眠只是 `scene.remove` 而不釋放,反覆開關角色遲早撞上限、最舊的 context 被瀏覽器強制回收,畫面莫名黑掉。所以把 `enabled` 從「顯示/隱藏」正式升級為「**運行/休眠並釋放資源**」(UI 文案也從「隱藏」改為「休息中」)。
+
+**釋放什麼**
+- renderer:`removeRuntime` 呼叫 `viewer.dispose()`,其中 `renderer.dispose()`(GL 資源)之後補 **`renderer.forceContextLoss()`**——這一步才真正歸還 WebGL context;少了它,dispose 過的 renderer 仍佔著 context 名額。
+- main:釋放該寵物的 `avatarIcons` / `wardrobeLists` 快取。
+
+**休眠前先存位置**
+`removeRuntime` 在拆掉 runtime 之前先 `saveState(petId, runtime.state)`,否則角色被拖過的最後位置會隨 runtime 一起消失,喚醒後跳回舊位。刪除路徑同樣會走到這裡,但 main 的 `save-state → updatePet` 有 `pets.get(id)` 守衛,對已刪除的寵物是 no-op,不會復活殭屍。
+
+**單一變更點(code review 後收斂)**
+「disable → 釋放快取」原本散在 `setPetEnabled` 與 `update-pet-meta` 兩處各記一份,日後易漏同步。改成**內建進 `updatePet`**:凡 `patch.enabled === false` 就釋放,無論來自選單、設定面板或未來任何路徑都一致。
+
+**喚醒動線**
+休息中的寵物在「切換寵物」選單中仍列出(標「(休息中)」)但**灰掉不可選**——避免選了牠變成 selectedPetId 卻沒有 runtime、桌面空無一物。喚醒有兩條路:牠正是目前角色時用選單的「喚醒目前角色」;否則到設定面板的寵物選單挑它、開啟即可。
+
+**教訓**:`renderer.dispose()` ≠ 釋放 context。要真正歸還 GPU context 得 `forceContextLoss()`——這在「單一長駐 canvas」的 app 看不出來,一旦變成「多 context 動態增減」就會踩到瀏覽器上限。

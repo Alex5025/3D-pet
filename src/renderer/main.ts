@@ -307,6 +307,8 @@ function addRuntime(profile: PetProfile): void {
 function removeRuntime(petId: string): void {
   const runtime = runtimes.get(petId);
   if (!runtime) return;
+  // 休息前保存最後位置；接著才停止動畫與釋放 GPU/DOM 資源。
+  window.pet.saveState(petId, { ...runtime.state });
   if (visiblePetId === petId) {
     visiblePetId = null;
     runtime.bubble.hide();

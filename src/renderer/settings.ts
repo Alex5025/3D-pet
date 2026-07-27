@@ -40,7 +40,7 @@ function renderPetSelector(): void {
   for (const profile of profiles) {
     const option = document.createElement('option');
     option.value = profile.id;
-    option.textContent = `${profile.enabled ? '' : '（隱藏）'}${profile.name}`;
+    option.textContent = `${profile.enabled ? '' : '（休息中）'}${profile.name}`;
     select.appendChild(option);
   }
   select.value = selectedPetId;

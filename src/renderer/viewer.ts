@@ -630,6 +630,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     }
     scene.remove(rootMotionCenter);
     renderer.dispose();
+    renderer.forceContextLoss();
     renderer.domElement.remove();
   }
 

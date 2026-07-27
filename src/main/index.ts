@@ -205,7 +205,22 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
   const profile = pets.get(id);
   if (!profile) return null;
   Object.assign(profile, patch, { id: profile.id });
+  // 「休息 → 釋放快取」是 disable 的固有副作用:集中在這唯一變更點,
+  // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
+  if (patch.enabled === false) releasePetCaches(id);
   scheduleConfigFlush();
+  return profile;
+}
+
+function releasePetCaches(id: string): void {
+  avatarIcons.delete(id);
+  wardrobeLists.delete(id);
+}
+
+function setPetEnabled(id: string, enabled: boolean): PetProfile | null {
+  const profile = updatePet(id, { enabled }); // 快取釋放已內建於 updatePet
+  if (!profile) return null;
+  sendPetProfiles();
   return profile;
 }
 
@@ -289,8 +304,7 @@ function removePet(id: string): boolean {
     renameSync(petPath(id), join(trashDir, `${id}-${Date.now()}.json`));
   } catch { /* 尚未落盤的新寵物沒有檔案可搬 */ }
   pets.delete(id);
-  avatarIcons.delete(id);
-  wardrobeLists.delete(id);
+  releasePetCaches(id);
   registry.petIds = registry.petIds.filter((petId) => petId !== id);
   if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
   persistConfigSync();
@@ -380,9 +394,13 @@ function petMenu(requestedId?: string): Menu {
     {
       label: '切換寵物',
       submenu: [...pets.values()].map((item) => ({
-        label: item.name,
+        // 休息中的寵物仍列出(讓使用者知道存在),但灰掉不可選——選了會變成
+        // selectedPetId 卻沒有 runtime、桌面看不到角色。喚醒走「喚醒目前角色」
+        // (若牠正是目前角色)或設定面板的寵物選單。
+        label: `${item.enabled ? '' : '（休息中）'}${item.name}`,
         type: 'radio' as const,
         checked: item.id === petId,
+        enabled: item.enabled,
         click: () => selectPet(item.id)
       }))
     },
@@ -395,6 +413,10 @@ function petMenu(requestedId?: string): Menu {
     { label: '調整燈光…', click: () => openSettings('light', petId) },
     { label: '角色調整…', click: () => openSettings('char', petId) },
     { label: '重置位置與大小', click: () => resetState(petId) },
+    {
+      label: profile.enabled ? '讓目前角色休息' : '喚醒目前角色',
+      click: () => setPetEnabled(petId, !profile.enabled)
+    },
     { type: 'separator' },
     {
       label: '新增寵物',
@@ -527,7 +549,7 @@ app.whenReady().then(async () => {
     if (typeof patch.name === 'string') next.name = patch.name.trim() || profile.name;
     if (typeof patch.codexSessionId === 'string') next.codexSessionId = patch.codexSessionId.trim() || undefined;
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
-    const updated = updatePet(id, next);
+    const updated = updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
     sendPetProfiles();
     return updated;
   });
