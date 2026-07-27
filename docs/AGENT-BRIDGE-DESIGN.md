@@ -1,6 +1,6 @@
 # 對話泡泡 ⇄ Agent 串接機制設計(v2)
 
-狀態:**設計定稿,尚未實作**(2026-07-24;v2 改版 2026-07-27)。
+狀態:**v0+v1 已實作完成**(2026-07-27,見 DEVLOG §25);v2(approval)、v3(MCP 寵物工具)未實作。
 目標:泡泡輸入框送出的訊息,依每隻寵物的設定交給 **Codex** 或 **Claude Code** 的 agent runtime 執行,回覆與過程狀態串流回泡泡;多寵物長對話、可中斷、審批(approval)、重啟後恢復、與寵物生命週期(休眠/刪除)整合。
 
 > v2 相對 v1 的核心改變:引入 **AgentProvider 抽象**——消費端(泡泡/IPC/持久化)只依賴統一介面,各家後端可獨立演進。Codex **v1 直接走 app-server(JSON-RPC 長駐)**,exec 僅為 fallback、預設不實作(exec 與 app-server 內部零共用,過渡工是白工;風險由 v0 gate 把關);Claude 受「**不使用計費 API**」硬性約束(使用者定案),走 **`claude -p` CLI spawn**(訂閱認證),Agent SDK(需 API key)排除。

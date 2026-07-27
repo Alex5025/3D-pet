@@ -327,3 +327,35 @@ VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = �
 休息中的寵物在「切換寵物」選單中仍列出(標「(休息中)」)但**灰掉不可選**——避免選了牠變成 selectedPetId 卻沒有 runtime、桌面空無一物。喚醒有兩條路:牠正是目前角色時用選單的「喚醒目前角色」;否則到設定面板的寵物選單挑它、開啟即可。
 
 **教訓**:`renderer.dispose()` ≠ 釋放 context。要真正歸還 GPU context 得 `forceContextLoss()`——這在「單一長駐 canvas」的 app 看不出來,一旦變成「多 context 動態增減」就會踩到瀏覽器上限。
+
+---
+
+## 25. 對話泡泡串接 Codex / Claude(v1 純問答)(2026-07-27)
+
+按 `docs/AGENT-BRIDGE-DESIGN.md` 落地 v0+v1:泡泡輸入 → 每寵設定的 agent(Codex app-server / Claude CLI)→ 串流回泡泡。硬性約束:**不使用計費 API**——Claude 走 `claude -p` 吃本機訂閱登入(spawn 前剝除 `ANTHROPIC_API_KEY`),Agent SDK(強制 API key)排除。
+
+### 架構落地
+
+- **`src/main/agent/`**:`AgentProvider` 抽象(startSession/sendMessage/cancel/closeSession/dispose/shutdownSync)+ `AgentBridge`(單寵單 turn、全域上限 4、每 turn 恰一個終結事件、30s/5min 看門狗、resume 失敗清 id 重開)+ 三個 provider(codex/claude/mock)。消費端(泡泡/IPC/持久化)只認統一 `AgentEvent`,加後端或換內部實作零外溢。
+- **CodexProvider = 長駐 app-server**(NDJSON JSON-RPC):v0 用 `codex app-server generate-ts` 拿官方協定(不猜格式),實測 initialize/thread/turn/interrupt/resume 全通。crash 偵測 → 進行中 turn 吐 error → 下次對話 lazy 重啟 + `thread/resume`(e2e 實測外部 pkill 後上下文完整保留)。v1 唯讀:`sandbox:'read-only'` + `approvalPolicy:'never'`,實測零 approval。
+- **ClaudeProvider = 每 turn spawn `claude -p --output-format stream-json`**:prompt 走 stdin(claude 會等 stdin 3 秒的坑,順便解掉 argv 逃逸);`--resume` 續 session;`--include-partial-messages` 拿 delta 做打字機;`--disallowedTools "*"` 純問答。
+- **session 持久化**:`profile.agent = { kind, sessionId }`(舊 `codexSessionId` 自動遷移、保留);bridge **只持久化 `session` 事件給的真 id**——claude 新 session 首 turn 才有 id,startSession 回傳的只是暫時 handle,不落盤。
+
+### 踩到的坑
+
+1. **SIGTERM 後 claude 會優雅吐 `result is_error:true` 再退出**——原以為殺行程=流中斷、由 bridge 補 `done ok:false`,實際會先收到錯誤 result,使用者主動取消被渲染成紅字錯誤。修法:provider 記 `cancelRequested`(WeakSet),取消中的 error result 轉 `done ok:false`。
+2. **「每 turn spawn」的 provider 拿不到 workdir**——介面只在 startSession 給 workdir,claude 每 turn 都要 cwd。provider 內部存 handle→workdir 對映,init 拿到真 id 後補別名(cancel 用哪個 id 都找得到行程)。
+3. **e2e 的 cancel 競態**——「寫 1000 字後取消」會輸給 claude 的寫作速度(8 秒寫完,cancel 撲空)。改成「等第一個 text 增量出現就取消」,確定 turn 在跑才殺。
+4. **codex 忘了 yield session 事件**——threadId 在 startSession 就有(真 id),但 bridge 改成只從 session 事件持久化後,codex 的 threadId 從未落盤(in-memory 全過、重啟就丟)。e2e 抓到:每 turn 開頭補 session 事件,bridge 去重。
+
+### UI 與生命週期
+
+- 泡泡維持笨元件:新增回覆區(200px 可捲)/狀態列/停止鈕/Enter 送出,`AgentEvent` → 泡泡方法的對映在 main.ts。**中斷以停止鈕為主**——input disabled 會 blur → 視窗回不可聚焦,Esc 收不到。
+- running 中移開游標:泡泡不藏(看進度)但 overlay 轉穿透,底下視窗照常點;游標回泡泡恢復互動可按停止。
+- 生命週期集中:寵物休眠/刪除 → `closePetSession`(掛在 `updatePet` 的 disable 副作用旁);`before-quit` 與 Tray「結束」(不觸發 before-quit)都掛 `shutdownSync()`(同步 SIGTERM——`app.exit` await 不到 async dispose)。
+
+### 驗證建設(headless,不開視窗)
+
+`VRM_PET_AGENT_SELFTEST=1`(MockProvider 全鏈 11 項)/ `=claude`、`=codex`(真 CLI e2e 各 7 項:問答、session 回存、resume、cancel、休眠、crash 重連),exit code 供 CI 化;`VRM_PET_AGENT_MOCK=1` 供 UI 手動走查不耗額度。全部 PASS;`pgrep` 驗無 app-server 殭屍。
+
+**教訓**:e2e 抓到的四個坑全是「單元層面正確、整合層面錯」的類型(取消語意、id 生命週期、競態)——mock 驗邏輯、真 CLI 驗契約,兩層缺一不可。
