@@ -69,7 +69,7 @@ const api = {
   selectPet: (petId: string): Promise<PetProfile | null> => ipcRenderer.invoke('select-pet', petId),
   updatePetMeta: (
     petId: string,
-    patch: Pick<Partial<PetProfile>, 'name' | 'codexSessionId' | 'enabled'>
+    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent'>
   ): Promise<PetProfile | null> => ipcRenderer.invoke('update-pet-meta', petId, patch),
   onPetProfiles: (callback: (pets: PetProfile[], selectedPetId: string) => void) =>
     ipcRenderer.on('pet-profiles-apply', (_event, pets, selectedPetId) => callback(pets, selectedPetId)),

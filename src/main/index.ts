@@ -104,12 +104,17 @@ function readJson(path: string): unknown | null {
 
 function normalizeProfile(value: Partial<PetProfile>, index: number): PetProfile {
   const id = typeof value.id === 'string' && value.id ? value.id : randomUUID();
-  return {
+  const profile: PetProfile = {
     ...value,
     id,
     name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : `寵物 ${index + 1}`,
     enabled: value.enabled !== false
   };
+  // 遷移:舊 codexSessionId → agent(舊欄位保留不刪,循遷移慣例)
+  if (!profile.agent && profile.codexSessionId) {
+    profile.agent = { kind: 'codex', sessionId: profile.codexSessionId };
+  }
+  return profile;
 }
 
 function createProfile(index = pets.size): PetProfile {
@@ -572,8 +577,13 @@ app.whenReady().then(async () => {
     if (!profile) return null;
     const next: Partial<PetProfile> = {};
     if (typeof patch.name === 'string') next.name = patch.name.trim() || profile.name;
-    if (typeof patch.codexSessionId === 'string') next.codexSessionId = patch.codexSessionId.trim() || undefined;
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
+    if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude')) {
+      const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
+      next.agent = sessionId ? { kind: patch.agent.kind, sessionId } : { kind: patch.agent.kind };
+      // 換 agent 種類 = 換家,不共享 session:關掉舊的
+      if (profile.agent?.kind && profile.agent.kind !== patch.agent.kind) void bridge?.closePetSession(id);
+    }
     const updated = updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
     sendPetProfiles();
     return updated;

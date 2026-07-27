@@ -279,15 +279,22 @@
       <!-- ── 工作設定 ── -->
       <div class="tab" id="tab-project">
         <h3>工作設定</h3>
-        <p class="project-note">每隻寵物可分別連結工作目錄與 Codex Session。切換寵物不會自動開啟瀏覽視窗。</p>
+        <p class="project-note">每隻寵物可分別連結工作目錄與 AI 助手（Codex / Claude Code）。切換寵物不會自動開啟瀏覽視窗。</p>
         <div class="workspace-card">
           <label class="field">
             <span>寵物名稱</span>
             <input class="text-input" id="pet-name" type="text" maxlength="40" placeholder="例如：小粉" />
           </label>
           <label class="field">
-            <span>Codex Session ID</span>
-            <input class="text-input" id="codex-session-id" type="text" maxlength="160" placeholder="例如：019f…" spellcheck="false" />
+            <span>AI 助手</span>
+            <select class="text-input" id="agent-kind">
+              <option value="codex">Codex</option>
+              <option value="claude">Claude Code</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Session ID（對話後自動回存；手動填寫為進階用途）</span>
+            <input class="text-input" id="agent-session-id" type="text" maxlength="160" placeholder="例如：019f…" spellcheck="false" />
           </label>
           <label class="toggle-field">
             <input id="pet-enabled" type="checkbox" />

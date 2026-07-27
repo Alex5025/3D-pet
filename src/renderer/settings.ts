@@ -50,7 +50,8 @@ function renderPetSelector(): void {
 function renderWorkSettings(): void {
   const profile = selectedProfile();
   input('pet-name').value = profile?.name ?? '';
-  input('codex-session-id').value = profile?.codexSessionId ?? '';
+  (el('agent-kind') as HTMLSelectElement).value = profile?.agent?.kind ?? 'codex';
+  input('agent-session-id').value = profile?.agent?.sessionId ?? '';
   input('pet-enabled').checked = profile?.enabled !== false;
   const path = el('workspace-path');
   path.textContent = profile?.workspacePath ?? '尚未選擇工作目錄';
@@ -124,11 +125,16 @@ input('pet-name').addEventListener('change', async () => {
   await window.pet.updatePetMeta(profile.id, { name: input('pet-name').value });
 });
 
-input('codex-session-id').addEventListener('change', async () => {
+async function submitAgentBinding(): Promise<void> {
   const profile = selectedProfile();
   if (!profile) return;
-  await window.pet.updatePetMeta(profile.id, { codexSessionId: input('codex-session-id').value });
-});
+  const kind = (el('agent-kind') as HTMLSelectElement).value === 'claude' ? 'claude' : 'codex';
+  const sessionId = input('agent-session-id').value.trim();
+  await window.pet.updatePetMeta(profile.id, { agent: sessionId ? { kind, sessionId } : { kind } });
+}
+
+el('agent-kind').addEventListener('change', () => void submitAgentBinding());
+input('agent-session-id').addEventListener('change', () => void submitAgentBinding());
 
 input('pet-enabled').addEventListener('change', async () => {
   const profile = selectedProfile();
