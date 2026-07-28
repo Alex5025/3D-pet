@@ -434,3 +434,23 @@ mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 �
 兩家 e2e 各 13 項全 PASS(新增:readonly 下請 agent 切表情 → 記錄型 hub 收到 `expr:happy`、turn 正常完成);mock selftest 16 項、開機煙霧、無殭屍行程、typecheck/build 全過。
 
 **教訓**:同一個「核准」概念在 codex 協定裡有兩套完全不同的 ServerRequest(指令審批 vs MCP elicitation),form/schema 都不同——「回覆形狀錯 = 靜默拒絕」沒有任何錯誤訊息,只能靠逐請求 log 抓。
+
+---
+
+## 29. 設定面板擴充與首輪實機驗收修復(2026-07-28)
+
+### 面板擴充(對話串接後的一批 UX 功能)
+
+- **泡泡輸入框改 textarea**:Enter 送出、Shift+Enter 換行、**IME 選字的 Enter 不誤送**(`isComposing`——注音使用者的必修課);高度隨內容長、5 行封頂;上限 120→1000 字。
+- **每寵模型與推理力度**:下拉選單——codex 動態拉 `model/list`(逐模型附支援力度,Sol 有到 `ultra`;lazy 啟動 app-server、成功才快取),claude 用實測過的別名(fable/opus/sonnet/haiku)。逐 turn 生效免重開對話;換家時自動歸預設。順帶抓到 **bridge 回存 sessionId 整包覆寫 agent、洗掉 model/effort 的潛伏 bug**(詳 §27)。
+- **角色個性(persona)**:角色分頁自由文字,claude 逐 turn `--append-system-prompt`、codex 於 thread 建立/恢復 `developerInstructions`;實測貓娘句尾喵。
+- **預設姿勢入面板**:main 抽共用 `setDefaultPose()`(白名單+存檔+雙向同步),右鍵選單與面板走同一入口。
+- **喚醒/休息**改狀態切換按鈕(取代勾選框)。
+
+### 首輪實機驗收(使用者真滑鼠實測)抓到的問題
+
+1. **審批鈕點不到(幽靈泡泡)**:三寵環境下游標掃過別隻寵物,`visiblePetId` 被切走;泡泡命中判定(hover/mousedown/wheel)只認「目前寵物」的泡泡 → 審批中的泡泡看得到、點不到(疊層維持穿透,點擊全落到底下視窗)。**修法:命中判定改掃描所有寵物的可見泡泡**,壓中即恢復互動並認領 visiblePetId。
+   **教訓**:headless e2e 蓋不到「疊層互動路由」這層——事件序全對,但 `setIgnoreMouseEvents` 的狀態機只有真滑鼠+多寵物才會暴露。單寵手測也不夠,**互動類驗收要用使用者的真實佈局**。
+2. **「沒有請求權限,直接說被拒絕」**:設定其實正確(`permission: ask` 已落盤),元凶是 §11 的老坑變種——**vite 熱重載讓 renderer 拿到新 UI(能設定新欄位),main 行程卻還是舊碼**(不吃 permission、一律唯讀+never→codex 自動拒絕提權)。「設定看起來生效、行為卻是舊的」= 先懷疑 main 沒重啟。
+3. **fileChange 審批描述退化成方法名**:`item/fileChange/requestApproval` 的 params 常只有可為 null 的 `reason`(協定如此),fallback 補人話「想修改工作目錄中的檔案」。
+4. **自發表演不發生**:「你可以呼叫…」對模型太客氣,effort=low 時幾乎不做份外事。提示改**具體行為規則**(何時切表情/播動作/回報);另建議表演型寵物 effort ≥ medium。
