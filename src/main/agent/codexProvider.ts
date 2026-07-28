@@ -157,11 +157,15 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     pendingApprovals.set(requestId, { rpcId: msg.id, method: msg.method! });
     const command = params['command'];
     const files = isRecordLike(params['fileChanges']) ? Object.keys(params['fileChanges'] as object).join('、') : '';
+    // fileChange 的 params 常只有可為 null 的 reason(v2 實測)——fallback 要是人話,不能是方法名
+    const fallback = msg.method === 'item/fileChange/requestApproval' || msg.method === 'applyPatchApproval'
+      ? '想修改工作目錄中的檔案(內容見泡泡回覆)'
+      : '想執行需要核准的操作';
     const description = [
       typeof params['reason'] === 'string' ? params['reason'] : '',
       typeof command === 'string' ? `$ ${command}` : Array.isArray(command) ? `$ ${command.join(' ')}` : '',
       files ? `修改檔案:${files}` : ''
-    ].filter(Boolean).join('\n') || msg.method!;
+    ].filter(Boolean).join('\n') || fallback;
     handler('__approval__', { requestId, description });
   }
 
@@ -184,7 +188,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     // 角色個性 + 寵物工具提示:官方 developerInstructions 欄位(thread 建立/恢復時注入)
     const parts: string[] = ['你是一隻桌面寵物。'];
     if (persona) parts.push(`以下是你的角色設定,請以此個性回應:\n${persona}`);
-    if (hub && petId) parts.push('你可以呼叫 pet_play_motion(播全身動作)、pet_show_expression(切臉部表情)、pet_speak(在泡泡說話)配合情緒表演,不必等使用者要求。');
+    if (hub && petId) parts.push('表演規則:每次回覆前先用 pet_show_expression 配合情緒(開心 happy、遇到問題 sad、驚訝 surprised);打招呼或完成任務時用 pet_play_motion 播個動作;工作過程較長時用 pet_speak 簡短回報。這些是你身體的一部分,主動使用,不要等使用者要求。');
     const dev = parts.length > 1 ? { developerInstructions: parts.join('\n') } : {};
     // 寵物工具 MCP:以 thread config 覆寫掛載(v3.0 實測可行)
     const mcp = hub && petId

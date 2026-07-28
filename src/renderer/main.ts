@@ -442,6 +442,14 @@ function runtimeAt(x: number, y: number): PetRuntime | null {
   return null;
 }
 
+/** 游標壓在「任一」可見泡泡上的那隻寵物(不只 visiblePetId——多寵物下審批中的泡泡也要可互動)。 */
+function bubbleAt(x: number, y: number): PetRuntime | null {
+  for (const runtime of runtimes.values()) {
+    if (runtime.bubble.containsPoint(x, y)) return runtime;
+  }
+  return null;
+}
+
 function cancelBubbleHide(): void {
   if (!bubbleHideTimer) return;
   clearTimeout(bubbleHideTimer);
@@ -471,6 +479,7 @@ function scheduleBubbleHide(): void {
 function updateHover(x: number, y: number): void {
   const hit = runtimeAt(x, y);
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
+  const bubbleHit = bubbleAt(x, y);
   if (hit) {
     cancelBubbleHide();
     // busy 中的泡泡不因切換到別隻而藏(其 turn 仍進行);只在非 busy 時換泡泡
@@ -478,8 +487,10 @@ function updateHover(x: number, y: number): void {
     visiblePetId = hit.profile.id;
     positionSpeechBubble(hit, true);
     setInteractive(true);
-  } else if (visible?.bubble.containsPoint(x, y)) {
+  } else if (bubbleHit) {
+    // 游標在任一可見泡泡上(含審批中的幽靈泡泡)→ 恢復互動;認領回 visiblePetId 讓離開時的收合正常
     cancelBubbleHide();
+    visiblePetId = bubbleHit.profile.id;
     setInteractive(true);
   } else if (visible) {
     if (visible.bubble.isBusy()) {
@@ -534,7 +545,7 @@ window.pet.onCursor(({ x, y }) => {
 addEventListener('mousedown', (event) => {
   lastPointerAt = performance.now();
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
-  if (visible?.bubble.containsPoint(event.clientX, event.clientY)) {
+  if (bubbleAt(event.clientX, event.clientY)) {
     cancelBubbleHide();
     return;
   }
@@ -593,7 +604,7 @@ addEventListener('contextmenu', (event) => event.preventDefault());
 addEventListener('wheel', (event) => {
   lastPointerAt = performance.now();
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
-  if (visible?.bubble.element.contains(event.target as Node)) return;
+  if ((event.target as HTMLElement | null)?.closest?.('.pet-speech-bubble')) return;
   const runtime = runtimeAt(event.clientX, event.clientY);
   if (!runtime) return;
   runtime.viewer.wake();
