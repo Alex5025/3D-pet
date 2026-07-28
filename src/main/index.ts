@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch } from 'node:fs';
@@ -668,6 +668,10 @@ app.whenReady().then(async () => {
   ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean) => {
     if (!win || event.sender !== win.webContents) return;
     bridge?.respondApproval(petId, String(requestId), allow === true);
+  });
+  ipcMain.on('open-external', (event, url: string) => {
+    if (!win || event.sender !== win.webContents) return;
+    if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url);
   });
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);

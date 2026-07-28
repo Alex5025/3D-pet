@@ -20,6 +20,8 @@
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",
     "@types/three": "^0.169.0",
+    "dompurify": "^3.4.12",
+    "marked": "^18.0.7",
     "three": "^0.169.0"
   }
 }

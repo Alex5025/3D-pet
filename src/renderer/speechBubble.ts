@@ -1,4 +1,9 @@
 import './speechBubble.css';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+
+// agent 回覆是 GFM markdown;breaks 讓單一換行也換行(聊天語感)
+marked.setOptions({ gfm: true, breaks: true });
 
 export interface SpeechBubble {
   element: HTMLElement;
@@ -21,6 +26,8 @@ export interface SpeechBubble {
   endTurn: (ok: boolean, errorMessage?: string) => void;
   /** 顯示審批請求(描述 + 允許/拒絕);使用者按鈕後觸發 onApproval 並收合。 */
   showApproval: (requestId: string, description: string) => void;
+  /** 顯示目前的模型/力度徽章(如「Codex · gpt-5.6-sol · low」);null 隱藏。 */
+  setAgentInfo: (text: string | null) => void;
 }
 
 export interface SpeechBubbleAvoidRect {
@@ -44,6 +51,8 @@ interface SpeechBubbleOptions {
   onCancel?: () => void;
   /** 審批按鈕(允許/拒絕)的回覆。 */
   onApproval?: (requestId: string, allow: boolean) => void;
+  /** 回覆區的連結點擊(交給外部瀏覽器開)。 */
+  onOpenLink?: (url: string) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -77,6 +86,26 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   // 回覆區 + 狀態列(含停止鈕):agent 對話的顯示面;泡泡是笨元件,事件對映由 main.ts 做。
   const reply = document.createElement('div');
   reply.className = 'bubble-reply';
+  const mdBox = document.createElement('div');
+  mdBox.className = 'reply-md';
+  reply.append(mdBox);
+  let replyRaw = '';
+  const renderReply = (): void => {
+    // agent 輸出是不可信文字:markdown 轉 HTML 後必經 DOMPurify 消毒
+    mdBox.innerHTML = DOMPurify.sanitize(marked.parse(replyRaw) as string);
+    reply.scrollTop = reply.scrollHeight;
+  };
+  reply.addEventListener('click', (event) => {
+    const anchor = (event.target as HTMLElement | null)?.closest?.('a');
+    if (anchor?.href) {
+      event.preventDefault();
+      options.onOpenLink?.(anchor.href);
+    }
+  });
+
+  // 模型/力度徽章(標題右下的小字)
+  const agentInfo = document.createElement('div');
+  agentInfo.className = 'bubble-agent-info';
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
   approvalBox.className = 'bubble-approval';
@@ -115,7 +144,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   stop.textContent = '停止';
   statusRow.append(status, stop);
 
-  element.append(label, reply, approvalBox, statusRow, input);
+  element.append(label, agentInfo, reply, approvalBox, statusRow, input);
   document.body.appendChild(element);
 
   let busy = false;
@@ -243,6 +272,10 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       reply.classList.remove('open');
       status.textContent = '';
       statusRow.classList.add('open');
+    },
+    setAgentInfo: (text) => {
+      agentInfo.textContent = text ?? '';
+      agentInfo.classList.toggle('open', !!text);
     },
     showApproval: (requestId, description) => {
       approvalRequestId = requestId;
