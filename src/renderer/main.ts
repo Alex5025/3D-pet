@@ -278,6 +278,14 @@ async function loadInitialModel(runtime: PetRuntime): Promise<void> {
   }
 }
 
+/** 泡泡徽章文字:AI 家別 + 模型 + 力度(未設就標預設)。 */
+function agentInfoText(profile: PetProfile): string {
+  const kind = profile.agent?.kind === 'claude' ? 'Claude' : 'Codex';
+  const model = profile.agent?.model ?? '預設模型';
+  const effort = profile.agent?.effort ? ` · ${profile.agent.effort}` : '';
+  return `${kind} · ${model}${effort}`;
+}
+
 function addRuntime(profile: PetProfile): void {
   if (runtimes.has(profile.id) || !profile.enabled) return;
   const viewer = createViewer({ transparent: true });
@@ -308,10 +316,12 @@ function addRuntime(profile: PetProfile): void {
         window.pet.chatSend(profile.id, text);
       },
       onCancel: () => window.pet.chatCancel(profile.id),
-      onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow)
+      onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow),
+      onOpenLink: (url) => window.pet.openExternal(url)
     })
   };
   runtimes.set(profile.id, runtime);
+  runtime.bubble.setAgentInfo(agentInfoText(profile));
   viewer.setLighting(profile.lighting ?? {});
   viewer.setSway(profile.sway ?? {});
   applyState(runtime);
@@ -348,6 +358,7 @@ function reconcileProfiles(profiles: PetProfile[]): void {
     else {
       runtime.profile = profile;
       runtime.bubble.setPetName(profile.name);
+      runtime.bubble.setAgentInfo(agentInfoText(profile)); // 設定面板換模型/力度即時反映
     }
   }
 }

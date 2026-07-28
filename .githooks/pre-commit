@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+echo '執行 pre-commit 密碼與金鑰檢查...'
+npm run check:secrets
+
+echo '執行 pre-commit 型別檢查...'
+npm run typecheck

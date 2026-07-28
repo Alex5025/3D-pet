@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+echo '執行 pre-push 建置檢查...'
+npm run build
