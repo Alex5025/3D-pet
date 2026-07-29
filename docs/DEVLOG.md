@@ -475,3 +475,18 @@ mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 �
 - **教訓**:
   1. **`str.replace` 類批次替換必須驗證替換數**(替換前後 diff 行數、或改用「無匹配即報錯」的工具如 Edit/patch)——靜默失敗會做出「管線俱在、就是沒接上」這種最難一眼看穿的半成品。
   2. 「新功能完全沒效果但周邊(徽章/CSS)都有效」的組合,優先懷疑**同一批改動有部分沒落地**,而不是邏輯錯誤。
+
+---
+
+## 32. codex 個性(persona)對既有 thread 無效——resume 的 developerInstructions 是死欄位(2026-07-29)
+
+- **症狀**(使用者實機):設定「句尾加喵」後,codex 寵物回覆完全沒有個性;第一輪修復(個性變更比照權限走「重啟 app-server + resume」重注)也無效。
+- **逐層根因**(兩輪):
+  1. 第一層(程式邏輯):persona 只在 thread 建立/恢復時注入,thread 已載入後改個性不觸發重注;且 `saved?.persona ?? opts?.persona` 讓舊快照壓過新值。修了,但沒效——因為還有第二層。
+  2. 第二層(平台實證,最小 probe 抓到):**`thread/resume` 的 `developerInstructions` 根本不生效**——schema 有這欄位(generate-ts 可見),但 server 沿用 rollout 裡的舊指示,**連全新 server 的 resume 也一樣**(和 §27 的 sandbox 不同:sandbox 是「同 server 不套、新 server 會套」,developerInstructions 是全都不套)。所以「重啟+resume」對 persona 是白工。
+- **正確通道(probe 實測)**:`thread/inject_items`——把 `{ type:'message', role:'developer', content:[{type:'input_text', …}] }` 塞進模型可見歷史。實測**即時生效**,還壓過 rollout 舊指示與歷史慣性(前幾輪都在喵,注入後立刻改汪)。
+- **修法**:新 thread 維持 `thread/start` + `developerInstructions`(實測有效);既有 thread 改 `syncPersona()`——追蹤每 thread「已生效 persona」(resume 回來的標未知),與 profile 當下值不同就在 turn 前注入【角色設定更新】developer 訊息。個性變更**不再重啟 server**(重啟只留給權限變更);注入失敗不擋 turn,下輪重試。
+- **驗證**:兩個最小 probe(start 注入喵 PASS;新 server resume 換汪 FAIL → inject_items 換汪 PASS)+ codex 真 CLI e2e 13 項全 PASS + mock selftest + typecheck/build。
+- **教訓**:
+  1. **schema 有欄位 ≠ server 會理它**(experimental 協定第二次犯:§27 sandbox、本次 developerInstructions)——每個「應該可以」的參數都要單獨 probe,而且要測「改得掉」而不只「設得上」。
+  2. 修 bug 後使用者回報「沒效」,先做**繞過自家程式碼的最小 probe** 直接打協定,把「我的邏輯錯」和「平台不支援」拆開——第一輪修復方向對但通道是死的,不 probe 會一直在自家程式碼裡打轉。
