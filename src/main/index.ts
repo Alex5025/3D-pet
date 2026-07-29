@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import type { AgentBinding } from '../shared/agentEvents';
+import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
 import { PET_EXPRESSIONS, createPetToolsHub } from './agent/petToolsHub';
@@ -606,6 +606,32 @@ app.whenReady().then(async () => {
   }
   if (process.platform === 'darwin') app.dock?.hide();
   loadConfigSync();
+
+  /* ── 串流文字合併(效能優化階段 3)──
+   * provider 的 text delta 是 token 級,每 token 一次 IPC 太密(renderer 每次都全文重渲);
+   * 33ms 合併一次;非 text 事件(done/error/approval…)到達時先 flush 緩衝,嚴格保序。 */
+  const chatTextBuffers = new Map<string, string>();
+  let chatFlushTimer: NodeJS.Timeout | null = null;
+  function flushChatText(): void {
+    if (chatFlushTimer) {
+      clearTimeout(chatFlushTimer);
+      chatFlushTimer = null;
+    }
+    for (const [petId, text] of chatTextBuffers) {
+      win?.webContents.send('chat-event-apply', petId, { kind: 'text', text });
+    }
+    chatTextBuffers.clear();
+  }
+  function sendChatEvent(petId: string, event: AgentEvent): void {
+    if (event.kind === 'text') {
+      chatTextBuffers.set(petId, (chatTextBuffers.get(petId) ?? '') + event.text);
+      chatFlushTimer ??= setTimeout(flushChatText, 33);
+      return;
+    }
+    flushChatText();
+    win?.webContents.send('chat-event-apply', petId, event);
+  }
+
   // 寵物工具中樞(v3):agent 經 MCP 呼叫 → socket 回連這裡 → 操縱桌寵
   petToolsHub = createPetToolsHub({
     playMotion: async (petId, file) => {
@@ -625,7 +651,8 @@ app.whenReady().then(async () => {
     speak: (petId, text) => {
       const trimmed = text.trim();
       if (!pets.has(petId) || !trimmed) return false;
-      win?.webContents.send('chat-event-apply', petId, { kind: 'text', text: `\n${trimmed.slice(0, 200)}\n` });
+      // 走同一個合併器:pet_speak 不可與緩衝中的串流文字互相超車
+      sendChatEvent(petId, { kind: 'text', text: `\n${trimmed.slice(0, 200)}\n` });
       return true;
     },
     listMotions: () => motionFiles
@@ -633,7 +660,7 @@ app.whenReady().then(async () => {
   bridge = createAgentBridge({
     getPet: (id) => pets.get(id) ?? null,
     updatePet,
-    send: (petId, event) => win?.webContents.send('chat-event-apply', petId, event),
+    send: sendChatEvent,
     providers: createProviders(petToolsHub)
   });
   await refreshMotions();

@@ -97,6 +97,26 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     mdBox.innerHTML = DOMPurify.sanitize(marked.parse(replyRaw) as string);
     reply.scrollTop = reply.scrollHeight;
   };
+  /** 串流重渲以 rAF 批次:一幀內到達的多個 chunk 只重渲一次(全文重跑 marked 是 O(n),不能每 token 一次)。 */
+  let renderQueued = false;
+  const queueRenderReply = (): void => {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      renderReply();
+    });
+  };
+  /** 回覆全文上限:超過就截頭保尾(切在段落邊界;截掉奇數個 ``` 圍欄要補回,防剩餘內文全被當 code block)。 */
+  const MAX_REPLY_CHARS = 60_000;
+  const truncateReplyRaw = (): void => {
+    let start = replyRaw.length - MAX_REPLY_CHARS;
+    const paragraph = replyRaw.indexOf('\n\n', start);
+    if (paragraph >= 0 && paragraph < start + MAX_REPLY_CHARS / 2) start = paragraph + 2;
+    const removed = replyRaw.slice(0, start);
+    const fences = (removed.match(/^```/gm) ?? []).length;
+    replyRaw = '…(前段過長已截斷)\n\n' + (fences % 2 === 1 ? '```\n' : '') + replyRaw.slice(start);
+  };
   reply.addEventListener('click', (event) => {
     const anchor = (event.target as HTMLElement | null)?.closest?.('a');
     if (anchor?.href) {
@@ -289,7 +309,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     appendText: (chunk) => {
       reply.classList.add('open');
       replyRaw += chunk;
-      renderReply(); // 串流中逐段重渲(marked 對幾 KB 文字是微秒級,無感)
+      if (replyRaw.length > MAX_REPLY_CHARS) truncateReplyRaw();
+      queueRenderReply();
     },
     setStatus: (text) => {
       status.textContent = text ?? '';
