@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createViewer, type Viewer } from './viewer';
+import { perf } from './perf';
 import {
   createSpeechBubble,
   type SpeechBubble,
@@ -59,6 +60,7 @@ function applyState(runtime: PetRuntime): void {
 }
 
 function projectedPetBounds(runtime: PetRuntime): SpeechBubbleAvoidRect {
+  perf.bubblePositions++;
   const { baseBox, viewer } = runtime;
   let left = Number.POSITIVE_INFINITY;
   let right = Number.NEGATIVE_INFINITY;

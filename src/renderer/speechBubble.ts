@@ -1,6 +1,7 @@
 import './speechBubble.css';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import { perf } from './perf';
 
 // agent 回覆是 GFM markdown;breaks 讓單一換行也換行(聊天語感)
 marked.setOptions({ gfm: true, breaks: true });
@@ -91,6 +92,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   reply.append(mdBox);
   let replyRaw = '';
   const renderReply = (): void => {
+    perf.renderReplies++;
     // agent 輸出是不可信文字:markdown 轉 HTML 後必經 DOMPurify 消毒
     mdBox.innerHTML = DOMPurify.sanitize(marked.parse(replyRaw) as string);
     reply.scrollTop = reply.scrollHeight;

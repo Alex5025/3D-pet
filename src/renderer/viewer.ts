@@ -7,6 +7,7 @@ import {
   VRMLookAtQuaternionProxy,
   type VRMAnimation
 } from '@pixiv/three-vrm-animation';
+import { perf } from './perf';
 
 /**
  * VRM 檢視核心 —— 逐行對照 pixiv/three-vrm 官方範例,不自創:
@@ -485,9 +486,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     if (disposed) return;
     requestAnimationFrame(animate);
     frameNo++;
+    perf.rafTicks++;
     if (mixerActive) wake(); // 播動作期間視為持續活動(角色在動,探針也要每幀重讀)
     const idle = performance.now() - lastActiveAt > IDLE_DELAY_MS;
     if (idle && frameNo % IDLE_SKIP !== 0) return; // 跳幀要在 getDelta 之前,delta 才不會被拆碎
+    perf.renderedFrames++;
 
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
     const dt = Math.min(clock.getDelta(), MAX_DT);
