@@ -24,7 +24,7 @@ function activateTab(name: string): void {
   });
   document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
   el(`tab-${name}`).classList.add('active');
-  el('reset').hidden = name === 'project';
+  el('reset').hidden = name === 'project' || name === 'motion'; // 重置只作用於光影/角色參數
 }
 
 for (const button of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {

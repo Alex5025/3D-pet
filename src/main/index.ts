@@ -528,7 +528,8 @@ function petMenu(requestedId?: string): Menu {
       submenu: [
         { label: '工作（AI 助手）…', click: () => openSettings('project', petId) },
         { label: '燈光…', click: () => openSettings('light', petId) },
-        { label: '角色…', click: () => openSettings('char', petId) }
+        { label: '角色…', click: () => openSettings('char', petId) },
+        { label: '動作…', click: () => openSettings('motion', petId) }
       ]
     },
     { label: '重置位置與大小', click: () => resetState(petId) },
@@ -549,7 +550,7 @@ function petMenu(requestedId?: string): Menu {
   ]);
 }
 
-function openSettings(tab: 'light' | 'char' | 'project' = 'light', petId?: string): void {
+function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', petId?: string): void {
   if (petId) selectPet(petId);
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.webContents.send('switch-tab', tab);

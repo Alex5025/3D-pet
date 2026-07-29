@@ -203,6 +203,7 @@
       <div id="tabs">
         <button data-tab="light" class="active">光影</button>
         <button data-tab="char">角色</button>
+        <button data-tab="motion">動作</button>
         <button data-tab="project">工作</button>
       </div>
 
@@ -266,12 +267,6 @@
           <input type="range" id="tail" min="0" max="2" step="0.02" />
         </div>
 
-        <h3>預設姿勢</h3>
-        <select class="text-input" id="default-pose" style="width: 100%;"></select>
-
-        <h3>待機動作（勾選後隨機播放）</h3>
-        <div id="idle-motions"><span class="empty">載入中…</span></div>
-
         <h3>服裝顯示</h3>
         <div id="wardrobe"><span class="empty">載入中…</span></div>
 
@@ -286,6 +281,15 @@
             <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
           </div>
         </div>
+      </div>
+
+      <!-- ── 動作設定 ── -->
+      <div class="tab" id="tab-motion">
+        <h3>預設姿勢</h3>
+        <select class="text-input" id="default-pose" style="width: 100%;"></select>
+
+        <h3>待機動作（勾選後隨機播放）</h3>
+        <div id="idle-motions"><span class="empty">載入中…</span></div>
       </div>
 
       <!-- ── 工作設定 ── -->
