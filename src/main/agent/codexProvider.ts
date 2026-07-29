@@ -224,21 +224,25 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       return threadId;
     },
     async *sendMessage(threadId, text, opts): AsyncIterable<AgentEvent> {
-      // crash 後的 lazy 重啟,或權限變更。
-      // 實測(v2 煙霧):同 server 內對已載入 thread 重新 resume「不會」換 sandbox/approval;
-      // 全新 server 的 resume 才會套新參數 → 權限變更 = 重啟 app-server 再 resume(context 保留)。
-      // 代價:其他 codex 寵物進行中的 turn 會收到 error(權限切換是罕見操作,可接受)。
+      // crash 後的 lazy 重啟,或權限/個性變更。
+      // 實測(v2 煙霧):同 server 內對已載入 thread 重新 resume「不會」套新 thread 參數
+      // (sandbox/approval 如此,developerInstructions 同理);
+      // 全新 server 的 resume 才會套 → 權限或個性變更 = 重啟 app-server 再 resume(context 保留)。
+      // 代價:其他 codex 寵物進行中的 turn 會收到 error(兩者都是罕見操作,可接受)。
       const saved = sessions.get(threadId);
       const permission: AgentPermission = opts?.permission ?? 'readonly';
-      if (loadedThreads.has(threadId) && saved?.permission !== permission) {
+      // persona 以本 turn 傳入為準(bridge 每 turn 帶當下 profile.persona;undefined = 已清空)——
+      // 不能讓 saved 舊值優先,否則設定面板改了個性、這裡永遠用舊的
+      const persona = opts ? opts.persona : saved?.persona;
+      const needReload = saved?.permission !== permission || saved?.persona !== persona;
+      if (loadedThreads.has(threadId) && needReload) {
         const proc = child;
-        teardown('權限變更,重啟 app-server');
+        teardown('權限或個性變更,重啟 app-server');
         proc?.kill('SIGTERM');
         await new Promise((resolve) => setTimeout(resolve, 400));
       }
-      if (!loadedThreads.has(threadId) || saved?.permission !== permission) {
+      if (!loadedThreads.has(threadId) || needReload) {
         const workdir = saved?.workdir ?? process.cwd();
-        const persona = saved?.persona ?? opts?.persona;
         const petId = saved?.petId ?? opts?.petId;
         loadedThreads.delete(threadId);
         await loadThread(threadId, workdir, persona, permission, petId);
