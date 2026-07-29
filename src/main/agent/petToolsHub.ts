@@ -39,14 +39,21 @@ export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
 
   const server: Server = createServer((socket) => {
     let buffer = '';
+    let chain = Promise.resolve(); // 同 socket 多請求串行處理,回覆順序不亂
+    socket.on('error', () => undefined); // 客戶端斷線等錯誤不可炸 main
     socket.on('data', (chunk) => {
       buffer += String(chunk);
-      const nl = buffer.indexOf('\n');
-      if (nl < 0) return;
-      void (async () => {
+      // 逐行切割並截斷 buffer——只讀第一行不截斷會把同 socket 的第二個請求解析成第一個
+      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        chain = chain.then(() => handleLine(line));
+      }
+      async function handleLine(line: string): Promise<void> {
+        if (socket.destroyed) return; // 前一行已 destroy(token 錯),殘餘行不再處理
         let reply: Record<string, unknown> = { ok: false, error: '無效請求' };
         try {
-          const msg = JSON.parse(buffer.slice(0, nl)) as Record<string, unknown>;
+          const msg = JSON.parse(line) as Record<string, unknown>;
           if (msg['token'] !== token) {
             socket.destroy();
             return;
@@ -79,7 +86,7 @@ export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
           /* 保底回 error reply */
         }
         socket.write(JSON.stringify(reply) + '\n');
-      })();
+      }
     });
   });
   server.listen(socketPath);

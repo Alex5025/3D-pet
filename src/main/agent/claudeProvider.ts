@@ -82,12 +82,20 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
     if (permServer) return;
     permServer = createServer((socket) => {
       let buffer = '';
+      socket.on('error', () => undefined); // 客戶端斷線等錯誤不可炸 main
       socket.on('data', (chunk) => {
         buffer += String(chunk);
-        const nl = buffer.indexOf('\n');
-        if (nl < 0) return;
+        // 逐行切割並截斷 buffer(同 petToolsHub:只讀第一行會把後續請求解析成舊行)
+        for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+          const line = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 1);
+          handleLine(line);
+        }
+      });
+      function handleLine(line: string): void {
+        if (socket.destroyed) return; // 前一行已 destroy,殘餘行不再處理
         let payload: Record<string, unknown>;
-        try { payload = JSON.parse(buffer.slice(0, nl)) as Record<string, unknown>; } catch { socket.destroy(); return; }
+        try { payload = JSON.parse(line) as Record<string, unknown>; } catch { socket.destroy(); return; }
         if (payload['token'] !== permToken) { socket.destroy(); return; }
         // 寵物工具(我們自己的 MCP)的權限詢問直接放行,不打擾使用者
         if (String(payload['toolName'] ?? '').startsWith('mcp__pettools__')) {
@@ -109,7 +117,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
           typeof input['file_path'] === 'string' ? `檔案:${input['file_path']}` : ''
         ].filter(Boolean).join('\n');
         queue.push({ kind: 'approval', requestId, description });
-      });
+      }
     });
     permServer.listen(permSocketPath);
   }

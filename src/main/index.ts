@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { mkdirSync, readFileSync, renameSync, writeFileSync, watch } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import type { AgentBinding } from '../shared/agentEvents';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
@@ -80,6 +80,7 @@ const wardrobeLists = new Map<string, { key: string; label: string }[]>();
 let configFlush: NodeJS.Timeout | null = null;
 let bridge: AgentBridge | null = null;
 let petToolsHub: PetToolsHub | null = null;
+let motionsWatcher: FSWatcher | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -136,6 +137,13 @@ function createProfile(index = pets.size): PetProfile {
   );
 }
 
+/** 待落盤集合:updatePet 標寵物、selectPet 等標 registry;flush 只寫髒的檔案。 */
+const dirtyPetIds = new Set<string>();
+let registryDirty = false;
+let configFlushInFlight = false;
+
+/** 全量同步落盤——**只給退出路徑用**(before-quit 與 Tray 結束;app.exit 不觸發 before-quit,
+ *  行程要死了必須同步寫完)。平時的 500ms debounce 走 persistConfigAsync,不佔 main event loop。 */
 function persistConfigSync(): void {
   if (configFlush) {
     clearTimeout(configFlush);
@@ -147,14 +155,46 @@ function persistConfigSync(): void {
     for (const profile of pets.values()) {
       writeFileSync(petPath(profile.id), JSON.stringify(profile, null, 2));
     }
+    registryDirty = false;
+    dirtyPetIds.clear();
   } catch (error) {
     console.log('[main] config flush failed', error);
   }
 }
 
+/** 非同步落盤:只寫髒檔;寫入期間新標髒的由迴圈或下一輪 debounce 撿走。 */
+async function persistConfigAsync(): Promise<void> {
+  if (configFlushInFlight) {
+    scheduleConfigFlush(); // 上一輪還在寫,改期再來(不可交錯寫同一批檔案)
+    return;
+  }
+  configFlushInFlight = true;
+  try {
+    await mkdir(petsDir(), { recursive: true });
+    while (registryDirty || dirtyPetIds.size) {
+      if (registryDirty) {
+        registryDirty = false;
+        await writeFile(registryPath(), JSON.stringify(registry, null, 2));
+      }
+      const ids = [...dirtyPetIds];
+      dirtyPetIds.clear();
+      for (const id of ids) {
+        const profile = pets.get(id);
+        if (profile) await writeFile(petPath(id), JSON.stringify(profile, null, 2));
+      }
+    }
+  } catch (error) {
+    console.log('[main] config flush failed', error);
+  } finally {
+    configFlushInFlight = false;
+    // 迴圈結束到這裡之間若又標髒(await 空檔),補一輪 debounce 免得漏寫
+    if (registryDirty || dirtyPetIds.size) scheduleConfigFlush();
+  }
+}
+
 function scheduleConfigFlush(): void {
   if (configFlush) clearTimeout(configFlush);
-  configFlush = setTimeout(persistConfigSync, 500);
+  configFlush = setTimeout(() => void persistConfigAsync(), 500);
 }
 
 function loadConfigSync(): void {
@@ -229,6 +269,7 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
     releasePetCaches(id);
     void bridge?.closePetSession(id);
   }
+  dirtyPetIds.add(id);
   scheduleConfigFlush();
   return profile;
 }
@@ -256,6 +297,7 @@ function selectPet(id: string): PetProfile | null {
   const profile = pets.get(id);
   if (!profile) return null;
   registry.selectedPetId = id;
+  registryDirty = true;
   scheduleConfigFlush();
   refreshTray();
   settingsWin?.webContents.send('selected-pet-apply', id);
@@ -591,7 +633,12 @@ app.whenReady().then(async () => {
   });
   await refreshMotions();
   try {
-    watch(join(dataDir(), 'motions'), () => void refreshMotions().then(refreshTray));
+    // macOS 單次檔案變動常觸發多個 watch 事件:debounce 讓一批變動只做一次 readdir + Tray 重建
+    let motionsDebounce: NodeJS.Timeout | null = null;
+    motionsWatcher = watch(join(dataDir(), 'motions'), () => {
+      if (motionsDebounce) clearTimeout(motionsDebounce);
+      motionsDebounce = setTimeout(() => void refreshMotions().then(refreshTray), 300);
+    });
   } catch { /* 選單會顯示 motions 資料夾不存在 */ }
 
   win = createOverlay();
@@ -789,5 +836,6 @@ app.on('window-all-closed', () => { /* 常駐 */ });
 app.on('before-quit', () => {
   bridge?.shutdownSync();
   petToolsHub?.dispose();
+  motionsWatcher?.close();
   persistConfigSync();
 });
