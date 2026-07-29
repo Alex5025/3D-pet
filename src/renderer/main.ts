@@ -6,7 +6,7 @@ import {
   type SpeechBubble,
   type SpeechBubbleAvoidRect,
 } from './speechBubble';
-import type { PetProfile, PetState, WardrobeItem } from '../preload/index';
+import type { PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 
@@ -291,6 +291,7 @@ function agentInfoText(profile: PetProfile): string {
 function addRuntime(profile: PetProfile): void {
   if (runtimes.has(profile.id) || !profile.enabled) return;
   const viewer = createViewer({ transparent: true });
+  if (powerProfile) viewer.setPowerProfile(powerProfile); // 晚加入的寵物補套當前檔位
   viewer.renderer.domElement.dataset['petId'] = profile.id;
   const runtime: PetRuntime = {
     profile,
@@ -367,6 +368,19 @@ function reconcileProfiles(profiles: PetProfile[]): void {
 
 window.pet.onPetProfiles((profiles) => reconcileProfiles(profiles));
 window.pet.getPetCollection().then(({ pets }) => reconcileProfiles(pets));
+
+/** 目前功率檔位(main 的 powerMonitor 推播);晚建立的 runtime 由 addRuntime 補套。 */
+let powerProfile: PowerProfile | null = null;
+window.pet.onPowerProfile((profile) => {
+  powerProfile = profile;
+  for (const runtime of runtimes.values()) runtime.viewer.setPowerProfile(profile);
+  if (profile.paused) {
+    // 鎖屏/睡眠:輪詢已停,拖曳看門狗不會再被 onCursor 觸發——旗標必須在這裡主動清,
+    // 否則解鎖後 overlay 以為還在拖曳、持續吃掉桌面點擊
+    clearDragFlags();
+    setInteractive(false);
+  }
+});
 
 window.pet.onVrm(async (petId, buffer) => {
   const runtime = runtimes.get(petId);

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
@@ -81,6 +81,8 @@ let configFlush: NodeJS.Timeout | null = null;
 let bridge: AgentBridge | null = null;
 let petToolsHub: PetToolsHub | null = null;
 let motionsWatcher: FSWatcher | null = null;
+/** 游標輪詢重算(功率檔位區塊注入):寵物啟用狀態變更時呼叫,全休息 = 停輪詢。 */
+let refreshCursorPollHook: (() => void) | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -269,6 +271,7 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
     releasePetCaches(id);
     void bridge?.closePetSession(id);
   }
+  if (patch.enabled !== undefined) refreshCursorPollHook?.();
   dirtyPetIds.add(id);
   scheduleConfigFlush();
   return profile;
@@ -354,6 +357,7 @@ function createNewPet(): PetProfile {
   pets.set(profile.id, profile);
   registry.petIds.push(profile.id);
   registry.selectedPetId = profile.id;
+  refreshCursorPollHook?.(); // 全休息時新增的寵物是啟用的:恢復輪詢
   persistConfigSync();
   sendPetProfiles();
   return profile;
@@ -371,6 +375,7 @@ function removePet(id: string): boolean {
   void bridge?.closePetSession(id);
   registry.petIds = registry.petIds.filter((petId) => petId !== id);
   if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
+  refreshCursorPollHook?.(); // 刪掉最後一隻醒著的寵物時停輪詢
   persistConfigSync();
   sendPetProfiles();
   return true;
@@ -808,22 +813,105 @@ app.whenReady().then(async () => {
   screen.on('display-metrics-changed', () => {
     if (win && !win.isDestroyed()) overlayBounds = win.getBounds();
   });
+
+  /* ── 游標輪詢中央控制 + 功率檔位(效能優化階段 2)──
+   * click-through 視窗收不到被動 mousemove(§平台實證),輪詢是必要之惡;
+   * 但頻率交給功率檔位決定,鎖屏/睡眠/全寵休息時完全停掉。 */
   let cursorTimer: NodeJS.Timeout | null = null;
-  let lastX = -1e9;
-  let lastY = -1e9;
-  let sameCount = 0;
-  win.webContents.on('did-finish-load', () => {
-    if (cursorTimer) clearInterval(cursorTimer);
+  let cursorPollMs = 30;
+  function setCursorPoll(intervalMs: number | null): void {
+    if (cursorTimer) {
+      clearInterval(cursorTimer);
+      cursorTimer = null;
+    }
+    if (intervalMs === null) return;
+    cursorPollMs = intervalMs;
+    // 心跳不變量:renderer 拖曳看門狗(1200ms 判死)依賴 ≈1s 一次的強制心跳,
+    // 任何輪詢頻率下 sameLimit 都要換算回「約 1 秒」而不是固定次數
+    const sameLimit = Math.max(1, Math.round(1000 / intervalMs));
+    let lastX = -1e9;
+    let lastY = -1e9;
+    let sameCount = 0;
     cursorTimer = setInterval(() => {
       if (!win || win.isDestroyed()) return;
       const point = screen.getCursorScreenPoint();
-      if (point.x === lastX && point.y === lastY && ++sameCount < 33) return;
+      if (point.x === lastX && point.y === lastY && ++sameCount < sameLimit) return;
       sameCount = 0;
       lastX = point.x;
       lastY = point.y;
       win.webContents.send('cursor', { x: point.x - overlayBounds.x, y: point.y - overlayBounds.y });
-    }, 30);
+    }, intervalMs);
+  }
+
+  /** 功率檔位:normal(AC)/ eco(電池或微熱)/ critical(過熱)/ suspended(鎖屏/睡眠)。 */
+  const POWER_TIERS = {
+    normal: { pollMs: 30, idleSkip: 6, idleDelayMs: 3000, activeSkip: 1 },
+    eco: { pollMs: 60, idleSkip: 12, idleDelayMs: 1500, activeSkip: 2 },
+    critical: { pollMs: 120, idleSkip: 20, idleDelayMs: 1000, activeSkip: 3 }
+  } as const;
+  type PowerTier = keyof typeof POWER_TIERS | 'suspended';
+  let onBattery = false;
+  let thermal = 'nominal';
+  let screenOff = false; // 鎖屏或系統睡眠
+  let powerTier: PowerTier | null = null; // null = 尚未套用過(開機首套必發)
+
+  function computeTier(): PowerTier {
+    if (screenOff) return 'suspended';
+    if (thermal === 'serious' || thermal === 'critical') return 'critical';
+    if (onBattery || thermal === 'fair') return 'eco';
+    return 'normal';
+  }
+
+  function currentProfilePayload(): Record<string, unknown> {
+    if (powerTier === 'suspended' || powerTier === null) {
+      return { tier: powerTier ?? 'normal', paused: powerTier === 'suspended', ...POWER_TIERS.normal };
+    }
+    return { tier: powerTier, paused: false, ...POWER_TIERS[powerTier] };
+  }
+
+  function anyPetEnabled(): boolean {
+    return [...pets.values()].some((profile) => profile.enabled !== false);
+  }
+
+  function applyPowerTier(): void {
+    const next = computeTier();
+    if (next === powerTier) return;
+    powerTier = next;
+    console.log(`[power] 功率檔位 → ${next}(battery=${onBattery} thermal=${thermal} screenOff=${screenOff})`);
+    win?.webContents.send('power-profile-apply', currentProfilePayload());
+    refreshCursorPoll();
+  }
+
+  /** 輪詢頻率 = 檔位 × 有沒有醒著的寵物(全休息時輪詢沒有意義)。 */
+  function refreshCursorPoll(): void {
+    if (powerTier === 'suspended' || !anyPetEnabled()) setCursorPoll(null);
+    else setCursorPoll(POWER_TIERS[(powerTier ?? 'normal') as keyof typeof POWER_TIERS].pollMs);
+  }
+  refreshCursorPollHook = refreshCursorPoll; // updatePet(enabled 變更)經此重算
+
+  const updatePowerState = (): void => {
+    onBattery = powerMonitor.isOnBatteryPower();
+    try {
+      thermal = powerMonitor.getCurrentThermalState(); // macOS 專屬;其他平台 unknown
+    } catch {
+      thermal = 'unknown';
+    }
+    applyPowerTier();
+  };
+  powerMonitor.on('on-battery', updatePowerState);
+  powerMonitor.on('on-ac', updatePowerState);
+  powerMonitor.on('thermal-state-change', updatePowerState);
+  powerMonitor.on('lock-screen', () => { screenOff = true; applyPowerTier(); });
+  powerMonitor.on('unlock-screen', () => { screenOff = false; updatePowerState(); });
+  powerMonitor.on('suspend', () => { screenOff = true; applyPowerTier(); });
+  powerMonitor.on('resume', () => { screenOff = false; updatePowerState(); });
+
+  win.webContents.on('did-finish-load', () => {
+    // renderer 重載會失去檔位狀態:重送當前 profile 再重啟輪詢(沿用防疊 timer 的既有防護)
+    win?.webContents.send('power-profile-apply', currentProfilePayload());
+    refreshCursorPoll();
   });
+  updatePowerState(); // 開機初始化(首套必發 profile)
 
   const icon = nativeImage.createFromDataURL(TRAY_ICON);
   icon.setTemplateImage(true);

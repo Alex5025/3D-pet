@@ -47,6 +47,8 @@ export interface Viewer {
   alphaMax: (pts: Array<[number, number]>) => number;
   /** 喚醒渲染:外部狀態變更(拖曳/縮放/面板改位置)時呼叫,恢復全速;idle 會自動節流省電 */
   wake: () => void;
+  /** 套用功率檔位(main 的 powerMonitor 推播):調整節流參數;paused 時渲染全停 */
+  setPowerProfile: (profile: { paused: boolean; idleSkip: number; idleDelayMs: number; activeSkip: number }) => void;
   /** 切換情緒表情(官方 expressionManager,VRM 標準 preset:happy/angry/sad/relaxed/surprised;neutral=清除) */
   setExpression: (name: string) => void;
   /** 播放 VRMA 動作(官方 three-vrm-animation);播一次,播完停在最後一幀,不循環 */
@@ -469,8 +471,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
 
   // animate —— official basic.html + 燈光錨定 + 命中探針 + idle 節流
   // 節流不動官方渲染路徑,只是閒置時跳過多餘的幀(桌寵絕大多數時間是靜止的)
-  const IDLE_DELAY_MS = 3000; // 最後活動後的全速緩衝:讓 spring bone 有時間安定
-  const IDLE_SKIP = 6; // 節流時每 6 個 rAF 才渲染一次(60Hz 螢幕 ≈ 10fps)
+  // 三個節流參數由功率檔位(main 的 powerMonitor 推播)動態調整,預設 = normal 檔
+  let idleDelayMs = 3000; // 最後活動後的全速緩衝:讓 spring bone 有時間安定
+  let idleSkip = 6; // 節流時每 N 個 rAF 才渲染一次(60Hz 螢幕、6 ≈ 10fps)
+  let activeSkip = 1; // 活動中的幀上限(eco=2≈30fps、critical=3≈20fps;物理經 MAX_DT 鉗制會輕微慢動作,是刻意降級)
+  let paused = false; // 鎖屏/睡眠:渲染全停(rAF 續排,恢復時自動繼續)
   const MAX_DT = 1 / 30; // 跳幀後 getDelta 變大:鉗制單步 dt,防 spring bone(Verlet)大步過衝爆掉
   let lastActiveAt = performance.now();
   let frameNo = 0;
@@ -487,9 +492,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     requestAnimationFrame(animate);
     frameNo++;
     perf.rafTicks++;
+    if (paused) return; // 鎖屏/睡眠:整個渲染暫停(跳幀要在 getDelta 之前,下同)
     if (mixerActive) wake(); // 播動作期間視為持續活動(角色在動,探針也要每幀重讀)
-    const idle = performance.now() - lastActiveAt > IDLE_DELAY_MS;
-    if (idle && frameNo % IDLE_SKIP !== 0) return; // 跳幀要在 getDelta 之前,delta 才不會被拆碎
+    const idle = performance.now() - lastActiveAt > idleDelayMs;
+    if (idle && frameNo % idleSkip !== 0) return; // 跳幀要在 getDelta 之前,delta 才不會被拆碎
+    if (!idle && frameNo % activeSkip !== 0) return; // 降功率檔位的活動幀上限(normal=1 不生效)
     perf.renderedFrames++;
 
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
@@ -649,5 +656,14 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     wake();
   }
 
-  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, enableRootMotionSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, setExpression, playVRMA, stopVRMA, dispose };
+  function setPowerProfile(profile: { paused: boolean; idleSkip: number; idleDelayMs: number; activeSkip: number }): void {
+    const wasPaused = paused;
+    paused = profile.paused;
+    idleSkip = Math.max(1, profile.idleSkip);
+    idleDelayMs = Math.max(0, profile.idleDelayMs);
+    activeSkip = Math.max(1, profile.activeSkip);
+    if (wasPaused && !paused) wake(); // 解鎖/喚醒:補渲染一幀(探針也要重讀)
+  }
+
+  return { scene, camera, renderer, currentVrm: () => vrm, root, loadFromUrl, loadFromBuffer, setLookAt, setLighting, setSway, enableRootMotionSway, snapshot, setHitProbe, isHit, requestAlphaScan, alphaAt, alphaMax, wake, setPowerProfile, setExpression, playVRMA, stopVRMA, dispose };
 }

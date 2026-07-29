@@ -63,6 +63,15 @@ export interface PetCollection {
   selectedPetId: string;
 }
 
+/** 功率檔位(main 的 powerMonitor 推播):renderer 據此調整渲染節流;paused = 鎖屏/睡眠全停。 */
+export interface PowerProfile {
+  tier: string;
+  paused: boolean;
+  idleSkip: number;
+  idleDelayMs: number;
+  activeSkip: number;
+}
+
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
@@ -107,6 +116,9 @@ const api = {
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
     ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent) => callback(petId, agentEvent)),
+
+  onPowerProfile: (callback: (profile: PowerProfile) => void) =>
+    ipcRenderer.on('power-profile-apply', (_event, profile) => callback(profile)),
 
   onVrm: (callback: (petId: string, buffer: ArrayBuffer) => void) =>
     ipcRenderer.on('vrm-buffer', (_event, petId, bytes: Uint8Array) =>
