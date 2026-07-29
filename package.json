@@ -4,6 +4,8 @@
   "description": "Desktop VRM pet — rendering follows pixiv/three-vrm official examples verbatim",
   "main": "out/main/index.js",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
+    "check:secrets": "node scripts/check-secrets.mjs",
     "predev": "pkill -9 -f \"$(pwd)/node_modules/electron/dist\" || true",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
