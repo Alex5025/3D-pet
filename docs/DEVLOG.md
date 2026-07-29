@@ -463,3 +463,15 @@ mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 �
 - **連結外開**:回覆裡的 `<a>` 攔截點擊,經 IPC 交給 main 的 `shell.openExternal`(僅放行 http/https)——疊層視窗絕不能被導航走。
 - **模型/力度徽章**:泡泡標題下顯示「家別 · 模型 · 力度」(如 `Codex · gpt-5.6-sol · low`),資料來自 profile.agent,走既有 profiles 推播鏈,設定面板改完即時反映。這是使用者問「目前模型權重怎麼設定」後的可視化——狀態要看得見,不用問。
 - 新依賴:`marked` + `dompurify`(泡泡渲染最小組合);另補 README(專案至此已是完整產品形態,值得一頁門面)。
+
+---
+
+## 31. Markdown 渲染沒生效——批次替換靜默失敗(2026-07-29)
+
+- **症狀**(使用者實機截圖):徽章正常,但回覆區仍顯示原始 markdown(`## 今日任務`、`- [x] …` 原樣),且換行全被吃掉,比改之前更難讀。
+- **根因**:§30 的改動用 Python `str.replace` 批次替換,其中 beginTurn+appendText 這段的舊字串比對不上(先前另一次修改動過該區),**`str.replace` 沒匹配就原樣返回、不報錯**——結果 marked/DOMPurify 管線、mdBox、CSS 全部就位,唯獨串流入口 `appendText` 還在 `append(document.createTextNode(chunk))`,`renderReply()` 從未被呼叫;新 CSS 的 `white-space: normal` 又把原始文字的換行吃掉,完全解釋截圖。
+- **修法**:`appendText` 改為累積 `replyRaw` 後 `renderReply()` 逐段重渲;`beginTurn` 清 `replyRaw`、`replaceChildren(mdBox)` 保容器(舊版 `reply.textContent = ''` 甚至會把 mdBox 整個移出 DOM)。
+- **驗證**:node 直跑 marked 確認截圖那段文字輸出正確 `<h2>`/`<li>`/`<code>`(含 task list checkbox);grep 確認 `renderReply()` 已被引用;typecheck + build 過。
+- **教訓**:
+  1. **`str.replace` 類批次替換必須驗證替換數**(替換前後 diff 行數、或改用「無匹配即報錯」的工具如 Edit/patch)——靜默失敗會做出「管線俱在、就是沒接上」這種最難一眼看穿的半成品。
+  2. 「新功能完全沒效果但周邊(徽章/CSS)都有效」的組合,優先懷疑**同一批改動有部分沒落地**,而不是邏輯錯誤。
