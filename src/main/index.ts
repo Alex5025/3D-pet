@@ -431,9 +431,15 @@ function petMenu(requestedId?: string): Menu {
     { type: 'separator' },
     { label: '選擇 VRM 檔…', click: () => void chooseVrm(petId) },
     { label: '工作設定…', click: () => openSettings('project', petId) },
-    { label: '播放動作', submenu: motionMenuItems(petId) },
-    { label: '預設姿勢', submenu: defaultPoseMenuItems(petId) },
-    { label: '停止動作', click: () => win?.webContents.send('vrma-stop', petId) },
+    {
+      label: '角色動作',
+      submenu: [
+        { label: '播放動作', submenu: motionMenuItems(petId) },
+        { label: '預設姿勢', submenu: defaultPoseMenuItems(petId) },
+        { type: 'separator' },
+        { label: '停止動作', click: () => win?.webContents.send('vrma-stop', petId) }
+      ]
+    },
     { label: '調整燈光…', click: () => openSettings('light', petId) },
     { label: '角色調整…', click: () => openSettings('char', petId) },
     { label: '重置位置與大小', click: () => resetState(petId) },
