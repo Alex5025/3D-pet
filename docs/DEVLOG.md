@@ -454,3 +454,12 @@ mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 �
 2. **「沒有請求權限,直接說被拒絕」**:設定其實正確(`permission: ask` 已落盤),元凶是 §11 的老坑變種——**vite 熱重載讓 renderer 拿到新 UI(能設定新欄位),main 行程卻還是舊碼**(不吃 permission、一律唯讀+never→codex 自動拒絕提權)。「設定看起來生效、行為卻是舊的」= 先懷疑 main 沒重啟。
 3. **fileChange 審批描述退化成方法名**:`item/fileChange/requestApproval` 的 params 常只有可為 null 的 `reason`(協定如此),fallback 補人話「想修改工作目錄中的檔案」。
 4. **自發表演不發生**:「你可以呼叫…」對模型太客氣,effort=low 時幾乎不做份外事。提示改**具體行為規則**(何時切表情/播動作/回報);另建議表演型寵物 effort ≥ medium。
+
+---
+
+## 30. 泡泡 Markdown 渲染與模型徽章(2026-07-28)
+
+- **回覆區 Markdown 渲染**:agent 回覆本來就是 GFM,原樣顯示 `#`/```` ``` ````/`>` 難讀。接 `marked`(gfm + breaks)+ **DOMPurify 消毒**——agent 輸出是不可信文字,markdown 轉 HTML 必過消毒才上 DOM。串流逐段重渲(幾 KB 文字 marked 是微秒級);回覆區結構改為「md 容器 + 錯誤列」分離,beginTurn 用 `replaceChildren` 保容器清錯誤。
+- **連結外開**:回覆裡的 `<a>` 攔截點擊,經 IPC 交給 main 的 `shell.openExternal`(僅放行 http/https)——疊層視窗絕不能被導航走。
+- **模型/力度徽章**:泡泡標題下顯示「家別 · 模型 · 力度」(如 `Codex · gpt-5.6-sol · low`),資料來自 profile.agent,走既有 profiles 推播鏈,設定面板改完即時反映。這是使用者問「目前模型權重怎麼設定」後的可視化——狀態要看得見,不用問。
+- 新依賴:`marked` + `dompurify`(泡泡渲染最小組合);另補 README(專案至此已是完整產品形態,值得一頁門面)。
