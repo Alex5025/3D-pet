@@ -44,6 +44,9 @@ class EventQueue {
   }
 }
 
+/** VRM_PET_AGENT_DEBUG=1:每次送出時把 argv / stdin / mcp-config 原樣 dump 到終端機(除錯用)。 */
+const AGENT_DEBUG = process.env['VRM_PET_AGENT_DEBUG'] === '1';
+
 function killGracefully(child: ChildProcess): void {
   child.kill('SIGTERM');
   const hardKill = setTimeout(() => {
@@ -131,6 +134,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
     if (!Object.keys(servers).length) return null;
     const path = join(permDir, `${turnKey ?? `plain-${++permSeq}`}.json`);
     writeFileSync(path, JSON.stringify({ mcpServers: servers }));
+    if (AGENT_DEBUG) console.log(`[claude][debug] mcp-config ${path}\n${JSON.stringify({ mcpServers: servers }, null, 2)}`);
     return path;
   }
 
@@ -182,6 +186,10 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       const isRealId = !sessionId.startsWith('pending-');
       if (isRealId) args.push('--resume', sessionId);
 
+      if (AGENT_DEBUG) {
+        console.log(`[claude][debug] cwd=${workdir ?? '(無)'} spawn claude \\\n  ${args.map((a) => JSON.stringify(a)).join(' \\\n  ')}`);
+        console.log(`[claude][debug] stdin: ${JSON.stringify(text)}`);
+      }
       const child = spawn('claude', args, { cwd: workdir, env, stdio: ['pipe', 'pipe', 'pipe'] });
       running.set(sessionId, child);
       if (turnKey) approvalQueues.set(turnKey, queue);

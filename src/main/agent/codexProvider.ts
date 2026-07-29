@@ -15,6 +15,9 @@ import type { PetToolsHub } from './petToolsHub';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/** VRM_PET_AGENT_DEBUG=1:每個送往 app-server 的 JSON-RPC 請求原樣 dump 到終端機(除錯用)。 */
+const AGENT_DEBUG = process.env['VRM_PET_AGENT_DEBUG'] === '1';
+
 interface JsonRpcMessage {
   id?: number;
   method?: string;
@@ -106,6 +109,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const proc = child;
     if (!proc?.stdin?.writable) return Promise.resolve({ error: { message: 'codex app-server 未連線' } });
     const id = nextId++;
+    if (AGENT_DEBUG) console.log(`[codex][debug] → ${method}\n${JSON.stringify(params, null, 2)}`);
     proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
     return new Promise((resolve) => {
       const timer = setTimeout(() => {

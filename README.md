@@ -50,6 +50,7 @@ VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=1 npm run dev       # MockP
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=claude npm run dev  # 真 claude e2e(耗訂閱額度)
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=codex npm run dev   # 真 codex e2e(耗訂閱額度)
 VRM_PET_AGENT_MOCK=1 npm run dev                                          # 假 agent 走 UI,不耗額度
+VRM_PET_AGENT_DEBUG=1 npm run dev                                         # 每次送出 dump argv/payload(claude spawn 指令+stdin、codex JSON-RPC)
 npm run typecheck && npm run build
 ```
 
