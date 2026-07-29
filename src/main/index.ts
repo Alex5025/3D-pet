@@ -430,7 +430,6 @@ function petMenu(requestedId?: string): Menu {
     },
     { type: 'separator' },
     { label: '選擇 VRM 檔…', click: () => void chooseVrm(petId) },
-    { label: '工作設定…', click: () => openSettings('project', petId) },
     {
       label: '角色動作',
       submenu: [
@@ -440,8 +439,15 @@ function petMenu(requestedId?: string): Menu {
         { label: '停止動作', click: () => win?.webContents.send('vrma-stop', petId) }
       ]
     },
-    { label: '調整燈光…', click: () => openSettings('light', petId) },
-    { label: '角色調整…', click: () => openSettings('char', petId) },
+    {
+      // 三項都是同一個設定視窗的分頁,收成一組入口
+      label: '設定',
+      submenu: [
+        { label: '工作（AI 助手）…', click: () => openSettings('project', petId) },
+        { label: '燈光…', click: () => openSettings('light', petId) },
+        { label: '角色…', click: () => openSettings('char', petId) }
+      ]
+    },
     { label: '重置位置與大小', click: () => resetState(petId) },
     {
       label: profile.enabled ? '讓目前角色休息' : '喚醒目前角色',
