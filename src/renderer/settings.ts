@@ -47,12 +47,26 @@ function renderPetSelector(): void {
   (el('remove-pet') as HTMLButtonElement).disabled = profiles.length <= 1;
 }
 
-/* 角色設定(個性):自由文字,注入 agent 對話的 system prompt(claude 逐 turn;codex 於 thread 建立/恢復)。 */
-el('pet-persona').addEventListener('change', async () => {
+/* 角色設定(個性):自由文字,注入 agent 對話的 system prompt(claude 逐 turn;codex 注入既有 thread)。
+ * 輸入即存(debounce)+ 失焦/切視窗立即補存——設定面板是獨立視窗,改完直接點回桌寵
+ * 不會觸發頁面內 blur,原本只掛 change 事件會漏存。 */
+const personaEl = el('pet-persona') as HTMLTextAreaElement;
+let personaTimer: number | null = null;
+async function savePersona(): Promise<void> {
+  if (personaTimer !== null) {
+    clearTimeout(personaTimer);
+    personaTimer = null;
+  }
   const profile = selectedProfile();
-  if (!profile) return;
-  await window.pet.updatePetMeta(profile.id, { persona: (el('pet-persona') as HTMLTextAreaElement).value });
+  if (!profile || (profile.persona ?? '') === personaEl.value) return;
+  await window.pet.updatePetMeta(profile.id, { persona: personaEl.value });
+}
+personaEl.addEventListener('input', () => {
+  if (personaTimer !== null) clearTimeout(personaTimer);
+  personaTimer = window.setTimeout(() => void savePersona(), 500);
 });
+personaEl.addEventListener('blur', () => void savePersona());
+window.addEventListener('blur', () => void savePersona());
 
 /** 預設姿勢下拉(角色分頁):清單來自 motions/,即選即播(與右鍵選單同一條 main 端邏輯)。 */
 let motionList: string[] | null = null;
@@ -100,7 +114,8 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
   wardrobeStates = { ...(profile.wardrobe ?? {}) };
   renderPetSelector();
   renderWorkSettings();
-  (el('pet-persona') as HTMLTextAreaElement).value = profile.persona ?? '';
+  // 打字中(textarea 聚焦)不回寫——存檔廣播回來的 profiles 會蓋掉正在輸入的內容
+  if (document.activeElement !== personaEl) personaEl.value = profile.persona ?? '';
   void renderDefaultPose();
   render();
   const front = el('origin-xz');
