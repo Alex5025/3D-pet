@@ -52,6 +52,8 @@ interface PetProfile {
   sway?: Sway;
   wardrobe?: Record<string, boolean>;
   defaultPose?: string;
+  /** 待機動作(motions/ 檔名):以隨機間隔從中挑一個播放。 */
+  idleMotions?: string[];
 }
 
 interface AppRegistry {
@@ -272,6 +274,7 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
     void bridge?.closePetSession(id);
   }
   if (patch.enabled !== undefined) refreshCursorPollHook?.();
+  if (patch.enabled !== undefined || 'idleMotions' in patch) scheduleIdleMotion(id);
   dirtyPetIds.add(id);
   scheduleConfigFlush();
   return profile;
@@ -372,6 +375,9 @@ function removePet(id: string): boolean {
   } catch { /* 尚未落盤的新寵物沒有檔案可搬 */ }
   pets.delete(id);
   releasePetCaches(id);
+  const idleTimer = idleMotionTimers.get(id);
+  if (idleTimer) clearTimeout(idleTimer);
+  idleMotionTimers.delete(id);
   void bridge?.closePetSession(id);
   registry.petIds = registry.petIds.filter((petId) => petId !== id);
   if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
@@ -401,6 +407,36 @@ async function refreshMotions(): Promise<void> {
     motionFiles = [];
     motionsDirMissing = true;
   }
+}
+
+/* ── 待機動作:每寵一個 timer,20~60 秒隨機間隔從勾選清單挑一個播放 ──
+ * 排程長駐、播放前才檢查當下狀態(啟用/清單/功率檔位),設定改完即生效、不用追著清 timer。 */
+const IDLE_MOTION_MIN_MS = 20_000;
+const IDLE_MOTION_SPAN_MS = 40_000;
+const idleMotionTimers = new Map<string, NodeJS.Timeout>();
+/** 功率檔位 suspended(鎖屏/睡眠)時暫停播放;power 區塊注入實作。 */
+let idleMotionsPaused: () => boolean = () => false;
+
+function scheduleIdleMotion(petId: string): void {
+  const old = idleMotionTimers.get(petId);
+  if (old) clearTimeout(old);
+  idleMotionTimers.delete(petId);
+  const profile = pets.get(petId);
+  if (!profile || profile.enabled === false || !profile.idleMotions?.length) return;
+  const delay = IDLE_MOTION_MIN_MS + Math.random() * IDLE_MOTION_SPAN_MS;
+  idleMotionTimers.set(petId, setTimeout(() => {
+    void (async () => {
+      const current = pets.get(petId);
+      const list = (current?.idleMotions ?? []).filter((file) => motionFiles.includes(file));
+      if (current && current.enabled !== false && list.length && !idleMotionsPaused()) {
+        const file = list[Math.floor(Math.random() * list.length)]!;
+        try {
+          win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+        } catch { /* 檔案剛被移走:這輪跳過,下輪過濾自然排除 */ }
+      }
+      scheduleIdleMotion(petId); // 排下一輪(清單被清空/寵物休息時鏈條停止,由 updatePet 的接點重啟)
+    })();
+  }, delay));
 }
 
 function motionMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
@@ -664,6 +700,7 @@ app.whenReady().then(async () => {
     providers: createProviders(petToolsHub)
   });
   await refreshMotions();
+  for (const id of pets.keys()) scheduleIdleMotion(id); // 開機排程各寵的待機動作
   try {
     // macOS 單次檔案變動常觸發多個 watch 事件:debounce 讓一批變動只做一次 readdir + Tray 重建
     let motionsDebounce: NodeJS.Timeout | null = null;
@@ -705,6 +742,10 @@ app.whenReady().then(async () => {
     if (typeof patch.name === 'string') next.name = patch.name.trim() || profile.name;
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
     if (typeof patch.persona === 'string') next.persona = patch.persona.trim().slice(0, 4000) || undefined;
+    if (Array.isArray(patch.idleMotions)) {
+      const files = [...new Set(patch.idleMotions.filter((f): f is string => typeof f === 'string'))].slice(0, 50);
+      next.idleMotions = files.length ? files : undefined;
+    }
     if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude')) {
       const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
       const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
@@ -928,6 +969,7 @@ app.whenReady().then(async () => {
     else setCursorPoll(POWER_TIERS[(powerTier ?? 'normal') as keyof typeof POWER_TIERS].pollMs);
   }
   refreshCursorPollHook = refreshCursorPoll; // updatePet(enabled 變更)經此重算
+  idleMotionsPaused = () => powerTier === 'suspended'; // 鎖屏/睡眠不播待機動作
 
   const updatePowerState = (): void => {
     onBattery = powerMonitor.isOnBatteryPower();

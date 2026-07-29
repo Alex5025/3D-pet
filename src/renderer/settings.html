@@ -134,8 +134,9 @@
       }
 
       /* 服裝清單 */
-      #wardrobe { display: flex; flex-direction: column; gap: 4px; }
-      #wardrobe label {
+      #wardrobe, #idle-motions { display: flex; flex-direction: column; gap: 4px; }
+      #wardrobe label,
+      #idle-motions label {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -144,8 +145,8 @@
         background: rgba(255, 255, 255, 0.04);
         cursor: pointer;
       }
-      #wardrobe input { accent-color: #6d64d8; }
-      #wardrobe .empty { color: #6f6f7a; }
+      #wardrobe input, #idle-motions input { accent-color: #6d64d8; }
+      #wardrobe .empty, #idle-motions .empty { color: #6f6f7a; }
 
       button.wide {
         width: 100%;
@@ -267,6 +268,9 @@
 
         <h3>預設姿勢</h3>
         <select class="text-input" id="default-pose" style="width: 100%;"></select>
+
+        <h3>待機動作（勾選後隨機播放）</h3>
+        <div id="idle-motions"><span class="empty">載入中…</span></div>
 
         <h3>服裝顯示</h3>
         <div id="wardrobe"><span class="empty">載入中…</span></div>

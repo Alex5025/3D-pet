@@ -82,6 +82,35 @@ async function renderDefaultPose(): Promise<void> {
   select.value = current;
 }
 
+/** 待機動作勾選清單(角色分頁):勾選的動作由 main 以隨機間隔播放;逐寵儲存。 */
+async function renderIdleMotions(): Promise<void> {
+  const box = el('idle-motions');
+  motionList ??= await window.pet.getMotionList();
+  const selected = new Set(selectedProfile()?.idleMotions ?? []);
+  box.innerHTML = '';
+  if (!motionList.length) {
+    box.innerHTML = '<span class="empty">motions/ 資料夾沒有動作檔</span>';
+    return;
+  }
+  for (const file of motionList) {
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selected.has(file);
+    checkbox.addEventListener('change', () => {
+      const profile = selectedProfile();
+      if (!profile) return;
+      const current = new Set(profile.idleMotions ?? []);
+      if (checkbox.checked) current.add(file);
+      else current.delete(file);
+      profile.idleMotions = [...current]; // 本地同步,連續勾選不被廣播回寫蓋掉
+      void window.pet.updatePetMeta(profile.id, { idleMotions: profile.idleMotions });
+    });
+    label.append(checkbox, document.createTextNode(file.replace(/\.vrma$/i, '')));
+    box.append(label);
+  }
+}
+
 el('default-pose').addEventListener('change', () => {
   const profile = selectedProfile();
   if (!profile) return;
@@ -117,6 +146,7 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
   // 打字中(textarea 聚焦)不回寫——存檔廣播回來的 profiles 會蓋掉正在輸入的內容
   if (document.activeElement !== personaEl) personaEl.value = profile.persona ?? '';
   void renderDefaultPose();
+  void renderIdleMotions();
   render();
   const front = el('origin-xz');
   const side = el('origin-yz');

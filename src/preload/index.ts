@@ -56,6 +56,8 @@ export interface PetProfile {
   sway?: Sway;
   wardrobe?: Record<string, boolean>;
   defaultPose?: string;
+  /** 待機動作(motions/ 檔名):main 以隨機間隔從中挑一個播放。 */
+  idleMotions?: string[];
 }
 
 export interface PetCollection {
@@ -87,7 +89,7 @@ const api = {
   selectPet: (petId: string): Promise<PetProfile | null> => ipcRenderer.invoke('select-pet', petId),
   updatePetMeta: (
     petId: string,
-    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent' | 'persona'>
+    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent' | 'persona' | 'idleMotions'>
   ): Promise<PetProfile | null> => ipcRenderer.invoke('update-pet-meta', petId, patch),
   onPetProfiles: (callback: (pets: PetProfile[], selectedPetId: string) => void) =>
     ipcRenderer.on('pet-profiles-apply', (_event, pets, selectedPetId) => callback(pets, selectedPetId)),
