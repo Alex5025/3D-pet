@@ -297,11 +297,30 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button
 
 const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;
 const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
+/* 高頻 IPC 節流(50ms trailing):滑桿/拖曳墊的 input 事件可達 60/s,每發都送會讓
+ * renderer 每發跑一次套用(shade 是整棵材質樹 traverse);到期時讀當下值,最終值保證送達。 */
+let lightingSendTimer: number | null = null;
+function sendLightingThrottled(): void {
+  if (lightingSendTimer !== null) return;
+  lightingSendTimer = window.setTimeout(() => {
+    lightingSendTimer = null;
+    if (selectedPetId) window.pet.setLighting(selectedPetId, lighting);
+  }, 50);
+}
+let swaySendTimer: number | null = null;
+function sendSwayThrottled(): void {
+  if (swaySendTimer !== null) return;
+  swaySendTimer = window.setTimeout(() => {
+    swaySendTimer = null;
+    if (selectedPetId) window.pet.setSway(selectedPetId, sway);
+  }, 50);
+}
+
 for (const key of LIGHT_KEYS) {
   input(key).addEventListener('input', () => {
     if (!selectedPetId) return;
     lighting[key] = Number(input(key).value);
-    window.pet.setLighting(selectedPetId, lighting);
+    sendLightingThrottled();
     render();
   });
 }
@@ -309,7 +328,7 @@ for (const key of SWAY_KEYS) {
   input(key).addEventListener('input', () => {
     if (!selectedPetId) return;
     sway[key] = Number(input(key).value);
-    window.pet.setSway(selectedPetId, sway);
+    sendSwayThrottled();
     render();
   });
 }
@@ -359,7 +378,7 @@ makePad({
   getHorizontal: () => lighting.x, getVertical: () => lighting.y,
   set: (horizontal, vertical) => {
     lighting.x = horizontal; lighting.y = vertical;
-    window.pet.setLighting(selectedPetId, lighting);
+    sendLightingThrottled();
   }
 });
 makePad({
@@ -367,15 +386,23 @@ makePad({
   getHorizontal: () => lighting.z, getVertical: () => lighting.y,
   set: (horizontal, vertical) => {
     lighting.z = horizontal; lighting.y = vertical;
-    window.pet.setLighting(selectedPetId, lighting);
+    sendLightingThrottled();
   }
 });
+let petStateSendTimer: number | null = null;
+function sendPetStateThrottled(): void {
+  if (petStateSendTimer !== null) return;
+  petStateSendTimer = window.setTimeout(() => {
+    petStateSendTimer = null;
+    if (selectedPetId) window.pet.setPetState(selectedPetId, petState);
+  }, 50);
+}
 makePad({
   element: el('pet-xy'), horizontalRange: [-6, 6], verticalRange: [-6, 6],
   getHorizontal: () => petState.x, getVertical: () => petState.y,
   set: (horizontal, vertical) => {
     petState.x = horizontal; petState.y = vertical;
-    window.pet.setPetState(selectedPetId, petState);
+    sendPetStateThrottled();
   }
 });
 makePad({
@@ -383,7 +410,7 @@ makePad({
   getHorizontal: () => petState.z, getVertical: () => petState.y,
   set: (horizontal, vertical) => {
     petState.z = horizontal; petState.y = vertical;
-    window.pet.setPetState(selectedPetId, petState);
+    sendPetStateThrottled();
   }
 });
 
@@ -427,7 +454,17 @@ window.pet.onState((petId, state) => {
 });
 
 /* ---------- 顯示與重置 ---------- */
+/** render 以 rAF 合併:滑桿 input 與 pad pointermove 每發都叫,一幀最多重繪一次面板。 */
+let renderQueued = false;
 function render(): void {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    renderNow();
+  });
+}
+function renderNow(): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button')) {
     button.classList.toggle('active', button.dataset['t'] === lighting.type);
   }

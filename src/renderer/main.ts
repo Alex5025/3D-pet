@@ -324,6 +324,7 @@ function addRuntime(profile: PetProfile): void {
     })
   };
   runtimes.set(profile.id, runtime);
+  refreshOrderedRuntimes();
   runtime.bubble.setAgentInfo(agentInfoText(profile));
   viewer.setLighting(profile.lighting ?? {});
   viewer.setSway(profile.sway ?? {});
@@ -347,6 +348,7 @@ function removeRuntime(petId: string): void {
   runtime.bubble.destroy();
   runtime.viewer.dispose();
   runtimes.delete(petId);
+  refreshOrderedRuntimes();
 }
 
 function reconcileProfiles(profiles: PetProfile[]): void {
@@ -452,9 +454,15 @@ function scheduleSave(runtime: PetRuntime): void {
   }, 300));
 }
 
+/** runtimes 的倒序陣列快取(後加入者優先命中):runtimeAt 是 hover/mousedown/wheel 共同入口,
+ *  每次呼叫重建陣列會在游標移動期間持續產生垃圾。變更點只有 add/remove runtime 兩處。 */
+let orderedRuntimes: PetRuntime[] = [];
+function refreshOrderedRuntimes(): void {
+  orderedRuntimes = [...runtimes.values()].reverse();
+}
+
 function runtimeAt(x: number, y: number): PetRuntime | null {
-  const ordered = [...runtimes.values()].reverse();
-  for (const runtime of ordered) {
+  for (const runtime of orderedRuntimes) {
     if (!runtime.baseBoxReady) continue;
     ndc.set((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1));
     raycaster.setFromCamera(ndc, runtime.viewer.camera);
@@ -503,6 +511,8 @@ function scheduleBubbleHide(): void {
   }, 160);
 }
 
+let lastBubblePosAt = 0;
+
 function updateHover(x: number, y: number): void {
   const hit = runtimeAt(x, y);
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
@@ -512,7 +522,12 @@ function updateHover(x: number, y: number): void {
     // busy 中的泡泡不因切換到別隻而藏(其 turn 仍進行);只在非 busy 時換泡泡
     if (visible && visible !== hit && !visible.bubble.isBusy()) visible.bubble.hide();
     visiblePetId = hit.profile.id;
-    positionSpeechBubble(hit, true);
+    // 定位含整棵骨骼投影(projectedPetBounds),hover 期間 100ms 節流;首次顯示不等
+    const now = performance.now();
+    if (!hit.bubble.isVisible() || now - lastBubblePosAt > 100) {
+      lastBubblePosAt = now;
+      positionSpeechBubble(hit, true);
+    }
     setInteractive(true);
   } else if (bubbleHit) {
     // 游標在任一可見泡泡上(含審批中的幽靈泡泡)→ 恢復互動;認領回 visiblePetId 讓離開時的收合正常
@@ -534,15 +549,16 @@ function updateHover(x: number, y: number): void {
   }
 }
 
+/** screenToWorld 共用回傳物件:拖曳中每個 mousemove 呼叫一次,呼叫端都立即消費,不必每次配置。 */
+const worldPoint = { x: 0, y: 0 };
 function screenToWorld(runtime: PetRuntime, x: number, y: number): { x: number; y: number } {
   dragDirection.set((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1), 0.5)
     .unproject(runtime.viewer.camera)
     .sub(runtime.viewer.camera.position);
   const scale = (runtime.state.z - runtime.viewer.camera.position.z) / dragDirection.z;
-  return {
-    x: runtime.viewer.camera.position.x + dragDirection.x * scale,
-    y: runtime.viewer.camera.position.y + dragDirection.y * scale
-  };
+  worldPoint.x = runtime.viewer.camera.position.x + dragDirection.x * scale;
+  worldPoint.y = runtime.viewer.camera.position.y + dragDirection.y * scale;
+  return worldPoint;
 }
 
 function clearDragFlags(): void {
@@ -564,8 +580,9 @@ window.pet.onCursor(({ x, y }) => {
       return;
     }
   }
-  for (const runtime of runtimes.values()) runtime.viewer.setLookAt(x, y);
+  // DOM mousemove 流存活(interactive 時可達 60-120Hz)剛做過同一件事:輪詢路徑整段跳過
   if (interactive && performance.now() - lastPointerAt < 100) return;
+  for (const runtime of runtimes.values()) runtime.viewer.setLookAt(x, y);
   updateHover(x, y);
 });
 

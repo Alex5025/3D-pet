@@ -107,6 +107,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       renderReply();
     });
   };
+  /** containsPoint 的 rect 快取(100ms):見 containsPoint 內註解。 */
+  let cachedRect: DOMRect | null = null;
+  let cachedRectAt = 0;
   /** 回覆全文上限:超過就截頭保尾(切在段落邊界;截掉奇數個 ``` 圍欄要補回,防剩餘內文全被當 code block)。 */
   const MAX_REPLY_CHARS = 60_000;
   const truncateReplyRaw = (): void => {
@@ -258,12 +261,14 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     if (placement === 'right') element.classList.add('right-of');
     element.classList.add('visible');
     element.setAttribute('aria-hidden', 'false');
+    cachedRect = null; // 位置剛變,舊 rect 作廢
   }
 
   function hide(): void {
     if (document.activeElement === input) input.blur();
     element.classList.remove('visible');
     element.setAttribute('aria-hidden', 'true');
+    cachedRect = null;
   }
 
   return {
@@ -272,8 +277,14 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     isVisible: () => element.classList.contains('visible'),
     containsPoint: (x, y) => {
       if (!element.classList.contains('visible')) return false;
-      const rect = element.getBoundingClientRect();
-      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      // getBoundingClientRect 會強制 layout,而 containsPoint 在游標輪詢/滑動中高頻呼叫:
+      // 快取 100ms(泡泡位置與尺寸在這個尺度內幾乎不變;過期或剛 showAt 時才重量)
+      const now = performance.now();
+      if (!cachedRect || now - cachedRectAt > 100) {
+        cachedRect = element.getBoundingClientRect();
+        cachedRectAt = now;
+      }
+      return x >= cachedRect.left && x <= cachedRect.right && y >= cachedRect.top && y <= cachedRect.bottom;
     },
     setPetName: (name) => {
       label.textContent = `${name || '寵物'}：想對我說什麼？`;
