@@ -268,7 +268,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       input.value = '';
       input.style.height = 'auto'; // 多行送出後收回單行高度
       input.disabled = true; // 會觸發 blur → releaseInputFocus,running 中不需要鍵盤
-      reply.textContent = '';
+      replyRaw = '';
+      reply.replaceChildren(mdBox); // 清掉上一輪的錯誤列,保留 md 容器
+      mdBox.innerHTML = '';
       reply.classList.remove('open');
       status.textContent = '';
       statusRow.classList.add('open');
@@ -284,8 +286,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     },
     appendText: (chunk) => {
       reply.classList.add('open');
-      reply.append(document.createTextNode(chunk));
-      reply.scrollTop = reply.scrollHeight;
+      replyRaw += chunk;
+      renderReply(); // 串流中逐段重渲(marked 對幾 KB 文字是微秒級,無感)
     },
     setStatus: (text) => {
       status.textContent = text ?? '';
