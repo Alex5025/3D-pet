@@ -65,7 +65,11 @@ const TOOLS = [
   }
 ];
 
-createInterface({ input: process.stdin }).on('line', async (line) => {
+// 宿主(claude/codex)死了 stdin 就關:立刻退出,不留孤兒行程佔住繼承的 stdio
+// (孤兒佔著 fd 會讓宿主行程的 close 事件永遠不觸發,上游 turn 無法終結)
+const rl = createInterface({ input: process.stdin });
+rl.on('close', () => process.exit(0));
+rl.on('line', async (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
   if (msg.method === 'initialize') {

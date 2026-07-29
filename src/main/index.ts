@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeIm
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
@@ -729,13 +729,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('choose-workspace', (_event, id: string) => chooseWorkspace(id));
 
   // 模型清單:codex 要跟 app-server 要(首次會 lazy 啟動),成功才快取(失敗可能只是還沒登入,下次再試)
-  const modelListCache = new Map<string, unknown[]>();
+  // 快取 10 分鐘 TTL:CLI 升版新增模型不用重啟 app 才看得到
+  const modelListCache = new Map<string, { at: number; list: unknown[] }>();
   ipcMain.handle('agent-models', async (_event, kind: string) => {
     if (kind !== 'codex' && kind !== 'claude') return [];
     const cached = modelListCache.get(kind);
-    if (cached) return cached;
+    if (cached && Date.now() - cached.at < 600_000) return cached.list;
     const list = (await bridge?.listModels(kind)) ?? [];
-    if (list.length) modelListCache.set(kind, list);
+    if (list.length) modelListCache.set(kind, { at: Date.now(), list });
+    else if (cached) return cached.list; // 拉失敗時寧可用過期清單也不回空
     return list;
   });
 
@@ -788,12 +790,23 @@ app.whenReady().then(async () => {
     win?.webContents.send('apply-lighting', id, lighting);
   });
 
+  /* VRM 讀檔快取:N 隻寵物用同一個模型檔時開機只讀一次磁碟(VRM 可達十幾 MB)。
+   * mtime 變了就重讀;開機潮過後(30s 無新請求)整批釋放,不長駐大 buffer。 */
+  const vrmReadCache = new Map<string, { mtimeMs: number; data: Promise<Buffer> }>();
+  let vrmCacheSweep: NodeJS.Timeout | null = null;
   ipcMain.handle('get-boot-vrm', async (_event, id: string) => {
     const path = getPet(id)?.vrmPath;
     if (!path) return null;
     try {
-      return await readFile(path);
+      const mtimeMs = (await stat(path)).mtimeMs;
+      const hit = vrmReadCache.get(path);
+      const entry = hit && hit.mtimeMs === mtimeMs ? hit : { mtimeMs, data: readFile(path) };
+      vrmReadCache.set(path, entry);
+      if (vrmCacheSweep) clearTimeout(vrmCacheSweep);
+      vrmCacheSweep = setTimeout(() => vrmReadCache.clear(), 30_000);
+      return await entry.data;
     } catch {
+      vrmReadCache.delete(path);
       return null;
     }
   });

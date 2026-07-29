@@ -576,12 +576,15 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     return alphaMax([[x, y]]);
   }
 
-  window.addEventListener('resize', () => {
+  // 具名 handler:dispose 時要 removeEventListener——匿名的話寵物「休息」後 listener 洩漏,
+  // 還會對已 forceContextLoss 的 renderer 呼叫 setSize
+  function onWindowResize(): void {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(window.devicePixelRatio); // 跨螢幕(不同 dpr)時解析度要跟上
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  }
+  window.addEventListener('resize', onWindowResize);
 
   /** 設定面板的原點小人用:以角色為中心拍正面/側面小圖(側面 = 從 -X 拍,臉朝畫面右)。
    *  ⚠️ 一定要用「主渲染器 + 離屏 RenderTarget」拍——另開第二個 WebGLRenderer 會與
@@ -634,6 +637,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     if (disposed) return;
     disposed = true;
     loadSeq++;
+    window.removeEventListener('resize', onWindowResize);
     disposeMixer();
     if (vrm) {
       root.remove(vrm.scene);

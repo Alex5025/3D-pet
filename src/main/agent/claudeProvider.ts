@@ -62,6 +62,8 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
   const running = new Map<string, ChildProcess>();
   /** 使用者主動取消的行程:SIGTERM 後 claude 會優雅吐 result is_error(v0 未觀察到、e2e 實證),要轉成 done ok:false 而非紅字錯誤。 */
   const cancelRequested = new WeakSet<ChildProcess>();
+  /** child → 該 turn 的事件佇列:cancel 的強制終結保險用(close 事件可能被孤兒 MCP 子行程佔住 stdio 而永不觸發)。 */
+  const queueByChild = new WeakMap<ChildProcess, EventQueue>();
   let pendingSeq = 0;
 
   /* ── 權限審批基建(permission=ask 才啟用;契約依 v2.0 煙霧測試)──
@@ -76,6 +78,8 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
   /** requestId → 等待回覆的 socket。 */
   const pendingPerm = new Map<string, Socket>();
   let permSeq = 0;
+  /** mcp-config 內容 → 已寫入的檔案路徑(內容相同重用;permDir 整個在 dispose 時刪除)。 */
+  const mcpConfigCache = new Map<string, string>();
   let turnSeq = 0;
 
   function ensurePermServer(): void {
@@ -140,8 +144,13 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       };
     }
     if (!Object.keys(servers).length) return null;
+    const json = JSON.stringify({ mcpServers: servers });
+    // 內容相同就重用上一份檔案(非 ask 模式的 pettools 設定每 turn 都一樣,不必一 turn 一檔堆 tmp)
+    const reused = mcpConfigCache.get(json);
+    if (reused) return reused;
     const path = join(permDir, `${turnKey ?? `plain-${++permSeq}`}.json`);
-    writeFileSync(path, JSON.stringify({ mcpServers: servers }));
+    writeFileSync(path, json);
+    mcpConfigCache.set(json, path);
     if (AGENT_DEBUG) console.log(`[claude][debug] mcp-config ${path}\n${JSON.stringify({ mcpServers: servers }, null, 2)}`);
     return path;
   }
@@ -200,6 +209,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       }
       const child = spawn('claude', args, { cwd: workdir, env, stdio: ['pipe', 'pipe', 'pipe'] });
       running.set(sessionId, child);
+      queueByChild.set(child, queue);
       if (turnKey) approvalQueues.set(turnKey, queue);
       let realSessionId = sessionId;
       let sawResult = false;
@@ -266,12 +276,15 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         // rate_limit_event / system post_turn_summary 等其他型別忽略(v0 樣本)
       });
       child.on('close', (code) => {
+        if (AGENT_DEBUG) console.log(`[claude][debug] close code=${code} sawResult=${sawResult}`);
         if (!sawResult && code !== 0 && code !== null && stderrTail) {
           queue.push({ kind: 'error', message: `claude 結束(code ${code}):${stderrTail.trim()}` });
         }
-        // 被 cancel 殺掉(SIGTERM)→ 不吐終結事件,由 bridge 補 done ok:false
-        running.delete(sessionId);
-        if (realSessionId) running.delete(realSessionId);
+        // 被 cancel 殺掉(SIGTERM)→ 不吐終結事件,由 bridge 補 done ok:false。
+        // 清理只刪「仍指向本 child」的條目——同 session 的下一 turn 已經 spawn 時,
+        // 本 turn 晚到的 close 不可把新 turn 的註冊刪掉(否則 cancel 會找不到行程,e2e 實證)
+        if (running.get(sessionId) === child) running.delete(sessionId);
+        if (realSessionId && running.get(realSessionId) === child) running.delete(realSessionId);
         if (turnKey) approvalQueues.delete(turnKey);
         queue.end();
       });
@@ -280,9 +293,24 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
     },
     async cancel(sessionId) {
       const child = running.get(sessionId);
+      if (AGENT_DEBUG) console.log(`[claude][debug] cancel(${sessionId}) child=${child ? child.pid : '無'}`);
       if (child) {
         cancelRequested.add(child);
         killGracefully(child);
+        // 強制終結保險(e2e 實證的坑):SIGKILL 死了行程,但 claude 孤兒化的 MCP 子行程
+        // 若繼承了 stdio fd,close 事件永遠不來 → queue 不終結 → turn 卡死。2.5 秒
+        // (SIGTERM 1s 寬限 + 緩衝)後 close 還沒處理就直接收隊;之後 close 真來也無害。
+        setTimeout(() => {
+          if (running.get(sessionId) !== child) {
+            if (AGENT_DEBUG) console.log('[claude][debug] cancel 保險:close 已正常處理,免出手');
+            return;
+          }
+          if (AGENT_DEBUG) console.log('[claude][debug] cancel 保險:close 未到,強制終結 turn');
+          running.delete(sessionId);
+          const queue = queueByChild.get(child);
+          queue?.push({ kind: 'done', ok: false });
+          queue?.end();
+        }, 2_500);
       }
     },
     async respondApproval(_sessionId, requestId, allow) {

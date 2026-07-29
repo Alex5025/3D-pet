@@ -35,6 +35,8 @@ function askMain(payload) {
 }
 
 const rl = createInterface({ input: process.stdin });
+// 宿主死了 stdin 就關:立刻退出,不留孤兒佔住繼承的 stdio(會卡死宿主的 close 事件)
+rl.on('close', () => process.exit(0));
 rl.on('line', async (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
