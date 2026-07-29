@@ -505,3 +505,44 @@ mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 �
   1. **多視窗 app 不能依賴 `change` 存檔**——`change`/頁面內 blur 的語意只在單頁內成立,跨視窗焦點切換要靠 window `blur` 或輸入即存兜底。
   2. 「即時存檔 + 廣播回寫」的組合必然打架,**回寫前要檢查該欄位是否正在編輯**(`document.activeElement`),否則修了漏存又引入蓋字。
   3. 設定「沒生效」要先分清是**沒存到**還是**沒套用**——這次和 §32 是同一個症狀的兩個獨立根因,先驗落盤值(config.json)再追注入鏈,能少走一輪。
+
+---
+
+## 34. 效能優化(六階段)與 e2e 抓到的 claude cancel 卡死(2026-07-29)
+
+目標(使用者定):高負載降功率(最優先)、idle 耗電、互動流暢、串流卡頓、多寵記憶體。兩輪程式碼探索定位熱點後分六階段實作,每階段獨立 commit。
+
+### 各階段摘要
+
+- **P0 量測基座**:`window.__perf` 計數器(rAF tick/渲染幀/泡泡重渲/骨骼投影)。量「render/rAF 比例」這個機制不變量,不量會被遮擋污染的絕對 fps(§22 教訓)。
+- **P1 main IO**:petToolsHub/permServer socket 改逐行切割並截斷 buffer(原本只讀第一行、不截斷——潛伏正確性 bug);motions fs.watch 加 300ms debounce(原單次變動多次重建整個 Tray);config 落盤改 dirty-set 非同步只寫髒檔(原任何變更全量同步寫全部檔案;退出路徑保留同步全量,`app.exit` 不觸發 before-quit)。
+- **P2 功率檔位(核心)**:`powerMonitor` 四檔——normal(AC)/eco(電池或微熱)/critical(過熱)/suspended(鎖屏/睡眠),聯動游標輪詢(30/60/120ms/停)與渲染節流(idleSkip 6/12/20、活動幀上限 60/30/20fps、暫停)。**心跳不變量**:`sameLimit = 1000/interval`,任何輪詢頻率下強制心跳都 ≈1s,拖曳看門狗(1200ms 判死)不餓死;suspended 時 renderer 主動清拖曳旗標(輪詢停了,看門狗不會再被觸發)。全寵休息=停輪詢。
+- **P3 串流**:main 端 33ms 合併 text delta(原每 token 一次 IPC;非 text 事件先 flush 嚴格保序);renderer 端 renderReply 改 rAF 批次;replyRaw 60k 上限(截頭保尾切段落邊界、補奇數 code fence 防後文全變 code block)。整輪成本 O(n²)→O(n)。
+- **P4 hover 熱路徑**:泡泡定位(整棵骨骼投影 60-120/s)加 100ms 節流;containsPoint 的 getBoundingClientRect(強制 layout)加 100ms 快取;游標輪詢在 DOM mousemove 流存活時整段跳過(原 setLookAt 重複做兩份);runtimeAt/screenToWorld 免每呼叫配置;settings render() rAF 合併 + 高頻 IPC 50ms trailing 節流。
+- **P5 多寵記憶體**:VRM 讀檔快取(mtime 比對,N 寵同模型只讀一次,30s 釋放);viewer resize listener 洩漏修復;mcp-config 重用;模型清單 10 分鐘 TTL。
+- **否決**:單 renderer 多 viewport——與「逐行對照官方範例」原則正面衝突(hit probe/snapshot/wake 集全部要重寫),現狀「每寵一份完整官方結構」反而最忠實;「休息」已是資源閥門。
+
+### e2e 全回歸抓到的既有 bug:claude cancel 三層卡死
+
+P5 收尾跑 claude 真 CLI e2e,6 項 FAIL(cancel 起全數連鎖)。**不是效能改動造成**——是 §29 表演規則提示之後 claude e2e 從未重跑,行為變化(模型先玩工具、60 秒不吐字)踩出三層舊 bug:
+
+1. **孤兒 MCP 子行程佔住 stdio**:cancel SIGKILL 殺了 claude,但它 spawn 的 petToolsServer.mjs 沒有「stdin 關閉即退出」,孤兒佔著繼承的 fd → 宿主行程的 `close` 事件永遠不來 → queue 不終結 → turn 卡死。修:MCP 腳本 `rl.on('close', () => process.exit(0))`。
+2. **晚到的 close 刪掉新 turn 的註冊(race)**:同 session 連續兩 turn 共用同一個 id 當 `running` 的 key;上一 turn 的 `close` 若在下一 turn spawn 之後才到,無條件 `running.delete(id)` 會把新 turn 的 child 刪掉 → cancel 找不到行程(debug 實錄 `child=無`)。以前被第 1 層 bug 蓋住(close 根本不來就不會刪)——**修一層露一層**。修:close 清理只刪「仍指向本 child」的條目。
+3. **保險**:cancel 後 2.5 秒 close 還沒處理就強制 push done ok:false + 收隊(任何未知的 stdio 佔用都不再卡死 turn)。
+
+修畢 claude/codex 真 CLI e2e 各 13 項全 PASS。
+
+### 量測(3 寵,AC/normal 檔)
+
+| | 優化前 | 優化後 |
+|---|---|---|
+| main idle | 1.0–5.5% | 0.8–1.1% |
+| renderer idle | 8.0%(低點) | 6.5–7.6% |
+
+normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過熱/鎖屏,原本鎖屏照樣 30ms 輪詢+10fps 渲染)、hover(骨骼投影降一個數量級)、串流(O(n²)→O(n))。
+
+### 教訓
+
+1. **修一層 bug 可能露出被它蓋住的下一層**(孤兒佔 fd → close 不來 → delete race 從不觸發):修完必須跑完整回歸,而不是只驗這次改的路徑。
+2. **行為型提示(表演規則)改變模型行為 = e2e 前提改變**:提示改完要重跑受影響家別的 e2e,不能只跑改動的那家。
+3. 以 pid/child 身份做清理判斷,**不要以共用 key 無條件刪**——凡是「上一代的延遲回呼」都可能踩到新一代的狀態。
