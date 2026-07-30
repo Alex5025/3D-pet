@@ -546,3 +546,21 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 1. **修一層 bug 可能露出被它蓋住的下一層**(孤兒佔 fd → close 不來 → delete race 從不觸發):修完必須跑完整回歸,而不是只驗這次改的路徑。
 2. **行為型提示(表演規則)改變模型行為 = e2e 前提改變**:提示改完要重跑受影響家別的 e2e,不能只跑改動的那家。
 3. 以 pid/child 身份做清理判斷,**不要以共用 key 無條件刪**——凡是「上一代的延遲回呼」都可能踩到新一代的狀態。
+
+---
+
+## 35. 拖放檔案穿透疊層——疊層視窗收不到 OS 拖放,接收窗解法(2026-07-30)
+
+- **症狀**(使用者實機):把檔案拖到寵物身上放開,參考檔案功能毫無反應,**檔案還被 Finder 移到桌面**——拖放整個穿透疊層。
+- **三輪實驗定位**(每輪一次真實拖曳):
+  1. 診斷 log:拖曳全程 **0 個 drag 事件**(連 dragenter 都沒有)→ 視窗不是拖放目的地。
+  2. 加 log 看 hover 鏈:拖曳中 `interactive → true` **有**發生(游標壓到寵物時視窗確實切成可互動)→ 推翻「hover 鏈斷掉」;先假設「目的地資格在拖曳 session 開始時定案、中途 setIgnoreMouseEvents 無效」。
+  3. 決定性實驗:**從啟動就永遠可互動**(setIgnoreMouseEvents(false))照樣 0 事件 → 推翻第 2 步的假設——**疊層視窗的屬性組合(透明 + panel + 不可聚焦 + screen-saver 置頂層)天生收不到 macOS 拖放**,與 click-through 狀態無關。對照組:同 app 開一個「不透明+可聚焦+floating」的一般小視窗,dragenter/DROP 全收到。
+- **解法(仿 Finder 彈簧資料夾)**:拖曳進行中「亮出新視窗」是系統允許的——
+  1. **全域檔案拖曳偵測**([dragMonitor.ts](../src/main/agent/../dragMonitor.ts)):長駐一個 osascript(JXA)子行程,輪詢拖曳剪貼簿 `NSPasteboard(drag)` 的 changeCount(拖曳開始遞增)+ `NSEvent.pressedMouseButtons`(左鍵放開=結束),且只認內容含 `file-url` 的拖曳(拖文字/視窗不觸發);掛掉自動重啟、連續失敗即停用不擾民。
+  2. **偵測到拖曳開始** → main 向 renderer 要各寵的螢幕矩形(`projectedPetBounds` 投影)→ 在每隻寵物位置亮出**一般屬性**(不透明+可聚焦+floating,`showInactive` 不搶焦點)的小接收窗「📎 放開加入參考檔案」;半透明用 `setOpacity(0.72)` 而非 `transparent` 屬性(後者就是死因之一的嫌疑組合)。
+  3. 接收窗共用主 preload(webUtils 取路徑 → 既有 `ref-files-add` IPC);**.vrm/.vrma 也走接收窗**維持換模型/播動作語意——疊層收不到拖放代表原本的「拖放換模型」其實也是壞的,一併救回。拖曳結束(放開左鍵)緩 300ms 收窗,讓 drop 先處理完。
+- **教訓**:
+  1. **「有 handler ≠ 收得到事件」**:桌面疊層這種特殊視窗,OS 層級的能力(拖放目的地資格)要用實驗驗證,不能只看 DOM 層寫了什麼。renderer 端的 drop handler 從 v1 就在,直到使用者真的拖了才發現整條路是斷的——**headless e2e 與瀏覽器驗證頁都蓋不到「OS 把不把事件給你」這層**。
+  2. 逐步實驗設計:每輪只驗一個假設(有沒有成為目的地 → hover 鏈有沒有動 → 資格是否 session 開始定案 → 哪組視窗屬性可行),四次拖曳就從「完全不知道」走到「平台結論 + 可行解」。
+  3. macOS 平台實證(勿改回去):透明+panel+不可聚焦+screen-saver 層的視窗**收不到任何拖放**,永遠可互動也沒用;但拖曳中途「新出現」的一般視窗可以收(Finder 彈簧資料夾同原理)。

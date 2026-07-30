@@ -672,6 +672,8 @@ addEventListener('wheel', (event) => {
   scheduleSave(runtime);
 });
 
+// 注意:疊層(透明+panel+screen-saver 層)實測收不到 OS 拖放事件——正式拖放入口是
+// main 的接收窗(dragMonitor 偵測到檔案拖曳時亮出);這裡保留 handler 給未來平台。
 addEventListener('dragover', (event) => event.preventDefault());
 addEventListener('drop', async (event) => {
   event.preventDefault();
@@ -701,5 +703,20 @@ addEventListener('drop', async (event) => {
 });
 
 window.pet.onRefFiles((petId, list) => {
-  runtimes.get(petId)?.bubble.setRefFiles(list);
+  const runtime = runtimes.get(petId);
+  if (!runtime) return;
+  runtime.bubble.setRefFiles(list);
+  if (list.length && !runtime.bubble.isVisible()) {
+    // 拖放加入後把泡泡叫出來,使用者立刻看到清單(即時回饋)
+    visiblePetId = petId;
+    positionSpeechBubble(runtime, true);
+  }
+});
+
+// 檔案拖曳開始:回報各寵的螢幕矩形,main 據此在寵物位置亮出拖放接收窗
+window.pet.onPetRectsRequest(() => {
+  const rects = [...runtimes.values()]
+    .filter((runtime) => runtime.baseBoxReady)
+    .map((runtime) => ({ petId: runtime.profile.id, name: runtime.profile.name, ...projectedPetBounds(runtime) }));
+  window.pet.sendPetRects(rects);
 });

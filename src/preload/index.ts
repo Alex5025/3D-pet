@@ -130,6 +130,10 @@ const api = {
   removeRefFile: (petId: string, path: string) => ipcRenderer.send('ref-files-remove', petId, path),
   onRefFiles: (callback: (petId: string, list: RefFile[]) => void) =>
     ipcRenderer.on('ref-files-apply', (_event, petId, list) => callback(petId, list)),
+  /** 檔案拖曳開始時 main 詢問各寵的螢幕矩形(要在哪裡亮接收窗)。 */
+  onPetRectsRequest: (callback: () => void) => ipcRenderer.on('pet-rects-request', () => callback()),
+  sendPetRects: (rects: { petId: string; name: string; left: number; top: number; right: number; bottom: number }[]) =>
+    ipcRenderer.send('pet-rects', rects),
 
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
