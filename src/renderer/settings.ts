@@ -281,6 +281,24 @@ el('agent-effort').addEventListener('change', () => void submitAgentBinding());
 el('agent-permission').addEventListener('change', () => void submitAgentBinding());
 input('agent-session-id').addEventListener('change', () => void submitAgentBinding());
 
+/** 開新對話:清空 sessionId 送出(main 端偵測到清空會一併關掉 bridge 的舊 session)。 */
+el('new-session').addEventListener('click', async () => {
+  const button = el('new-session') as HTMLButtonElement;
+  const previous = input('agent-session-id').value.trim();
+  if (!previous) return; // 本來就是新的,不用做事
+  input('agent-session-id').value = '';
+  button.disabled = true;
+  button.textContent = '已開新對話,下一句從零開始';
+  try {
+    await submitAgentBinding();
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = '開新對話（清空上下文）';
+    }, 1600);
+  }
+});
+
 el('pet-enabled-toggle').addEventListener('click', async () => {
   const profile = selectedProfile();
   if (!profile) return;

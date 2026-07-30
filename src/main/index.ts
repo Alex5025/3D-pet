@@ -763,6 +763,9 @@ app.whenReady().then(async () => {
       };
       // 換 agent 種類 = 換家,不共享 session:關掉舊的
       if (profile.agent?.kind && profile.agent.kind !== patch.agent.kind) void bridge?.closePetSession(id);
+      // sessionId 被清空(「開新對話」鈕或手動清欄位)= 要求開新 session:
+      // 光清 profile 不夠,bridge 記憶體裡還握著舊 session,下一句仍會續用舊對話
+      else if (profile.agent?.sessionId && !sessionId) void bridge?.closePetSession(id);
     }
     const updated = updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
     sendPetProfiles();
