@@ -304,7 +304,28 @@
 }
 
 .pet-speech-bubble .bubble-agent-info.open {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+/* 「新對話」鈕:徽章列右側的小字鈕,不搶視覺 */
+.pet-speech-bubble .bubble-new-session {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.04);
+  color: #6f6780;
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.pet-speech-bubble .bubble-new-session:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #4b4458;
 }
 
 /* Markdown 渲染(回覆區) */

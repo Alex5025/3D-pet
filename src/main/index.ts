@@ -771,6 +771,19 @@ app.whenReady().then(async () => {
     sendPetProfiles();
     return updated;
   });
+  /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
+   *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
+  ipcMain.on('new-session', (event, id: string) => {
+    const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents;
+    if (!fromOurWindow) return;
+    const profile = getPet(id);
+    if (!profile?.agent?.sessionId) return; // 已經是新對話
+    const { sessionId: _dropped, ...keep } = profile.agent;
+    updatePet(id, { agent: keep });
+    void bridge?.closePetSession(id);
+    sendPetProfiles();
+  });
+
   ipcMain.handle('choose-workspace', (_event, id: string) => chooseWorkspace(id));
 
   // 模型清單:codex 要跟 app-server 要(首次會 lazy 啟動),成功才快取(失敗可能只是還沒登入,下次再試)

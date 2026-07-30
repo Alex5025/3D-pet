@@ -115,6 +115,7 @@ const api = {
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
   chatApproval: (petId: string, requestId: string, allow: boolean) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow),
+  newSession: (petId: string) => ipcRenderer.send('new-session', petId),
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
     ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent) => callback(petId, agentEvent)),

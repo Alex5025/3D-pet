@@ -54,6 +54,8 @@ interface SpeechBubbleOptions {
   onApproval?: (requestId: string, allow: boolean) => void;
   /** 回覆區的連結點擊(交給外部瀏覽器開)。 */
   onOpenLink?: (url: string) => void;
+  /** 「新對話」鈕:清掉 session,下一句從零開始。 */
+  onNewSession?: () => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -129,8 +131,16 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   });
 
   // 模型/力度徽章(標題右下的小字)
+  // 徽章列:左邊「家別 · 模型 · 力度」,右邊「新對話」鈕
   const agentInfo = document.createElement('div');
   agentInfo.className = 'bubble-agent-info';
+  const agentInfoText = document.createElement('span');
+  const newSessionBtn = document.createElement('button');
+  newSessionBtn.type = 'button';
+  newSessionBtn.className = 'bubble-new-session';
+  newSessionBtn.textContent = '＋ 新對話';
+  newSessionBtn.title = '清掉目前對話上下文,下一句從零開始';
+  agentInfo.append(agentInfoText, newSessionBtn);
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
   approvalBox.className = 'bubble-approval';
@@ -158,6 +168,18 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   };
   allowButton.addEventListener('click', () => answerApproval(true));
   denyButton.addEventListener('click', () => answerApproval(false));
+
+  // 新對話:turn 進行中不給按(要先停止);按下後就地清空回覆區,視覺上等於「重新開始」
+  newSessionBtn.addEventListener('click', () => {
+    if (busy) return;
+    replyRaw = '';
+    reply.replaceChildren(mdBox);
+    mdBox.innerHTML = '';
+    reply.classList.remove('open');
+    newSessionBtn.textContent = '已清空';
+    setTimeout(() => (newSessionBtn.textContent = '＋ 新對話'), 1400);
+    options.onNewSession?.();
+  });
 
   const statusRow = document.createElement('div');
   statusRow.className = 'bubble-status-row';
@@ -309,7 +331,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       statusRow.classList.add('open');
     },
     setAgentInfo: (text) => {
-      agentInfo.textContent = text ?? '';
+      agentInfoText.textContent = text ?? '';
       agentInfo.classList.toggle('open', !!text);
     },
     showApproval: (requestId, description) => {

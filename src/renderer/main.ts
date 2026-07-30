@@ -320,7 +320,8 @@ function addRuntime(profile: PetProfile): void {
       },
       onCancel: () => window.pet.chatCancel(profile.id),
       onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow),
-      onOpenLink: (url) => window.pet.openExternal(url)
+      onOpenLink: (url) => window.pet.openExternal(url),
+      onNewSession: () => window.pet.newSession(profile.id)
     })
   };
   runtimes.set(profile.id, runtime);
