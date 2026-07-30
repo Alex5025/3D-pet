@@ -244,8 +244,10 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
   return {
     kind: 'codex',
     async startSession(opts) {
-      // 先以唯讀開 thread;實際權限在首個 turn 由 sendMessage 對齊(權限變更走重啟+resume)
-      const permission: AgentPermission = 'readonly';
+      // thread 直接以「當下權限」建立——不可先用假的 readonly 再讓 sendMessage 對齊:
+      // 那會在首個 turn 觸發「權限變更 → 重啟 server + resume」,而剛建立、還沒跑過 turn 的
+      // thread 在 codex 那邊沒有 rollout 檔,resume 必定失敗(no rollout found,實測)。
+      const permission: AgentPermission = opts.permission ?? 'readonly';
       const threadId = await loadThread(opts.resumeId ?? null, opts.workdir, opts.persona, permission, opts.petId);
       sessions.set(threadId, { workdir: opts.workdir, persona: opts.persona, permission, petId: opts.petId });
       return threadId;
@@ -271,8 +273,19 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
         const workdir = saved?.workdir ?? process.cwd();
         const petId = saved?.petId ?? opts?.petId;
         loadedThreads.delete(threadId);
-        await loadThread(threadId, workdir, persona, permission, petId);
-        sessions.set(threadId, { workdir, persona, permission, petId });
+        try {
+          await loadThread(threadId, workdir, persona, permission, petId);
+          sessions.set(threadId, { workdir, persona, permission, petId });
+        } catch (error) {
+          // resume 失敗(rollout 被清掉/從未寫入)→ 開全新 thread 接手,不讓寵物永久卡死。
+          // 本 turn 起改用新 id;下方每 turn 固定 push 的 session 事件會帶新 id 給 bridge 持久化。
+          console.log(`[codex] resume 失敗,改開新 thread:${String(error)}`);
+          const fresh = await loadThread(null, workdir, persona, permission, petId);
+          sessions.delete(threadId);
+          appliedPersona.delete(threadId);
+          sessions.set(fresh, { workdir, persona, permission, petId });
+          threadId = fresh; // 通知路由(turnHandlers)/interrupt 都跟著換到新 thread
+        }
       }
       await syncPersona(threadId, persona); // 個性對齊(有變更才注入;失敗不擋 turn)
 

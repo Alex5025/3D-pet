@@ -231,6 +231,26 @@ export async function runCodexE2E(): Promise<boolean> {
   // 6. 寵物工具(thread config 掛 MCP + elicitation 自動放行)
   await runPetToolsE2E(h, calls, check);
 
+  // 7. 死 threadId 復原:落盤 id 對應的 rollout 不存在(被清掉/從未寫入)→ 自動開新 thread 接手,
+  //    不可讓寵物永久卡在 "no rollout found"(實機回報的 bug)
+  await h.bridge.closePetSession('e2e');
+  h.profile.agent = { ...h.profile.agent, kind: 'codex', sessionId: '019f0000-0000-7000-8000-000000000000' };
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請只回答:RECOVERED');
+  await h.waitTerminal(1, 120_000);
+  check('死 threadId → 開新 thread 復原', h.textOf().includes('RECOVERED'));
+  check('死 threadId → 新 id 已回存', typeof h.profile.agent?.sessionId === 'string' &&
+    h.profile.agent.sessionId !== '019f0000-0000-7000-8000-000000000000');
+
+  // 8. auto 權限的新寵物首句(根因回歸):thread 必須以當下權限建立——
+  //    若先用假的 readonly 開再對齊,首個 turn 會 resume 一個沒有 rollout 的新 thread 而必定失敗
+  await h.bridge.closePetSession('e2e');
+  h.profile.agent = { kind: 'codex', permission: 'auto' }; // 無 sessionId = 全新寵物
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請只回答:AUTO-OK');
+  await h.waitTerminal(1, 120_000);
+  check('auto 權限新寵物首句成功', h.textOf().includes('AUTO-OK'));
+
   await h.bridge.dispose();
   hub.dispose();
   const pass = failures.length === 0;
