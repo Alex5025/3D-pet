@@ -321,7 +321,8 @@ function addRuntime(profile: PetProfile): void {
       onCancel: () => window.pet.chatCancel(profile.id),
       onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow),
       onOpenLink: (url) => window.pet.openExternal(url),
-      onNewSession: () => window.pet.newSession(profile.id)
+      onNewSession: () => window.pet.newSession(profile.id),
+      onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path)
     })
   };
   runtimes.set(profile.id, runtime);
@@ -675,7 +676,8 @@ addEventListener('dragover', (event) => event.preventDefault());
 addEventListener('drop', async (event) => {
   event.preventDefault();
   const runtime = runtimeAt(event.clientX, event.clientY);
-  const file = event.dataTransfer?.files?.[0];
+  const files = [...(event.dataTransfer?.files ?? [])];
+  const file = files[0];
   if (!runtime || !file) return;
   try {
     if (file.name.toLowerCase().endsWith('.vrma')) {
@@ -683,8 +685,21 @@ addEventListener('drop', async (event) => {
     } else if (file.name.toLowerCase().endsWith('.vrm')) {
       await runtime.viewer.loadFromBuffer(await file.arrayBuffer());
       afterModelLoad(runtime);
+    } else {
+      // 其他檔案/資料夾 = 參考檔案:取絕對路徑交給 main 記錄(當次對話有效),注入 AI 對話
+      const paths = files.map((f) => window.pet.getFilePath(f)).filter(Boolean);
+      if (!paths.length) return;
+      window.pet.addRefFiles(runtime.profile.id, paths);
+      // 立刻把泡泡叫出來,讓使用者看到清單出現(即時回饋)
+      visiblePetId = runtime.profile.id;
+      positionSpeechBubble(runtime, true);
+      setInteractive(true);
     }
   } catch (error) {
     console.log('[overlay] dropped file failed', error);
   }
+});
+
+window.pet.onRefFiles((petId, list) => {
+  runtimes.get(petId)?.bubble.setRefFiles(list);
 });

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
 
 export type { AgentBinding, AgentEvent, AgentKind };
@@ -65,6 +65,12 @@ export interface PetCollection {
   selectedPetId: string;
 }
 
+/** 參考檔案(拖放到寵物身上):絕對路徑注入 AI 對話;當次對話有效。 */
+export interface RefFile {
+  path: string;
+  isDir: boolean;
+}
+
 /** 功率檔位(main 的 powerMonitor 推播):renderer 據此調整渲染節流;paused = 鎖屏/睡眠全停。 */
 export interface PowerProfile {
   tier: string;
@@ -116,6 +122,15 @@ const api = {
   chatApproval: (petId: string, requestId: string, allow: boolean) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow),
   newSession: (petId: string) => ipcRenderer.send('new-session', petId),
+
+  /* 參考檔案(拖放到寵物身上;當次對話有效,不落盤)。
+   * Electron 33 已移除 File.path,取絕對路徑必須經 preload 的 webUtils。 */
+  getFilePath: (file: File): string => webUtils.getPathForFile(file),
+  addRefFiles: (petId: string, paths: string[]) => ipcRenderer.send('ref-files-add', petId, paths),
+  removeRefFile: (petId: string, path: string) => ipcRenderer.send('ref-files-remove', petId, path),
+  onRefFiles: (callback: (petId: string, list: RefFile[]) => void) =>
+    ipcRenderer.on('ref-files-apply', (_event, petId, list) => callback(petId, list)),
+
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
     ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent) => callback(petId, agentEvent)),

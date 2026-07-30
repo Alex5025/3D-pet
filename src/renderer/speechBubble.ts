@@ -29,6 +29,8 @@ export interface SpeechBubble {
   showApproval: (requestId: string, description: string) => void;
   /** 顯示目前的模型/力度徽章(如「Codex · gpt-5.6-sol · low」);null 隱藏。 */
   setAgentInfo: (text: string | null) => void;
+  /** 參考檔案清單(拖放到寵物身上的絕對路徑;泡泡最下方);空陣列隱藏區塊。 */
+  setRefFiles: (list: { path: string; isDir: boolean }[]) => void;
 }
 
 export interface SpeechBubbleAvoidRect {
@@ -56,6 +58,8 @@ interface SpeechBubbleOptions {
   onOpenLink?: (url: string) => void;
   /** 「新對話」鈕:清掉 session,下一句從零開始。 */
   onNewSession?: () => void;
+  /** 參考檔案清單的 ✕(移除該路徑)。 */
+  onRemoveRef?: (path: string) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -181,6 +185,10 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     options.onNewSession?.();
   });
 
+  // 參考檔案清單(泡泡最下方):拖放檔案/資料夾到寵物身上後出現,每列可 ✕ 移除
+  const refsBox = document.createElement('div');
+  refsBox.className = 'bubble-refs';
+
   const statusRow = document.createElement('div');
   statusRow.className = 'bubble-status-row';
   const status = document.createElement('div');
@@ -191,7 +199,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   stop.textContent = '停止';
   statusRow.append(status, stop);
 
-  element.append(label, agentInfo, reply, approvalBox, statusRow, input);
+  element.append(label, agentInfo, reply, approvalBox, statusRow, input, refsBox);
   document.body.appendChild(element);
 
   let busy = false;
@@ -333,6 +341,26 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     setAgentInfo: (text) => {
       agentInfoText.textContent = text ?? '';
       agentInfo.classList.toggle('open', !!text);
+    },
+    setRefFiles: (list) => {
+      refsBox.replaceChildren();
+      refsBox.classList.toggle('open', list.length > 0);
+      for (const item of list) {
+        const row = document.createElement('div');
+        row.className = 'ref-row';
+        const name = document.createElement('span');
+        name.className = 'ref-name';
+        name.textContent = `${item.isDir ? '📁' : '📄'} ${item.path.split('/').filter(Boolean).pop() ?? item.path}`;
+        name.title = item.path; // hover 看完整路徑
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'ref-remove';
+        remove.textContent = '✕';
+        remove.title = '移除這個參考檔案';
+        remove.addEventListener('click', () => options.onRemoveRef?.(item.path));
+        row.append(name, remove);
+        refsBox.append(row);
+      }
     },
     showApproval: (requestId, description) => {
       approvalRequestId = requestId;

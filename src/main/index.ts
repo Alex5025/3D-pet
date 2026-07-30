@@ -695,7 +695,13 @@ app.whenReady().then(async () => {
     listMotions: () => motionFiles
   });
   bridge = createAgentBridge({
-    getPet: (id) => pets.get(id) ?? null,
+    // 淺拷貝合併參考檔(ephemeral,不落盤——persist 走 pets.get 的原物件);資料夾以尾斜線標記
+    getPet: (id) => {
+      const profile = pets.get(id);
+      if (!profile) return null;
+      const refs = petRefFiles.get(id);
+      return refs?.length ? { ...profile, refFiles: refs.map((r) => r.path + (r.isDir ? '/' : '')) } : profile;
+    },
     updatePet,
     send: sendChatEvent,
     providers: createProviders(petToolsHub)
@@ -771,13 +777,42 @@ app.whenReady().then(async () => {
     sendPetProfiles();
     return updated;
   });
+  /* ── 參考檔案(拖放到寵物身上;當次對話有效,純記憶體不落盤)──
+   * renderer 經 webUtils 取絕對路徑送來;這裡 stat 驗證存在、判資料夾,注入走 bridge 的 turnOpts。 */
+  const petRefFiles = new Map<string, { path: string; isDir: boolean }[]>();
+  const sendRefFiles = (petId: string): void =>
+    win?.webContents.send('ref-files-apply', petId, petRefFiles.get(petId) ?? []);
+  ipcMain.on('ref-files-add', (event, petId: string, paths: string[]) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId) || !Array.isArray(paths)) return;
+    void (async () => {
+      const list = petRefFiles.get(petId) ?? [];
+      for (const path of paths.filter((p): p is string => typeof p === 'string' && p.startsWith('/'))) {
+        if (list.some((item) => item.path === path) || list.length >= 20) continue;
+        try {
+          list.push({ path, isDir: (await stat(path)).isDirectory() });
+        } catch {
+          console.log('[main] 參考檔不存在,略過:', path);
+        }
+      }
+      petRefFiles.set(petId, list);
+      sendRefFiles(petId);
+    })();
+  });
+  ipcMain.on('ref-files-remove', (event, petId: string, path: string) => {
+    if (!win || event.sender !== win.webContents || !petRefFiles.has(petId)) return;
+    petRefFiles.set(petId, (petRefFiles.get(petId) ?? []).filter((item) => item.path !== path));
+    sendRefFiles(petId);
+  });
+
   /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
    *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
   ipcMain.on('new-session', (event, id: string) => {
     const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents;
     if (!fromOurWindow) return;
+    petRefFiles.delete(id); // 參考檔是「當次對話」的:開新對話一併清空
+    sendRefFiles(id);
     const profile = getPet(id);
-    if (!profile?.agent?.sessionId) return; // 已經是新對話
+    if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
     const { sessionId: _dropped, ...keep } = profile.agent;
     updatePet(id, { agent: keep });
     void bridge?.closePetSession(id);

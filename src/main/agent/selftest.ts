@@ -242,7 +242,15 @@ export async function runCodexE2E(): Promise<boolean> {
   check('死 threadId → 新 id 已回存', typeof h.profile.agent?.sessionId === 'string' &&
     h.profile.agent.sessionId !== '019f0000-0000-7000-8000-000000000000');
 
-  // 8. auto 權限的新寵物首句(根因回歸):thread 必須以當下權限建立——
+  // 8. 參考檔案注入:refFiles 經 syncContext(inject_items)注入,模型答得出路徑
+  h.profile.refFiles = ['/tmp/vrm-pet-ref-demo.md'];
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '我的參考檔案清單裡有哪個路徑?請只回答那個路徑,不要其他文字。');
+  await h.waitTerminal(1, 120_000);
+  check('參考檔案路徑注入', h.textOf().includes('/tmp/vrm-pet-ref-demo.md'));
+  delete h.profile.refFiles;
+
+  // 9. auto 權限的新寵物首句(根因回歸):thread 必須以當下權限建立——
   //    若先用假的 readonly 開再對齊,首個 turn 會 resume 一個沒有 rollout 的新 thread 而必定失敗
   await h.bridge.closePetSession('e2e');
   h.profile.agent = { kind: 'codex', permission: 'auto' }; // 無 sessionId = 全新寵物

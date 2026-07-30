@@ -7,6 +7,8 @@ export interface AgentPetProfile {
   workspacePath?: string;
   agent?: AgentBinding;
   persona?: string;
+  /** 參考檔案(當次對話有效;index.ts 的 getPet 以記憶體清單合併進來,不落盤)。 */
+  refFiles?: string[];
 }
 
 export interface AgentBridgeDeps {
@@ -131,7 +133,8 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         effort: profile.agent?.effort,
         persona: profile.persona,
         permission: profile.agent?.permission,
-        petId
+        petId,
+        refFiles: profile.refFiles
       };
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
         state.lastActivity = Date.now();

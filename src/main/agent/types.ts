@@ -2,6 +2,14 @@ import type { AgentEvent, AgentKind, AgentPermission } from '../../shared/agentE
 
 export type { AgentEvent, AgentKind, AgentPermission };
 
+/** 參考檔案清單 → 注入 prompt 的文字段(兩家 provider 共用;空清單回 null)。
+ *  只給路徑不塞內容——讓 AI 自己用工具讀,大檔塞 prompt 是反模式。 */
+export function refFilesPrompt(refFiles: string[] | undefined): string | null {
+  if (!refFiles?.length) return null;
+  const lines = refFiles.map((p) => `- ${p}${p.endsWith('/') ? '(資料夾)' : ''}`);
+  return `參考檔案(使用者指定的絕對路徑;需要查閱時直接讀取,被要求更新該文件時直接修改它):\n${lines.join('\n')}`;
+}
+
 /** provider.sendMessage 的每 turn 選項(全部來自 profile,空 = 預設)。 */
 export interface TurnOptions {
   model?: string;
@@ -10,6 +18,8 @@ export interface TurnOptions {
   permission?: AgentPermission;
   /** 寵物 id:寵物工具 MCP(v3)路由用。 */
   petId?: string;
+  /** 參考檔案絕對路徑(資料夾以尾斜線標記):注入 system prompt,AI 據此查找/更新文件。 */
+  refFiles?: string[];
 }
 
 /** 設定面板下拉選單用的模型資訊。 */

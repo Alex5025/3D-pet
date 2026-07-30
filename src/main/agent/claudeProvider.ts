@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { app } from 'electron';
 import type { AgentEvent, AgentProvider } from './types';
+import { refFilesPrompt } from './types';
 import type { PetToolsHub } from './petToolsHub';
 
 /**
@@ -193,11 +194,13 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       if (mcpConfig) args.push('--mcp-config', mcpConfig);
       if (opts?.model) args.push('--model', opts.model);
       if (opts?.effort) args.push('--effort', opts.effort);
-      // 角色個性 + 寵物工具提示:附加到 system prompt(逐 turn 注入,設定面板改完下一句就生效)
+      // 角色個性 + 寵物工具提示 + 參考檔案:附加到 system prompt(逐 turn 注入,變動下一句就生效)
       {
         const parts: string[] = [];
         if (opts?.persona) parts.push(`你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${opts.persona}`);
         if (hub && opts?.petId) parts.push('表演規則:每次回覆前先用 pet_show_expression 配合情緒(開心 happy、遇到問題 sad、驚訝 surprised);打招呼或完成任務時用 pet_play_motion 播個動作;工作過程較長時用 pet_speak 簡短回報。這些是你身體的一部分,主動使用,不要等使用者要求。');
+        const refs = refFilesPrompt(opts?.refFiles);
+        if (refs) parts.push(refs);
         if (parts.length) args.push('--append-system-prompt', parts.join('\n'));
       }
       const isRealId = !sessionId.startsWith('pending-');

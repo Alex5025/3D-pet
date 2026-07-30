@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { AgentEvent, AgentModelInfo, AgentPermission, AgentProvider } from './types';
+import { refFilesPrompt } from './types';
 import type { PetToolsHub } from './petToolsHub';
 
 /**
@@ -39,9 +40,9 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
   const pendingApprovals = new Map<string, { rpcId: number; method: string }>();
   /** 本世代 server 已載入(start/resume 過)的 thread;server 重啟後清空。 */
   const loadedThreads = new Set<string>();
-  /** threadId → 已對模型生效的 persona('' = 無);null = 未知(resume 回來的 thread,
-   *  rollout 裡的舊指示看不到)。與 profile 當下 persona 不一致時,下個 turn 前注入更新。 */
-  const appliedPersona = new Map<string, string | null>();
+  /** threadId → 已對模型生效的上下文組合值(persona + 參考檔案;'' = 無);null = 未知
+   *  (resume 回來的 thread,rollout 裡的舊指示看不到)。與當下組合值不一致時,下個 turn 前注入更新。 */
+  const appliedContext = new Map<string, string | null>();
   /** threadId → 進行中 turn 的通知處理器(單寵單 turn,一 thread 至多一個)。 */
   const turnHandlers = new Map<string, NotificationHandler>();
   /** threadId → 進行中 turnId(interrupt 用)。 */
@@ -205,11 +206,11 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       : {};
     if (threadId) {
       // 注意:resume 的 developerInstructions「不會」生效(2026-07 實測,連全新 server 也一樣,
-      // schema 有欄位但 server 沿用 rollout 裡的舊指示)——既有 thread 的 persona 走 syncPersona 注入。
+      // schema 有欄位但 server 沿用 rollout 裡的舊指示)——既有 thread 的上下文走 syncContext 注入。
       const res = await request('thread/resume', { threadId, cwd: workdir, ...perm, ...mcp });
       if (res.error) throw new Error(`thread/resume 失敗:${res.error.message ?? '未知'}`);
       loadedThreads.add(threadId);
-      appliedPersona.set(threadId, null); // rollout 裡的舊指示看不到,persona 狀態未知
+      appliedContext.set(threadId, null); // rollout 裡的舊指示看不到,上下文狀態未知
       return threadId;
     }
     const res = await request('thread/start', { cwd: workdir, ...perm, ...dev, ...mcp });
@@ -217,28 +218,39 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
     if (!id) throw new Error('thread/start 未回傳 thread id');
     loadedThreads.add(id);
-    appliedPersona.set(id, persona?.trim() ?? '');
+    appliedContext.set(id, composeContext(persona, undefined)); // thread/start 只注入 persona,參考檔由首個 turn 的 syncContext 補上
     return id;
   }
 
-  /** 既有 thread 的 persona 對齊:與已生效值不同時,以 thread/inject_items 注入 developer 訊息
-   *  (2026-07 實測:注入可即時改寫個性、壓過 rollout 舊指示與歷史慣性;resume 換 developerInstructions 則無效)。 */
-  async function syncPersona(threadId: string, persona: string | undefined): Promise<void> {
-    const wanted = persona?.trim() ?? '';
-    const applied = appliedPersona.get(threadId) ?? null;
+  /** persona + 參考檔案的組合上下文(比對與注入都用這個組合值;'' = 兩者皆無)。 */
+  function composeContext(persona: string | undefined, refFiles: string[] | undefined): string {
+    const parts: string[] = [];
+    const trimmed = persona?.trim();
+    if (trimmed) parts.push(`以下是你目前的角色設定,請以此個性回應:\n${trimmed}`);
+    const refs = refFilesPrompt(refFiles);
+    if (refs) parts.push(refs);
+    return parts.join('\n\n');
+  }
+
+  /** 既有 thread 的上下文對齊(persona + 參考檔案):與已生效組合值不同時,以 thread/inject_items
+   *  注入 developer 訊息(2026-07 實測:注入可即時生效、壓過 rollout 舊指示與歷史慣性;
+   *  resume 換 developerInstructions 則無效)。移除參考檔 = 組合值變了 → 注入「以本則為準」的新清單。 */
+  async function syncContext(threadId: string, persona: string | undefined, refFiles: string[] | undefined): Promise<void> {
+    const wanted = composeContext(persona, refFiles);
+    const applied = appliedContext.get(threadId) ?? null;
     if (wanted === applied) return;
-    if (!wanted && applied === null) return; // 未知基準且未設個性:視為無,不注入
+    if (!wanted && applied === null) return; // 未知基準且無上下文:視為無,不注入
     const text = wanted
-      ? `【角色設定更新】你是一隻桌面寵物。以下是你目前的角色設定,請以此個性回應:\n${wanted}`
-      : '【角色設定更新】角色設定已清空,請回到一般語氣回應。';
+      ? `【上下文更新】你是一隻桌面寵物。以下設定以本則為準,先前的已失效:\n${wanted}`
+      : '【上下文更新】角色設定與參考檔案已清空,請回到一般語氣、忽略先前的清單。';
     const res = await request('thread/inject_items', { threadId, items: [
       { type: 'message', role: 'developer', content: [{ type: 'input_text', text }] }
     ] });
     if (res.error) {
-      console.log(`[codex] persona 注入失敗(下個 turn 重試):${res.error.message ?? '未知'}`);
+      console.log(`[codex] 上下文注入失敗(下個 turn 重試):${res.error.message ?? '未知'}`);
       return;
     }
-    appliedPersona.set(threadId, wanted);
+    appliedContext.set(threadId, wanted);
   }
 
   return {
@@ -257,7 +269,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       // 實測(v2 煙霧):同 server 內對已載入 thread 重新 resume「不會」換 sandbox/approval;
       // 全新 server 的 resume 才會套新權限 → 權限變更 = 重啟 app-server 再 resume(context 保留)。
       // 代價:其他 codex 寵物進行中的 turn 會收到 error(權限切換是罕見操作,可接受)。
-      // persona 不走這條:resume 的 developerInstructions 實測無效,改由 syncPersona 注入(免重啟)。
+      // persona/參考檔不走這條:resume 的 developerInstructions 實測無效,改由 syncContext 注入(免重啟)。
       const saved = sessions.get(threadId);
       const permission: AgentPermission = opts?.permission ?? 'readonly';
       // persona 以本 turn 傳入為準(bridge 每 turn 帶當下 profile.persona;undefined = 已清空)——
@@ -282,12 +294,12 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
           console.log(`[codex] resume 失敗,改開新 thread:${String(error)}`);
           const fresh = await loadThread(null, workdir, persona, permission, petId);
           sessions.delete(threadId);
-          appliedPersona.delete(threadId);
+          appliedContext.delete(threadId);
           sessions.set(fresh, { workdir, persona, permission, petId });
           threadId = fresh; // 通知路由(turnHandlers)/interrupt 都跟著換到新 thread
         }
       }
-      await syncPersona(threadId, persona); // 個性對齊(有變更才注入;失敗不擋 turn)
+      await syncContext(threadId, persona, opts?.refFiles); // 上下文對齊(有變更才注入;失敗不擋 turn)
 
       const buffer: AgentEvent[] = [];
       let wake: (() => void) | null = null;

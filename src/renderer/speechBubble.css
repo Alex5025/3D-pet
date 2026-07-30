@@ -328,6 +328,54 @@
   color: #4b4458;
 }
 
+/* 參考檔案清單(泡泡最下方) */
+.pet-speech-bubble .bubble-refs {
+  display: none;
+  margin-top: 8px;
+  max-height: 90px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: #6f6780;
+}
+
+.pet-speech-bubble .bubble-refs.open {
+  display: block;
+}
+
+.pet-speech-bubble .ref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  margin-top: 3px;
+}
+
+.pet-speech-bubble .ref-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-speech-bubble .ref-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: #a49bb0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.pet-speech-bubble .ref-remove:hover {
+  color: #d3455b;
+}
+
 /* Markdown 渲染(回覆區) */
 .pet-speech-bubble .bubble-reply {
   white-space: normal; /* 改由 markdown 控制換行(breaks:true);程式碼區塊另有 pre-wrap */
