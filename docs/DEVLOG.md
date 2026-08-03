@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-07-29。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-08-03。對應的 commit 見 `git log`。
 
 ---
 
@@ -564,3 +564,32 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
   1. **「有 handler ≠ 收得到事件」**:桌面疊層這種特殊視窗,OS 層級的能力(拖放目的地資格)要用實驗驗證,不能只看 DOM 層寫了什麼。renderer 端的 drop handler 從 v1 就在,直到使用者真的拖了才發現整條路是斷的——**headless e2e 與瀏覽器驗證頁都蓋不到「OS 把不把事件給你」這層**。
   2. 逐步實驗設計:每輪只驗一個假設(有沒有成為目的地 → hover 鏈有沒有動 → 資格是否 session 開始定案 → 哪組視窗屬性可行),四次拖曳就從「完全不知道」走到「平台結論 + 可行解」。
   3. macOS 平台實證(勿改回去):透明+panel+不可聚焦+screen-saver 層的視窗**收不到任何拖放**,永遠可互動也沒用;但拖曳中途「新出現」的一般視窗可以收(Finder 彈簧資料夾同原理)。
+
+---
+
+## 36. 對話泡泡圖片附件、按壓鎖定與外側狀態提示(2026-08-03)
+
+- **剪貼簿圖片**:輸入框支援直接貼上 PNG/JPEG/WebP,泡泡只顯示附件數量、不產生縮圖;允許純圖片訊息。renderer 每輪最多收 4 張、單張 8 MiB,main IPC 再做 MIME、base64、數量與長度檢查。Codex 使用 app-server 原生 `{ type:'image', url:dataURL }` 輸入(以本機 generate-ts 核對協定);Claude 將圖片寫入短命暫存檔並提示 Read 工具讀取,turn 結束立即刪除。Mock bridge 自驗補純圖片訊息傳遞案例。
+- **按住不收合**:泡泡顯示時若滑鼠按下,renderer 記住當下泡泡並取消隱藏計時;游標離開角色或泡泡仍保持展開,直到 mouseup 才重新依游標位置判斷。blur/visibilitychange 與寵物移除會清除鎖定,避免漏掉 mouseup 後永久卡住。
+- **常駐圖釘**:泡泡依自身位於螢幕左/右半邊,把控制放到遠離螢幕中心的外側上角。34px 隱形感應區只有在游標靠近時才淡入 14px 圓形圖釘;啟用後泡泡不再因 hover 切換或游標移開而收合。
+- **已讀狀態提示**:外側下角顯示「燈點 + 單行小字」,區分執行中(藍)、等待核准(橘)、完成(綠)、錯誤(紅);進行中狀態會脈動,並遵守 `prefers-reduced-motion`。狀態改變時重新出現,游標停留 500ms 視為已讀後淡出。
+- **驗證**:`npm run typecheck`、`npm run build`、`git diff --check` 通過。沙箱禁止 Electron dev server 監聽 `::1:5173`,因此本輪未完成實機 UI 操作驗收。
+
+---
+
+## 37. 獨立「沙盒設定」視窗——由桌寵直接管理專案 Codex 設定(2026-08-03)
+
+- **需求**:使用者要在桌寵設定中調整工作專案的 Codex 沙盒,按下後直接在工作目錄生效,不把「修改權限」再交給受該權限限制的 AI 執行。
+- **介面與風險隔離**:右鍵選單把「沙盒設定…」獨立放在一般「設定」之外,另開專用視窗；一般設定頁完全移除沙盒分頁、DOM 與 renderer 邏輯,無法從光影/角色/動作/工作頁切換進去。專用視窗可選 `approval_policy`、`sandbox_mode`、`sandbox_workspace_write.network_access`;預設推薦 `on-request + workspace-write + network`,完整存取另有二次警告。頁面可直接選擇寵物與工作目錄,並明示套用目錄、設定檔路徑與重新開啟 Codex 工作階段後生效。
+- **卡在讀取的回復**:讀取期間只停用「套用」而不鎖住下拉選單;IPC 讀取 4 秒、寫入 8 秒未回覆會顯示可理解的錯誤並恢復操作,避免 main/preload 尚未重載或磁碟異常時整頁永久停用。另拒絕非一般檔案的 `config.toml`,避免讀到 FIFO 等特殊檔案時懸置。
+- **安全邊界**:renderer 只傳固定 enum/boolean,preload 暴露受限 IPC;main 只接受獨立沙盒視窗的 sender（一般設定視窗呼叫會被拒絕）,再驗寵物與工作目錄,拒絕 `.codex`/`config.toml` 符號連結,不接受任意路徑、腳本或 shell 字串。寫入採同目錄暫存檔 + rename 原子替換。
+- **保留既有設定**:更新器只替換 root 的 `approval_policy`/`sandbox_mode` 與 `[sandbox_workspace_write]` 的 `network_access`,其餘 model、MCP、writable_roots 等內容原樣保留;若偵測到 granular approval 等進階格式,套用前在頁面警告會被標準選項取代。
+- **驗證**:新增純函式合併/解析 selftest;另以獨立 probe 驗證既有 model/MCP/writable_roots 保留且三項設定可讀回。`npm run typecheck`、`npm run build`、一般設定與獨立沙盒頁 DOM id 對照及 `git diff --check` 通過。
+
+---
+
+## 38. 工作目錄辨識與遠距縮放收尾(2026-08-03)
+
+- **工作目錄辨識**:泡泡顯示專案根目錄名稱並保留完整路徑提示；設定視窗與右鍵寵物選單依標準化後的工作目錄分組，未設定工作目錄的寵物集中顯示，讓多專案環境較容易辨識。
+- **遠距縮放**:桌面滾輪縮小上限由相機距離 12 放寬到 30，同步把 PerspectiveCamera far plane 從 20 調整為 100，避免相機超過舊裁切面後角色整隻消失。
+- **驗證**:`npm run typecheck`、`npm run build` 與 pre-commit secrets 檢查通過。
