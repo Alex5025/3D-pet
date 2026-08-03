@@ -1,4 +1,5 @@
 import type { AgentBinding, AgentEvent, AgentKind } from '../../shared/agentEvents';
+import type { ChatImage } from '../../shared/chat';
 import type { AgentModelInfo, AgentProvider } from './types';
 
 /** bridge 需要的 profile 子集(依賴注入,避免與 index.ts 循環引用)。 */
@@ -20,7 +21,7 @@ export interface AgentBridgeDeps {
 }
 
 export interface AgentBridge {
-  chatSend(petId: string, text: string): void;
+  chatSend(petId: string, text: string, images?: ChatImage[]): void;
   chatCancel(petId: string): void;
   /** 泡泡審批按鈕的回覆(requestId 來自 approval 事件)。 */
   respondApproval(petId: string, requestId: string, allow: boolean): void;
@@ -64,7 +65,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
     return state;
   }
 
-  async function runTurn(petId: string, text: string): Promise<void> {
+  async function runTurn(petId: string, text: string, images: ChatImage[]): Promise<void> {
     const profile = deps.getPet(petId);
     if (!profile) return; // 寵物已消失,無處回報
     const send = (event: AgentEvent): void => deps.send(petId, event);
@@ -134,7 +135,8 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         persona: profile.persona,
         permission: profile.agent?.permission,
         petId,
-        refFiles: profile.refFiles
+        refFiles: profile.refFiles,
+        images,
       };
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
         state.lastActivity = Date.now();
@@ -162,10 +164,10 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
   }
 
   return {
-    chatSend(petId, text) {
+    chatSend(petId, text, images = []) {
       const trimmed = text.trim();
-      if (!trimmed) return;
-      void runTurn(petId, trimmed);
+      if (!trimmed && !images.length) return;
+      void runTurn(petId, trimmed, images);
     },
     chatCancel(petId) {
       const state = states.get(petId);

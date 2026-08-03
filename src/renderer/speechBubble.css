@@ -131,6 +131,116 @@
   transition-delay: 0s;
 }
 
+.pet-speech-bubble .bubble-pin-hotspot {
+  position: absolute;
+  z-index: 2;
+  top: -17px;
+  width: 34px;
+  height: 34px;
+}
+
+.pet-speech-bubble.outer-left .bubble-pin-hotspot {
+  left: -17px;
+}
+
+.pet-speech-bubble.outer-right .bubble-pin-hotspot {
+  right: -17px;
+}
+
+.pet-speech-bubble .bubble-pin {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.96);
+  border-radius: 50%;
+  box-shadow: 0 1px 5px rgba(40, 27, 52, 0.28);
+  background: #d5cfdb;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: background 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+
+.pet-speech-bubble .bubble-pin svg {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 0;
+  fill: #fff;
+}
+
+.pet-speech-bubble .bubble-pin-hotspot:hover .bubble-pin,
+.pet-speech-bubble .bubble-pin:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.pet-speech-bubble .bubble-pin:hover {
+  transform: scale(1.12);
+}
+
+.pet-speech-bubble .bubble-pin.active {
+  background: #8060a0;
+}
+
+.pet-speech-bubble .bubble-activity {
+  position: absolute;
+  z-index: 2;
+  bottom: -22px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 3px 6px 3px 4px;
+  color: #5f5668;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(111, 93, 128, 0.2);
+  border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(40, 27, 52, 0.18);
+  opacity: 1;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 0s;
+}
+
+.pet-speech-bubble.outer-left .bubble-activity { left: -7px; }
+.pet-speech-bubble.outer-right .bubble-activity { right: -7px; }
+
+.pet-speech-bubble .bubble-activity.read {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
+}
+
+.pet-speech-bubble .bubble-activity-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.pet-speech-bubble .bubble-activity.idle .bubble-activity-dot { background: #aaa2b1; }
+.pet-speech-bubble .bubble-activity.working .bubble-activity-dot { background: #6d8fff; }
+.pet-speech-bubble .bubble-activity.approval .bubble-activity-dot { background: #f0a43c; }
+.pet-speech-bubble .bubble-activity.done .bubble-activity-dot { background: #45b978; }
+.pet-speech-bubble .bubble-activity.error .bubble-activity-dot { background: #d95763; }
+
+.pet-speech-bubble .bubble-activity.working .bubble-activity-dot,
+.pet-speech-bubble .bubble-activity.approval .bubble-activity-dot {
+  animation: bubble-activity-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes bubble-activity-pulse {
+  50% { transform: scale(0.72); opacity: 0.62; }
+}
+
 .pet-speech-bubble label {
   display: block;
   margin: 0 2px 8px;
@@ -173,6 +283,29 @@
 .pet-speech-bubble textarea:disabled {
   color: #8d8496;
   background: rgba(240, 238, 244, 0.9);
+}
+
+.pet-speech-bubble .bubble-images {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 7px;
+  color: #6f5d80;
+  font-size: 12px;
+}
+
+.pet-speech-bubble .bubble-images.open {
+  display: flex;
+}
+
+.pet-speech-bubble .bubble-images button {
+  padding: 2px 7px;
+  color: #806c91;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 
 /* 回覆區:內容只往下長、可捲動;預設收合 */
@@ -243,6 +376,10 @@
   .pet-speech-bubble textarea {
     transition: none;
   }
+
+  .pet-speech-bubble .bubble-activity-dot {
+    animation: none;
+  }
 }
 
 /* 審批區塊(agent 想做危險操作,等使用者點頭) */
@@ -293,6 +430,20 @@
   background: rgba(146, 114, 176, 0.12);
   border: 1px solid rgba(111, 93, 128, 0.28);
 }
+
+/* 工作目錄：只顯示專案根目錄最後一層，完整路徑放在 title。 */
+.pet-speech-bubble .bubble-workspace {
+  display: none;
+  margin: -3px 2px 6px;
+  overflow: hidden;
+  color: #70677b;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-speech-bubble .bubble-workspace.open { display: block; }
 
 /* 模型/力度徽章 */
 .pet-speech-bubble .bubble-agent-info {

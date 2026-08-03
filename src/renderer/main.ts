@@ -9,6 +9,7 @@ import {
 import type { PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
+const MAX_CAMERA_Z = 30;
 
 interface PetRuntime {
   profile: PetProfile;
@@ -33,6 +34,7 @@ const dragDirection = new THREE.Vector3();
 let interactive = false;
 let visiblePetId: string | null = null;
 let bubbleHideTimer: ReturnType<typeof setTimeout> | null = null;
+let heldBubblePetId: string | null = null;
 let interactionRuntime: PetRuntime | null = null;
 let dragging = false;
 let rotating = false;
@@ -304,9 +306,10 @@ function addRuntime(profile: PetProfile): void {
     bubble: createSpeechBubble({
       petId: profile.id,
       petName: profile.name,
+      workspacePath: profile.workspacePath,
       requestInputFocus: () => window.pet.setInputMode(true),
       releaseInputFocus: () => { void window.pet.setInputMode(false); },
-      onSend: (text) => {
+      onSend: (text, images) => {
         const current = runtimes.get(profile.id);
         if (!current) return;
         // workspacePath 就地提示(main 端仍二次把關)
@@ -316,7 +319,7 @@ function addRuntime(profile: PetProfile): void {
         }
         current.bubble.beginTurn();
         current.bubble.setStatus('連線中…');
-        window.pet.chatSend(profile.id, text);
+        window.pet.chatSend(profile.id, text, images);
       },
       onCancel: () => window.pet.chatCancel(profile.id),
       onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow),
@@ -343,6 +346,7 @@ function removeRuntime(petId: string): void {
     visiblePetId = null;
     runtime.bubble.hide();
   }
+  if (heldBubblePetId === petId) heldBubblePetId = null;
   if (interactionRuntime === runtime) clearDragFlags();
   const timer = saveTimers.get(petId);
   if (timer) clearTimeout(timer);
@@ -365,6 +369,7 @@ function reconcileProfiles(profiles: PetProfile[]): void {
     else {
       runtime.profile = profile;
       runtime.bubble.setPetName(profile.name);
+      runtime.bubble.setWorkspacePath(profile.workspacePath);
       runtime.bubble.setAgentInfo(agentInfoText(profile)); // 設定面板換模型/力度即時反映
     }
   }
@@ -495,11 +500,15 @@ function cancelBubbleHide(): void {
 
 function hideVisibleBubble(): void {
   cancelBubbleHide();
-  if (visiblePetId) runtimes.get(visiblePetId)?.bubble.hide();
+  const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
+  if (visible?.bubble.isPinned()) return;
+  visible?.bubble.hide();
   visiblePetId = null;
 }
 
 function scheduleBubbleHide(): void {
+  if (heldBubblePetId) return;
+  if (visiblePetId && runtimes.get(visiblePetId)?.bubble.isPinned()) return;
   if (bubbleHideTimer) return;
   bubbleHideTimer = setTimeout(() => {
     bubbleHideTimer = null;
@@ -516,13 +525,19 @@ function scheduleBubbleHide(): void {
 let lastBubblePosAt = 0;
 
 function updateHover(x: number, y: number): void {
+  if (heldBubblePetId) {
+    cancelBubbleHide();
+    visiblePetId = heldBubblePetId;
+    setInteractive(true);
+    return;
+  }
   const hit = runtimeAt(x, y);
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
   const bubbleHit = bubbleAt(x, y);
   if (hit) {
     cancelBubbleHide();
     // busy 中的泡泡不因切換到別隻而藏(其 turn 仍進行);只在非 busy 時換泡泡
-    if (visible && visible !== hit && !visible.bubble.isBusy()) visible.bubble.hide();
+    if (visible && visible !== hit && !visible.bubble.isBusy() && !visible.bubble.isPinned()) visible.bubble.hide();
     visiblePetId = hit.profile.id;
     // 定位含整棵骨骼投影(projectedPetBounds),hover 期間 100ms 節流;首次顯示不等
     const now = performance.now();
@@ -537,7 +552,7 @@ function updateHover(x: number, y: number): void {
     visiblePetId = bubbleHit.profile.id;
     setInteractive(true);
   } else if (visible) {
-    if (visible.bubble.isBusy()) {
+    if (visible.bubble.isBusy() || visible.bubble.isPinned()) {
       // running 中移開游標:泡泡留著看進度,但 overlay 轉穿透讓底下視窗可點;
       // 游標回到泡泡上時 containsPoint 分支恢復互動,可按「停止」。
       cancelBubbleHide();
@@ -567,6 +582,7 @@ function clearDragFlags(): void {
   dragging = false;
   rotating = false;
   interactionRuntime = null;
+  heldBubblePetId = null;
 }
 
 addEventListener('blur', clearDragFlags);
@@ -591,13 +607,17 @@ window.pet.onCursor(({ x, y }) => {
 addEventListener('mousedown', (event) => {
   lastPointerAt = performance.now();
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
+  if (visible?.bubble.isVisible()) {
+    heldBubblePetId = visible.profile.id;
+    cancelBubbleHide();
+  }
   if (bubbleAt(event.clientX, event.clientY)) {
     cancelBubbleHide();
     return;
   }
   const runtime = runtimeAt(event.clientX, event.clientY);
   if (!runtime) return;
-  hideVisibleBubble();
+  if (!heldBubblePetId) hideVisibleBubble();
   interactionRuntime = runtime;
   runtime.viewer.wake();
   if (event.button === 0) {
@@ -642,6 +662,7 @@ addEventListener('mouseup', (event) => {
     }
   }
   interactionRuntime = null;
+  heldBubblePetId = null;
   updateHover(event.clientX, event.clientY);
 });
 
@@ -661,7 +682,7 @@ addEventListener('wheel', (event) => {
     return;
   }
   const minimum = runtime.state.z + 1.2;
-  const cameraZ = Math.min(12, Math.max(minimum, runtime.state.camZ + event.deltaY * 0.005));
+  const cameraZ = Math.min(MAX_CAMERA_Z, Math.max(minimum, runtime.state.camZ + event.deltaY * 0.005));
   const ratio = (cameraZ - runtime.state.z) / (runtime.state.camZ - runtime.state.z);
   if (ratio === 1) return;
   const anchorY = runtime.state.y + runtime.anchorH;

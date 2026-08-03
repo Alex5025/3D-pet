@@ -82,6 +82,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
   /** mcp-config 內容 → 已寫入的檔案路徑(內容相同重用;permDir 整個在 dispose 時刪除)。 */
   const mcpConfigCache = new Map<string, string>();
   let turnSeq = 0;
+  let pastedImageSeq = 0;
 
   function ensurePermServer(): void {
     if (permServer) return;
@@ -175,6 +176,13 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         '--verbose',
         '--include-partial-messages'
       ];
+      const pastedImagePaths: string[] = [];
+      for (const image of opts?.images ?? []) {
+        const extension = image.mimeType === 'image/png' ? 'png' : image.mimeType === 'image/webp' ? 'webp' : 'jpg';
+        const path = join(permDir, `pasted-${++pastedImageSeq}.${extension}`);
+        writeFileSync(path, Buffer.from(image.data, 'base64'));
+        pastedImagePaths.push(path);
+      }
       // 權限等級 → 旗標(v2.0 實證:permission-prompt-tool 契約見 VERDICT)
       const permission = opts?.permission ?? 'readonly';
       let turnKey: string | null = null;
@@ -187,6 +195,9 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       } else if (hub && opts?.petId) {
         // 唯讀但保留寵物工具:dontAsk 靜默拒絕其他工具,白名單放行 pettools
         args.push('--permission-mode', 'dontAsk', '--allowedTools', 'mcp__pettools__*', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
+      } else if (pastedImagePaths.length) {
+        // 貼圖要讓 Claude 的 Read 工具取得暫存檔，但仍禁止寫入、執行與網路工具。
+        args.push('--permission-mode', 'dontAsk', '--allowedTools', 'Read', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
       } else {
         args.push('--disallowedTools', '*'); // 唯讀:純問答
       }
@@ -218,7 +229,10 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       let sawResult = false;
       let stderrTail = '';
 
-      child.stdin.write(text + '\n');
+      const imagePrompt = pastedImagePaths.length
+        ? `\n\n使用者隨本則訊息貼上了圖片，請用 Read 工具讀取並理解後再回答：\n${pastedImagePaths.map((path) => `- ${path}`).join('\n')}`
+        : '';
+      child.stdin.write((text || '請閱讀我貼上的圖片。') + imagePrompt + '\n');
       child.stdin.end();
       child.stderr.on('data', (chunk) => {
         stderrTail = (stderrTail + String(chunk)).slice(-500);
@@ -289,6 +303,9 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         if (running.get(sessionId) === child) running.delete(sessionId);
         if (realSessionId && running.get(realSessionId) === child) running.delete(realSessionId);
         if (turnKey) approvalQueues.delete(turnKey);
+        for (const path of pastedImagePaths) {
+          try { rmSync(path, { force: true }); } catch { /* 暫存檔,稍後由 permDir 一併清理 */ }
+        }
         queue.end();
       });
 

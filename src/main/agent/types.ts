@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentKind, AgentPermission } from '../../shared/agentEvents';
+import type { ChatImage } from '../../shared/chat';
 
 export type { AgentEvent, AgentKind, AgentPermission };
 
@@ -20,6 +21,8 @@ export interface TurnOptions {
   petId?: string;
   /** 參考檔案絕對路徑(資料夾以尾斜線標記):注入 system prompt,AI 據此查找/更新文件。 */
   refFiles?: string[];
+  /** 從剪貼簿貼上的當輪圖片附件。 */
+  images?: ChatImage[];
 }
 
 /** 設定面板下拉選單用的模型資訊。 */
@@ -49,6 +52,7 @@ export interface AgentProvider {
    * opts.model / opts.effort 為每寵設定(空 = CLI 預設);兩家都支援逐 turn 指定。
    * opts.persona = 角色個性(claude 逐 turn 注入 --append-system-prompt;codex 在 thread 建立/恢復時吃 developerInstructions)。
    * opts.permission = 權限等級(見 AgentPermission;codex 對映 sandbox/approvalPolicy、claude 對映旗標)。
+   * opts.images = 當輪貼上的圖片(codex 原生 image input;claude 以短命暫存檔交給 Read)。
    */
   sendMessage(sessionId: string, text: string, opts?: TurnOptions): AsyncIterable<AgentEvent>;
   /** 中斷該 session 進行中的 turn(codex: turn/interrupt;claude: 殺該 turn 的行程)。 */

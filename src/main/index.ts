@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
+import type { ChatImage } from '../shared/chat';
+import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
+import { groupPetsByWorkspace } from '../shared/petGroups';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
 import { createDragMonitor, type DragMonitor } from './dragMonitor';
@@ -11,6 +14,7 @@ import { PET_EXPRESSIONS, createPetToolsHub } from './agent/petToolsHub';
 import type { PetToolsHub } from './agent/petToolsHub';
 import { createProviders } from './agent/providers';
 import { runAgentSelftest, runClaudeE2E, runCodexE2E } from './agent/selftest';
+import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
 
 interface PetState {
   x: number;
@@ -74,6 +78,7 @@ const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settingsWin: BrowserWindow | null = null;
+let sandboxSettingsWin: BrowserWindow | null = null;
 let overlayInteractive = false;
 let overlayInputMode = false;
 let registry: AppRegistry;
@@ -298,6 +303,7 @@ function sendPetProfiles(): void {
   const profiles = [...pets.values()];
   win?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   settingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
+  sandboxSettingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   refreshTray();
 }
 
@@ -309,6 +315,7 @@ function selectPet(id: string): PetProfile | null {
   scheduleConfigFlush();
   refreshTray();
   settingsWin?.webContents.send('selected-pet-apply', id);
+  sandboxSettingsWin?.webContents.send('selected-pet-apply', id);
   const icons = avatarIcons.get(id);
   if (icons) settingsWin?.webContents.send('avatar-icons-apply', id, icons);
   const list = wardrobeLists.get(id);
@@ -336,19 +343,19 @@ async function chooseVrm(petId: string): Promise<void> {
   if (!result.canceled && result.filePaths[0]) await pushVrm(petId, result.filePaths[0]);
 }
 
-async function chooseWorkspace(petId: string): Promise<string | null> {
+async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<string | null> {
   const profile = getPet(petId);
   if (!profile) return null;
   app.focus({ steal: true });
-  settingsWin?.focus();
+  parent?.focus();
   const options: Electron.OpenDialogOptions = {
     title: '選擇工作目錄',
     buttonLabel: '選擇',
     defaultPath: profile.workspacePath ?? app.getPath('documents'),
     properties: ['openDirectory', 'createDirectory']
   };
-  const result = settingsWin
-    ? await dialog.showOpenDialog(settingsWin, options)
+  const result = parent
+    ? await dialog.showOpenDialog(parent, options)
     : await dialog.showOpenDialog(options);
   const path = result.filePaths[0];
   if (result.canceled || !path) return profile.workspacePath ?? null;
@@ -502,15 +509,16 @@ function petMenu(requestedId?: string): Menu {
     { label: `寵物：${profile.name}`, enabled: false },
     {
       label: '切換寵物',
-      submenu: [...pets.values()].map((item) => ({
-        // 休息中的寵物仍列出(讓使用者知道存在),但灰掉不可選——選了會變成
-        // selectedPetId 卻沒有 runtime、桌面看不到角色。喚醒走「喚醒目前角色」
-        // (若牠正是目前角色)或設定面板的寵物選單。
-        label: `${item.enabled ? '' : '（休息中）'}${item.name}`,
-        type: 'radio' as const,
-        checked: item.id === petId,
-        enabled: item.enabled,
-        click: () => selectPet(item.id)
+      submenu: groupPetsByWorkspace([...pets.values()]).map((group) => ({
+        label: `📁 ${group.name}`,
+        submenu: group.pets.map((item) => ({
+          // 休息中的寵物仍列出(讓使用者知道存在),但灰掉不可選。
+          label: `${item.enabled ? '' : '（休息中）'}${item.name}`,
+          type: 'radio' as const,
+          checked: item.id === petId,
+          enabled: item.enabled,
+          click: () => selectPet(item.id)
+        }))
       }))
     },
     { type: 'separator' },
@@ -525,7 +533,7 @@ function petMenu(requestedId?: string): Menu {
       ]
     },
     {
-      // 三項都是同一個設定視窗的分頁,收成一組入口
+      // 一般外觀與工作設定共用分頁；高風險沙盒設定刻意排除。
       label: '設定',
       submenu: [
         { label: '工作（AI 助手）…', click: () => openSettings('project', petId) },
@@ -534,6 +542,7 @@ function petMenu(requestedId?: string): Menu {
         { label: '動作…', click: () => openSettings('motion', petId) }
       ]
     },
+    { label: '沙盒設定…', click: () => openSandboxSettings(petId) },
     { label: '重置位置與大小', click: () => resetState(petId) },
     {
       label: profile.enabled ? '讓目前角色休息' : '喚醒目前角色',
@@ -580,6 +589,37 @@ function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', pe
   const dev = process.env['ELECTRON_RENDERER_URL'];
   if (dev) settingsWin.loadURL(`${dev}/settings.html?tab=${tab}`);
   else settingsWin.loadFile(join(__dirname, '../renderer/settings.html'), { query: { tab } });
+  app.focus({ steal: true });
+}
+
+/** 高風險設定使用獨立視窗與獨立 renderer，不可從一般設定分頁切入。 */
+function openSandboxSettings(petId?: string): void {
+  if (petId) selectPet(petId);
+  if (sandboxSettingsWin && !sandboxSettingsWin.isDestroyed()) {
+    sandboxSettingsWin.webContents.send('selected-pet-apply', registry.selectedPetId);
+    sandboxSettingsWin.show();
+    sandboxSettingsWin.focus();
+    return;
+  }
+  sandboxSettingsWin = new BrowserWindow({
+    width: 480,
+    height: 720,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    title: '專案沙盒設定',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  sandboxSettingsWin.on('closed', () => (sandboxSettingsWin = null));
+  const dev = process.env['ELECTRON_RENDERER_URL'];
+  if (dev) sandboxSettingsWin.loadURL(`${dev}/sandboxSettings.html`);
+  else sandboxSettingsWin.loadFile(join(__dirname, '../renderer/sandboxSettings.html'));
   app.focus({ steal: true });
 }
 
@@ -839,7 +879,50 @@ app.whenReady().then(async () => {
     sendPetProfiles();
   });
 
-  ipcMain.handle('choose-workspace', (_event, id: string) => chooseWorkspace(id));
+  ipcMain.handle('choose-workspace', (event, id: string) => {
+    const parent = event.sender === settingsWin?.webContents
+      ? settingsWin
+      : event.sender === sandboxSettingsWin?.webContents ? sandboxSettingsWin : undefined;
+    return chooseWorkspace(id, parent ?? undefined);
+  });
+
+  /* ── 專案 Codex 沙盒設定──
+   * 設定視窗明確按下後由 main 直接讀寫 <workspace>/.codex/config.toml；不啟動 agent、不跑 shell。 */
+  ipcMain.handle('sandbox-settings-get', async (event, id: string): Promise<ProjectSandboxSettingsResult> => {
+    if (!sandboxSettingsWin || event.sender !== sandboxSettingsWin.webContents) {
+      return { ok: false, message: '沙盒設定只能從獨立安全視窗操作' };
+    }
+    const profile = getPet(id);
+    if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
+    try {
+      return {
+        ok: true,
+        message: '已讀取專案沙盒設定',
+        settings: await readProjectSandboxSettings(profile.workspacePath),
+      };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  ipcMain.handle(
+    'sandbox-settings-set',
+    async (event, id: string, settings: ProjectSandboxSettingsInput): Promise<ProjectSandboxSettingsResult> => {
+      if (!sandboxSettingsWin || event.sender !== sandboxSettingsWin.webContents) {
+        return { ok: false, message: '沙盒設定只能從獨立安全視窗操作' };
+      }
+      const profile = getPet(id);
+      if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
+      try {
+        return {
+          ok: true,
+          message: '已直接寫入專案 .codex/config.toml；重新開啟 Codex 工作階段後生效',
+          settings: await writeProjectSandboxSettings(profile.workspacePath, settings),
+        };
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  );
 
   // 模型清單:codex 要跟 app-server 要(首次會 lazy 啟動),成功才快取(失敗可能只是還沒登入,下次再試)
   // 快取 10 分鐘 TTL:CLI 升版新增模型不用重啟 app 才看得到
@@ -863,9 +946,25 @@ app.whenReady().then(async () => {
     void setDefaultPose(petId, typeof file === 'string' ? file : null);
   });
 
-  ipcMain.on('chat-send', (event, petId: string, text: string) => {
+  ipcMain.on('chat-send', (event, petId: string, text: string, rawImages: unknown) => {
     if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    bridge?.chatSend(petId, String(text));
+    const images: ChatImage[] = [];
+    if (Array.isArray(rawImages)) {
+      for (const item of rawImages.slice(0, 4)) {
+        if (!item || typeof item !== 'object') continue;
+        const value = item as Record<string, unknown>;
+        const mimeType = value['mimeType'];
+        const data = value['data'];
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(String(mimeType))) continue;
+        if (typeof data !== 'string' || data.length > 11_200_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) continue;
+        images.push({
+          mimeType: mimeType as ChatImage['mimeType'],
+          data,
+          name: typeof value['name'] === 'string' ? value['name'].slice(0, 200) : undefined,
+        });
+      }
+    }
+    bridge?.chatSend(petId, String(text).slice(0, 1000), images);
   });
   ipcMain.on('chat-cancel', (event, petId: string) => {
     if (!win || event.sender !== win.webContents) return;

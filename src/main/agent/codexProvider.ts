@@ -353,7 +353,12 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
         // threadId 即真 session id:每 turn 開頭補 session 事件,bridge 據此持久化(去重後只落盤一次)
         push({ kind: 'session', sessionId: threadId });
         // model / effort 是官方 TurnStartParams 欄位(v0 generate-ts 產物),逐 turn 指定、免重開 thread
-        const turnParams: Record<string, unknown> = { threadId, input: [{ type: 'text', text, text_elements: [] }] };
+        const input: Record<string, unknown>[] = [];
+        if (text) input.push({ type: 'text', text, text_elements: [] });
+        for (const image of opts?.images ?? []) {
+          input.push({ type: 'image', url: `data:${image.mimeType};base64,${image.data}` });
+        }
+        const turnParams: Record<string, unknown> = { threadId, input };
         if (opts?.model) turnParams['model'] = opts.model;
         if (opts?.effort) turnParams['effort'] = opts.effort;
         const res = await request('turn/start', turnParams, 120_000);

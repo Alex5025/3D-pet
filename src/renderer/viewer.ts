@@ -98,7 +98,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   document.body.appendChild(renderer.domElement);
 
   // camera —— official basic.html
-  const camera = new THREE.PerspectiveCamera(30.0, window.innerWidth / window.innerHeight, 0.1, 20.0);
+  // 縮小角色會把相機拉到最遠 30；far plane 須保留模型深度與位移餘裕，
+  // 否則相機越過 20 時角色會被整隻裁掉。
+  const camera = new THREE.PerspectiveCamera(30.0, window.innerWidth / window.innerHeight, 0.1, 100.0);
   camera.position.set(0.0, 1.0, 5.0);
   camera.lookAt(0.0, 1.0, 0.0);
 

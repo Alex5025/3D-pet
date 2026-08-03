@@ -1,5 +1,6 @@
 import { DEFAULT_LIGHTING, DEFAULT_SWAY, type Lighting, type Sway } from './viewer';
 import type { AgentKind, AgentModelInfo, PetProfile, PetState, WardrobeItem } from '../preload/index';
+import { groupPetsByWorkspace } from '../shared/petGroups';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 const el = (id: string): HTMLElement => document.getElementById(id)!;
@@ -30,18 +31,23 @@ function activateTab(name: string): void {
 for (const button of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
   button.addEventListener('click', () => activateTab(button.dataset['tab']!));
 }
-activateTab(new URLSearchParams(location.search).get('tab') ?? 'light');
+const initialTab = new URLSearchParams(location.search).get('tab') ?? 'light';
 window.pet.onSwitchTab(activateTab);
 
 /* ---------- 寵物選擇與工作設定 ---------- */
 function renderPetSelector(): void {
   const select = el('pet-select') as HTMLSelectElement;
   select.innerHTML = '';
-  for (const profile of profiles) {
-    const option = document.createElement('option');
-    option.value = profile.id;
-    option.textContent = `${profile.enabled ? '' : '（休息中）'}${profile.name}`;
-    select.appendChild(option);
+  for (const group of groupPetsByWorkspace(profiles)) {
+    const options = document.createElement('optgroup');
+    options.label = `📁 ${group.name}`;
+    for (const profile of group.pets) {
+      const option = document.createElement('option');
+      option.value = profile.id;
+      option.textContent = `${profile.enabled ? '' : '（休息中）'}${profile.name}`;
+      options.appendChild(option);
+    }
+    select.appendChild(options);
   }
   select.value = selectedPetId;
   (el('remove-pet') as HTMLButtonElement).disabled = profiles.length <= 1;
@@ -562,4 +568,5 @@ window.pet.getPetCollection().then((collection) => {
   selectedPetId = collection.selectedPetId;
   syncProfiles(collection.pets, collection.selectedPetId);
 });
+activateTab(initialTab);
 render();

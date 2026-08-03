@@ -25,8 +25,9 @@ export function createMockProvider(kind: AgentKind): MockProvider {
       log.push(`started:${sessionId}${opts.resumeId ? ':resumed' : ''}`);
       return sessionId;
     },
-    async *sendMessage(sessionId, text): AsyncIterable<AgentEvent> {
+    async *sendMessage(sessionId, text, opts): AsyncIterable<AgentEvent> {
       log.push(`message:${sessionId}:${text}`);
+      if (opts?.images?.length) log.push(`images:${sessionId}:${opts.images.length}`);
       cancelled.delete(sessionId);
       yield { kind: 'session', sessionId };
       yield { kind: 'thinking' };

@@ -2,6 +2,8 @@ import './speechBubble.css';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { perf } from './perf';
+import type { ChatImage } from '../shared/chat';
+import { workspaceFolderName } from '../shared/petGroups';
 
 // agent 回覆是 GFM markdown;breaks 讓單一換行也換行(聊天語感)
 marked.setOptions({ gfm: true, breaks: true });
@@ -12,11 +14,15 @@ export interface SpeechBubble {
   isVisible: () => boolean;
   containsPoint: (x: number, y: number) => boolean;
   setPetName: (name: string) => void;
+  /** 顯示工作目錄最後一層名稱；完整路徑保留在 hover 提示。 */
+  setWorkspacePath: (path?: string) => void;
   showAt: (anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect) => void;
   hide: () => void;
   destroy: () => void;
   /** 對話進行中(泡泡不因移開游標而隱藏;Enter 送出被擋)。 */
   isBusy: () => boolean;
+  /** 使用者是否將泡泡切成常駐展開。 */
+  isPinned: () => boolean;
   /** turn 開始:鎖輸入框、清回覆區、顯示狀態列。 */
   beginTurn: () => void;
   /** 回覆文字增量(自動展開回覆區並捲到底)。 */
@@ -45,11 +51,12 @@ type BubblePlacement = 'above' | 'below' | 'left' | 'right';
 interface SpeechBubbleOptions {
   petId?: string;
   petName?: string;
+  workspacePath?: string;
   /** Electron 疊層預設不可聚焦；按輸入框時由主程序暫時開放鍵盤焦點。 */
   requestInputFocus?: () => Promise<void>;
   releaseInputFocus?: () => void;
-  /** Enter 送出(非 busy 且非空白時觸發)。 */
-  onSend?: (text: string) => void;
+  /** Enter 送出(非 busy 且有文字或圖片時觸發)。 */
+  onSend?: (text: string, images: ChatImage[]) => void;
   /** 停止鈕/Esc 中斷進行中的 turn。 */
   onCancel?: () => void;
   /** 審批按鈕(允許/拒絕)的回覆。 */
@@ -64,6 +71,13 @@ interface SpeechBubbleOptions {
 
 const VIEWPORT_MARGIN = 12;
 const ANCHOR_GAP = 16;
+const MAX_PASTED_IMAGES = 4;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = new Set<ChatImage['mimeType']>([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
 
 export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBubble {
   const element = document.createElement('aside');
@@ -74,6 +88,76 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
 
   const label = document.createElement('label');
   label.textContent = `${options.petName ?? '寵物'}：想對我說什麼？`;
+
+  const workspace = document.createElement('div');
+  workspace.className = 'bubble-workspace';
+  const setWorkspacePath = (path?: string): void => {
+    const name = workspaceFolderName(path);
+    workspace.textContent = name ? `📁 ${name}` : '';
+    workspace.title = path ?? '';
+    workspace.classList.toggle('open', !!name);
+  };
+  setWorkspacePath(options.workspacePath);
+
+  // 外側上、下角控制：實際靠左或靠右由 showAt 依螢幕中心動態決定。
+  const pinHotspot = document.createElement('div');
+  pinHotspot.className = 'bubble-pin-hotspot';
+  const pin = document.createElement('button');
+  pin.type = 'button';
+  pin.className = 'bubble-corner-dot bubble-pin';
+  pin.setAttribute('aria-label', '讓對話泡泡保持展開');
+  pin.setAttribute('aria-pressed', 'false');
+  pin.title = '保持展開：關';
+  pin.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 2.2h5.6l-1 3.4 2.1 2.1v1.1H8.7V14L8 15l-.7-1V8.8H4.1V7.7l2.1-2.1-1-3.4Z"/></svg>';
+  pinHotspot.append(pin);
+  const activity = document.createElement('div');
+  activity.className = 'bubble-activity idle read';
+  activity.setAttribute('role', 'status');
+  const activityDot = document.createElement('span');
+  activityDot.className = 'bubble-activity-dot';
+  const activityText = document.createElement('span');
+  activityText.className = 'bubble-activity-text';
+  activity.append(activityDot, activityText);
+  activity.setAttribute('aria-label', '執行狀態：閒置');
+  activity.title = '閒置';
+  let pinned = false;
+  let activityReadTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastActivityKey = 'idle:閒置';
+  const markActivityRead = (): void => {
+    if (activityReadTimer) clearTimeout(activityReadTimer);
+    activityReadTimer = null;
+    activity.classList.add('read');
+  };
+  const setActivity = (state: 'idle' | 'working' | 'approval' | 'done' | 'error', text: string): void => {
+    const key = `${state}:${text}`;
+    activity.classList.remove('idle', 'working', 'approval', 'done', 'error');
+    activity.classList.add(state);
+    activityText.textContent = text;
+    activity.setAttribute('aria-label', `執行狀態：${text}`);
+    activity.title = text;
+    if (key !== lastActivityKey) {
+      lastActivityKey = key;
+      if (activityReadTimer) clearTimeout(activityReadTimer);
+      activityReadTimer = null;
+      activity.classList.remove('read');
+    }
+  };
+  activity.addEventListener('pointerenter', () => {
+    if (activity.classList.contains('read')) return;
+    activityReadTimer = setTimeout(markActivityRead, 500);
+  });
+  activity.addEventListener('pointerleave', () => {
+    if (!activityReadTimer) return;
+    clearTimeout(activityReadTimer);
+    activityReadTimer = null;
+  });
+  pin.addEventListener('click', () => {
+    pinned = !pinned;
+    pin.classList.toggle('active', pinned);
+    pin.setAttribute('aria-pressed', String(pinned));
+    pin.setAttribute('aria-label', pinned ? '取消保持對話泡泡展開' : '讓對話泡泡保持展開');
+    pin.title = `保持展開：${pinned ? '開' : '關'}`;
+  });
 
   // textarea 才能承載多行(Shift+Enter 換行);高度隨內容自動增長,上限由 CSS max-height 管
   const input = document.createElement('textarea');
@@ -168,6 +252,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     const requestId = approvalRequestId;
     approvalRequestId = null;
     approvalBox.classList.remove('open');
+    setActivity('working', '執行中');
     options.onApproval?.(requestId, allow);
   };
   allowButton.addEventListener('click', () => answerApproval(true));
@@ -189,6 +274,25 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const refsBox = document.createElement('div');
   refsBox.className = 'bubble-refs';
 
+  // 圖片只以附件數量呈現，不產生縮圖；送出後才清空。
+  const imagesBox = document.createElement('div');
+  imagesBox.className = 'bubble-images';
+  const imagesText = document.createElement('span');
+  const clearImages = document.createElement('button');
+  clearImages.type = 'button';
+  clearImages.textContent = '移除';
+  clearImages.title = '移除所有已貼上的圖片';
+  imagesBox.append(imagesText, clearImages);
+  let pendingImages: ChatImage[] = [];
+  const updateImagesBox = (): void => {
+    imagesText.textContent = `📎 已貼上 ${pendingImages.length} 張圖片`;
+    imagesBox.classList.toggle('open', pendingImages.length > 0);
+  };
+  clearImages.addEventListener('click', () => {
+    pendingImages = [];
+    updateImagesBox();
+  });
+
   const statusRow = document.createElement('div');
   statusRow.className = 'bubble-status-row';
   const status = document.createElement('div');
@@ -199,7 +303,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   stop.textContent = '停止';
   statusRow.append(status, stop);
 
-  element.append(label, agentInfo, reply, approvalBox, statusRow, input, refsBox);
+  element.append(pinHotspot, activity, label, workspace, agentInfo, reply, approvalBox, statusRow, imagesBox, input, refsBox);
   document.body.appendChild(element);
 
   let busy = false;
@@ -214,12 +318,43 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     });
   });
   input.addEventListener('blur', () => options.releaseInputFocus?.());
+  input.addEventListener('paste', (event) => {
+    const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith('image/'));
+    if (!files.length) return;
+    event.preventDefault();
+    const text = event.clipboardData?.getData('text/plain');
+    if (text) {
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      input.setRangeText(text, start, end, 'end');
+      autosize();
+    }
+    const slots = Math.max(0, MAX_PASTED_IMAGES - pendingImages.length);
+    for (const file of files.slice(0, slots)) {
+      if (!ACCEPTED_IMAGE_TYPES.has(file.type as ChatImage['mimeType']) || file.size > MAX_IMAGE_BYTES) continue;
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        if (typeof reader.result !== 'string' || pendingImages.length >= MAX_PASTED_IMAGES) return;
+        const comma = reader.result.indexOf(',');
+        if (comma < 0) return;
+        pendingImages.push({
+          mimeType: file.type as ChatImage['mimeType'],
+          data: reader.result.slice(comma + 1),
+          name: file.name || undefined,
+        });
+        updateImagesBox();
+      });
+      reader.readAsDataURL(file);
+    }
+  });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       // Shift+Enter = 換行(交給 textarea 預設行為);IME 選字的 Enter(注音/日文)不可觸發送出
       if (event.shiftKey || event.isComposing) return;
       event.preventDefault();
-      if (!busy && input.value.trim()) options.onSend?.(input.value.trim());
+      if (!busy && (input.value.trim() || pendingImages.length)) {
+        options.onSend?.(input.value.trim(), [...pendingImages]);
+      }
       return;
     }
     // busy 中 input 已 disabled 收不到 Esc,中斷以停止鈕為主;這裡保留非 busy 的收合行為。
@@ -289,6 +424,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     if (placement === 'below') element.classList.add('below');
     if (placement === 'left') element.classList.add('left-of');
     if (placement === 'right') element.classList.add('right-of');
+    element.classList.toggle('outer-left', left + width / 2 < window.innerWidth / 2);
+    element.classList.toggle('outer-right', left + width / 2 >= window.innerWidth / 2);
     element.classList.add('visible');
     element.setAttribute('aria-hidden', 'false');
     cachedRect = null; // 位置剛變,舊 rect 作廢
@@ -314,20 +451,28 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
         cachedRect = element.getBoundingClientRect();
         cachedRectAt = now;
       }
-      return x >= cachedRect.left && x <= cachedRect.right && y >= cachedRect.top && y <= cachedRect.bottom;
+      // 角落圓點有一半伸出泡泡本體，命中範圍同步外擴。
+      return x >= cachedRect.left - 20 && x <= cachedRect.right + 20 &&
+        y >= cachedRect.top - 20 && y <= cachedRect.bottom + 28;
     },
     setPetName: (name) => {
       label.textContent = `${name || '寵物'}：想對我說什麼？`;
     },
+    setWorkspacePath,
     showAt,
     hide,
     destroy: () => {
+      if (activityReadTimer) clearTimeout(activityReadTimer);
       hide();
       element.remove();
     },
     isBusy: () => busy,
+    isPinned: () => pinned,
     beginTurn: () => {
       busy = true;
+      setActivity('working', '執行中');
+      pendingImages = [];
+      updateImagesBox();
       input.value = '';
       input.style.height = 'auto'; // 多行送出後收回單行高度
       input.disabled = true; // 會觸發 blur → releaseInputFocus,running 中不需要鍵盤
@@ -366,6 +511,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       approvalRequestId = requestId;
       approvalText.textContent = description;
       approvalBox.classList.add('open');
+      setActivity('approval', '等待核准');
     },
     appendText: (chunk) => {
       reply.classList.add('open');
@@ -375,9 +521,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     },
     setStatus: (text) => {
       status.textContent = text ?? '';
+      if (busy) setActivity('working', text || '執行中');
     },
     endTurn: (ok, errorMessage) => {
       busy = false;
+      setActivity(ok ? 'done' : 'error', ok ? '已完成' : (errorMessage || '執行失敗'));
       input.disabled = false;
       statusRow.classList.remove('open');
       status.textContent = '';

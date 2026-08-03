@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
+import type { ChatImage } from '../shared/chat';
+import type {
+  ProjectSandboxSettings,
+  ProjectSandboxSettingsInput,
+  ProjectSandboxSettingsResult,
+} from '../shared/sandboxSettings';
 
 export type { AgentBinding, AgentEvent, AgentKind };
 
@@ -114,10 +120,17 @@ const api = {
 
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
+  getProjectSandboxSettings: (petId: string): Promise<ProjectSandboxSettingsResult> =>
+    ipcRenderer.invoke('sandbox-settings-get', petId),
+  setProjectSandboxSettings: (
+    petId: string,
+    settings: ProjectSandboxSettingsInput,
+  ): Promise<ProjectSandboxSettingsResult> => ipcRenderer.invoke('sandbox-settings-set', petId, settings),
 
   listAgentModels: (kind: AgentKind): Promise<AgentModelInfo[]> =>
     ipcRenderer.invoke('agent-models', kind),
-  chatSend: (petId: string, text: string) => ipcRenderer.send('chat-send', petId, text),
+  chatSend: (petId: string, text: string, images: ChatImage[] = []) =>
+    ipcRenderer.send('chat-send', petId, text, images),
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
   chatApproval: (petId: string, requestId: string, allow: boolean) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow),

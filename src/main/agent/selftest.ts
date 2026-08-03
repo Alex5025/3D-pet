@@ -9,6 +9,7 @@ import { createClaudeProvider } from './claudeProvider';
 import { createCodexProvider } from './codexProvider';
 import { createMockProvider } from './mockProvider';
 import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
+import { parseProjectSandboxConfig, updateProjectSandboxConfig } from '../sandboxConfig';
 
 /**
  * Headless 回歸自驗(VRM_PET_AGENT_SELFTEST=1 觸發,不開視窗):
@@ -273,6 +274,17 @@ export async function runAgentSelftest(): Promise<boolean> {
     if (!ok) failures.push(name);
   };
 
+  // 專案沙盒設定只改三個指定鍵，既有 Codex 設定與 table 內容必須保留。
+  const sandboxUpdated = updateProjectSandboxConfig(
+    'model = "gpt-test"\n\n[sandbox_workspace_write]\nwritable_roots = ["/tmp"]\n\n[mcp_servers.demo]\ncommand = "demo"\n',
+    { approvalPolicy: 'on-request', sandboxMode: 'workspace-write', networkAccess: true },
+  );
+  const sandboxParsed = parseProjectSandboxConfig('/tmp/work', '/tmp/work/.codex/config.toml', sandboxUpdated);
+  check('沙盒設定保留其他 config.toml 內容', sandboxUpdated.includes('model = "gpt-test"') &&
+    sandboxUpdated.includes('writable_roots = ["/tmp"]') && sandboxUpdated.includes('command = "demo"'));
+  check('沙盒設定寫入與讀回一致', sandboxParsed.approvalPolicy === 'on-request' &&
+    sandboxParsed.sandboxMode === 'workspace-write' && sandboxParsed.networkAccess === true);
+
   const profile: AgentPetProfile = { id: 'p1', workspacePath: '/tmp', agent: { kind: 'claude' } };
   const events: AgentEvent[] = [];
   const mockClaude = createMockProvider('claude');
@@ -303,6 +315,12 @@ export async function runAgentSelftest(): Promise<boolean> {
   check('done ok=true', events.some((e) => e.kind === 'done' && e.ok));
   check('sessionId 已回存 profile', profile.agent?.sessionId === 'mock-claude-1');
   check('每 turn 恰一個終結事件', terminalCount() === 1);
+
+  // 1.5 圖片可單獨成為一則訊息,且完整傳到 provider。
+  events.length = 0;
+  bridge.chatSend('p1', '', [{ mimeType: 'image/png', data: 'iVBORw0KGgo=' }]);
+  await waitTerminal(1);
+  check('純圖片訊息有送到 provider', mockClaude.log.includes('images:mock-claude-1:1'));
 
   // 2. 單 turn 限制:running 中第二句 → error
   events.length = 0;
