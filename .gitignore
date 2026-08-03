@@ -7,3 +7,4 @@ runtime-data/pets/
 models/*
 !models/AvatarSample_A.vrm
 motions/
+/.codex/config.toml
