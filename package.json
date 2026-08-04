@@ -6,6 +6,7 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
     "check:secrets": "node scripts/check-secrets.mjs",
+    "check:secrets:all": "node scripts/check-secrets.mjs --tracked",
     "predev": "pkill -9 -f \"$(pwd)/node_modules/electron/dist\" || true",
     "dev": "electron-vite dev",
     "build": "electron-vite build",

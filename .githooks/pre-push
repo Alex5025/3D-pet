@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
 
+echo '執行 pre-push 密碼與金鑰檢查(所有追蹤檔案)...'
+npm run check:secrets:all
+
 echo '執行 pre-push 建置檢查...'
 npm run build
