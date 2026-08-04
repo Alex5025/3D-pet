@@ -333,12 +333,14 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         }, 2_500);
       }
     },
-    async respondApproval(_sessionId, requestId, allow) {
+    async respondApproval(_sessionId, requestId, allow, feedback) {
       const socket = pendingPerm.get(requestId);
       if (!socket) return;
       pendingPerm.delete(requestId);
       socket.write(JSON.stringify(
-        allow ? { behavior: 'allow', updatedInput: undefined } : { behavior: 'deny', message: '使用者拒絕了這個操作' }
+        allow
+          ? { behavior: 'allow', updatedInput: undefined }
+          : { behavior: 'deny', message: feedback || '使用者拒絕了這個操作' }
       ) + '\n');
     },
     async closeSession(sessionId) {

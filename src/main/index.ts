@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
@@ -106,6 +107,13 @@ const registryPath = (): string => join(runtimeDataDir(), 'app.json');
 const petPath = (id: string): string => join(petsDir(), `${id}.json`);
 const legacyRuntimeConfigPath = (): string => join(runtimeDataDir(), 'config.json');
 const legacyRootConfigPath = (): string => join(dataDir(), 'config.json');
+const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
+
+/** 地端重啟腳本只需要這份 PID 紀錄；啟動命令固定寫在腳本內。 */
+function writeSystemPidRecord(): void {
+  mkdirSync(runtimeDataDir(), { recursive: true });
+  writeFileSync(systemPidPath(), `${process.pid}\n`);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -502,6 +510,46 @@ function refreshTray(): void {
   if (registry) tray?.setContextMenu(petMenu(registry.selectedPetId));
 }
 
+/** 只重建指定寵物的 agent/runtime；設定與已持久化 session 保留，下一句可 resume。 */
+async function restartPet(petId: string): Promise<void> {
+  const profile = getPet(petId);
+  if (!profile?.enabled) return;
+  try {
+    // provider 正在等待外部程序時 close 可能拖很久；角色重建不可被它無限卡住。
+    await Promise.race([
+      bridge?.closePetSession(petId) ?? Promise.resolve(),
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+  } finally {
+    win?.webContents.send('pet-runtime-restart', petId);
+  }
+}
+
+function shutdownSync(): void {
+  // 每項各自隔離：某個外部程序或 watcher 清理失敗，不可阻止設定落盤與 app 結束／重啟。
+  const cleanup = (label: string, action: () => void): void => {
+    try { action(); } catch (error) { console.log(`[main] ${label} cleanup failed`, error); }
+  };
+  cleanup('agent bridge', () => bridge?.shutdownSync());
+  cleanup('pet tools', () => petToolsHub?.dispose());
+  cleanup('motions watcher', () => motionsWatcher?.close());
+  cleanup('drag monitor', () => dragMonitor?.dispose());
+  cleanup('config', persistConfigSync);
+}
+
+function restartApp(): void {
+  // Electron 只觸發固定地端腳本；PID 讀取、終止程序與 npm run dev 全由腳本負責。
+  persistConfigSync();
+  const scriptPath = join(app.getAppPath(), 'scripts/restart-pet-system.sh');
+  const child = spawn('/bin/zsh', [scriptPath], {
+    cwd: app.getAppPath(),
+    detached: true,
+    stdio: 'ignore',
+    env: process.env,
+  });
+  child.unref();
+}
+
 function petMenu(requestedId?: string): Menu {
   const profile = getPet(requestedId) ?? [...pets.values()][0];
   const petId = profile.id;
@@ -545,6 +593,11 @@ function petMenu(requestedId?: string): Menu {
     { label: '沙盒設定…', click: () => openSandboxSettings(petId) },
     { label: '重置位置與大小', click: () => resetState(petId) },
     {
+      label: '重啟目前角色',
+      enabled: profile.enabled,
+      click: () => void restartPet(petId)
+    },
+    {
       label: profile.enabled ? '讓目前角色休息' : '喚醒目前角色',
       click: () => setPetEnabled(petId, !profile.enabled)
     },
@@ -556,8 +609,9 @@ function petMenu(requestedId?: string): Menu {
         openSettings('project', created.id);
       }
     },
+    { label: '重啟寵物系統', click: restartApp },
     // app.exit 不觸發 before-quit,清理要在這裡自己做(已知坑,見 DEVLOG §22)
-    { label: '結束', click: () => { bridge?.shutdownSync(); petToolsHub?.dispose(); dragMonitor?.dispose(); persistConfigSync(); app.exit(0); } }
+    { label: '結束', click: () => { shutdownSync(); app.exit(0); } }
   ]);
 }
 
@@ -673,6 +727,7 @@ const TRAY_ICON =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAZklEQVR4nGNgoAFQAOIEIJ4PxPeheD5UTAGfRpiG/wQwzEAMQIxmZEMwnE2sZhhG8U4CGQYkoPufVANQwoEU/2MNB4oNoNgLFAeiAhkGKDCgAYoSEiwciDHkPrr/0YECA5mZiSwAANJTnOH5R44LAAAAAElFTkSuQmCC';
 
 app.whenReady().then(async () => {
+  writeSystemPidRecord();
   // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)。
   // =1 → MockProvider 全鏈;=claude / =codex → 真 CLI e2e(耗額度,顯式觸發才跑)
   const selftestMode = process.env['VRM_PET_AGENT_SELFTEST'];
@@ -970,9 +1025,14 @@ app.whenReady().then(async () => {
     if (!win || event.sender !== win.webContents) return;
     bridge?.chatCancel(petId);
   });
-  ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean) => {
+  ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean, feedback?: string) => {
     if (!win || event.sender !== win.webContents) return;
-    bridge?.respondApproval(petId, String(requestId), allow === true);
+    bridge?.respondApproval(
+      petId,
+      String(requestId),
+      allow === true,
+      typeof feedback === 'string' ? feedback.trim().slice(0, 1000) : undefined,
+    );
   });
   ipcMain.on('open-external', (event, url: string) => {
     if (!win || event.sender !== win.webContents) return;
@@ -1252,10 +1312,4 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { /* 常駐 */ });
-app.on('before-quit', () => {
-  bridge?.shutdownSync();
-  petToolsHub?.dispose();
-  motionsWatcher?.close();
-  dragMonitor?.dispose();
-  persistConfigSync();
-});
+app.on('before-quit', shutdownSync);

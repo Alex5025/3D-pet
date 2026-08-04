@@ -381,19 +381,35 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       const turnId = activeTurns.get(threadId);
       if (turnId) await request('turn/interrupt', { threadId, turnId });
     },
-    async respondApproval(_threadId, requestId, allow) {
+    async respondApproval(threadId, requestId, allow, feedback) {
       const pending = pendingApprovals.get(requestId);
       if (!pending) return;
       pendingApprovals.delete(requestId);
       if (pending.method === 'mcpServer/elicitation/request') {
         respondToServer(pending.rpcId, { action: allow ? 'accept' : 'decline', content: allow ? {} : null, _meta: null });
+        const turnId = activeTurns.get(threadId);
+        if (!allow && feedback && turnId) {
+          await request('turn/steer', {
+            threadId,
+            expectedTurnId: turnId,
+            input: [{ type: 'text', text: `我拒絕了剛才的操作，請依照這個調整：${feedback}`, text_elements: [] }],
+          });
+        }
         return;
       }
       const legacy = pending.method === 'execCommandApproval' || pending.method === 'applyPatchApproval';
       const decision = legacy
-        ? (allow ? 'approved' : { denied: { rejection: '使用者拒絕' } })
+        ? (allow ? 'approved' : { denied: { rejection: feedback || '使用者拒絕' } })
         : (allow ? 'accept' : 'decline');
       respondToServer(pending.rpcId, { decision });
+      const turnId = activeTurns.get(threadId);
+      if (!allow && feedback && !legacy && turnId) {
+        await request('turn/steer', {
+          threadId,
+          expectedTurnId: turnId,
+          input: [{ type: 'text', text: `我拒絕了剛才的操作，請依照這個調整：${feedback}`, text_elements: [] }],
+        });
+      }
     },
     async closeSession(threadId) {
       // thread 在磁碟($CODEX_HOME),清掉本地載入狀態即可;下次以 resume 恢復

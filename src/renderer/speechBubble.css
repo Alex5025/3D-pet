@@ -397,7 +397,11 @@
 }
 
 .pet-speech-bubble .approval-text {
+  max-height: min(180px, 30vh);
   margin-bottom: 8px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 12.5px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -408,6 +412,24 @@
 .pet-speech-bubble .approval-buttons {
   display: flex;
   gap: 8px;
+}
+
+.pet-speech-bubble .approval-feedback {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  max-height: 108px;
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  overflow-y: auto;
+  resize: vertical;
+  color: #4f4120;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(198, 149, 55, 0.4);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .pet-speech-bubble .approval-buttons button {

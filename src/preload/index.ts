@@ -107,6 +107,8 @@ const api = {
     ipcRenderer.on('pet-profiles-apply', (_event, pets, selectedPetId) => callback(pets, selectedPetId)),
   onSelectedPet: (callback: (petId: string) => void) =>
     ipcRenderer.on('selected-pet-apply', (_event, petId) => callback(petId)),
+  onPetRestart: (callback: (petId: string) => void) =>
+    ipcRenderer.on('pet-runtime-restart', (_event, petId) => callback(petId)),
 
   getState: (petId: string): Promise<Partial<PetState> | null> => ipcRenderer.invoke('get-state', petId),
   saveState: (petId: string, state: PetState) => ipcRenderer.send('save-state', petId, state),
@@ -132,8 +134,8 @@ const api = {
   chatSend: (petId: string, text: string, images: ChatImage[] = []) =>
     ipcRenderer.send('chat-send', petId, text, images),
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
-  chatApproval: (petId: string, requestId: string, allow: boolean) =>
-    ipcRenderer.send('chat-approval', petId, requestId, allow),
+  chatApproval: (petId: string, requestId: string, allow: boolean, feedback?: string) =>
+    ipcRenderer.send('chat-approval', petId, requestId, allow, feedback),
   newSession: (petId: string) => ipcRenderer.send('new-session', petId),
 
   /* 參考檔案(拖放到寵物身上;當次對話有效,不落盤)。

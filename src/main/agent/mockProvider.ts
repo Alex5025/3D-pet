@@ -67,7 +67,7 @@ export function createMockProvider(kind: AgentKind): MockProvider {
       cancelled.add(sessionId);
       log.push(`cancelled:${sessionId}`);
     },
-    async respondApproval(_sessionId, requestId, allow) {
+    async respondApproval(_sessionId, requestId, allow, _feedback) {
       approvals.get(requestId)?.(allow);
       approvals.delete(requestId);
     },

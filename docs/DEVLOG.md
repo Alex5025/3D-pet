@@ -593,3 +593,13 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 - **工作目錄辨識**:泡泡顯示專案根目錄名稱並保留完整路徑提示；設定視窗與右鍵寵物選單依標準化後的工作目錄分組，未設定工作目錄的寵物集中顯示，讓多專案環境較容易辨識。
 - **遠距縮放**:桌面滾輪縮小上限由相機距離 12 放寬到 30，同步把 PerspectiveCamera far plane 從 20 調整為 100，避免相機超過舊裁切面後角色整隻消失。
 - **驗證**:`npm run typecheck`、`npm run build` 與 pre-commit secrets 檢查通過。
+
+---
+
+## 39. 審批拒絕回饋、泡泡收合與寵物系統重啟(2026-08-03)
+
+- **執行中泡泡收合**:修正 `busy` 被誤當成常駐條件；未釘選的泡泡在 agent 執行期間仍會於游標移開後收起，只有使用者主動開啟圖釘才保持展開。
+- **拒絕時可附調整方向**:審批區加入最多 1000 字的回饋欄位與內容捲軸。Claude 直接把文字放入 permission deny message；Codex 舊協定使用 rejection，新協定在 decline 後用 `turn/steer` 把調整方向送進同一 turn。收起審批框前主動 blur，避免透明 overlay 留在鍵盤輸入模式造成桌面像卡住；審批回覆失敗時顯示錯誤並中斷 turn。
+- **單寵重啟**:右鍵選單可只重建目前角色的 renderer、模型、泡泡與 agent runtime，保留 transform、profile 與已持久化 session；provider 關閉最多等待 2 秒，避免單寵重啟被外部程序卡死。
+- **整體重啟最終方案**:Electron 啟動時將自身 PID 寫入 `runtime-data/pet-system.pid`，選單只觸發固定地端腳本 `scripts/restart-pet-system.sh`。腳本讀 PID，先送 SIGTERM、5 秒未退出再送 SIGKILL，等待 electron-vite 釋放資源後於專案根目錄重新執行 `npm run dev`；過程寫入 `runtime-data/pet-system-restart.log`。不再使用 `app.relaunch()`，也不由 Electron 傳入或推測重啟命令。
+- **實機驗收**:使用者確認地端腳本重啟成功。另通過 shell 語法檢查、`npm run typecheck`、`npm run build` 與 `git diff --check`。

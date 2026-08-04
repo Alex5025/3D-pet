@@ -24,7 +24,7 @@ export interface AgentBridge {
   chatSend(petId: string, text: string, images?: ChatImage[]): void;
   chatCancel(petId: string): void;
   /** 泡泡審批按鈕的回覆(requestId 來自 approval 事件)。 */
-  respondApproval(petId: string, requestId: string, allow: boolean): void;
+  respondApproval(petId: string, requestId: string, allow: boolean, feedback?: string): void;
   /** 設定面板下拉用;provider 不支援或失敗回空清單。 */
   listModels(kind: AgentKind): Promise<AgentModelInfo[]>;
   /** 寵物休眠/刪除/換 agent 種類時關閉 session。 */
@@ -174,14 +174,16 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       if (!state?.running || !state.sessionId) return;
       void deps.providers[state.kind].cancel(state.sessionId);
     },
-    respondApproval(petId, requestId, allow) {
+    respondApproval(petId, requestId, allow, feedback) {
       const state = states.get(petId);
       if (!state?.sessionId) return;
       state.awaitingApproval = false;
       state.lastActivity = Date.now();
-      void deps.providers[state.kind].respondApproval(state.sessionId, requestId, allow).catch((error) =>
-        console.log('[agent] respondApproval 失敗:', error)
-      );
+      void deps.providers[state.kind].respondApproval(state.sessionId, requestId, allow, feedback).catch(async (error) => {
+        console.log('[agent] respondApproval 失敗:', error);
+        deps.send(petId, { kind: 'error', message: `回覆操作選擇失敗：${String(error)}` });
+        await deps.providers[state.kind].cancel(state.sessionId!).catch(() => undefined);
+      });
     },
     async listModels(kind) {
       try {

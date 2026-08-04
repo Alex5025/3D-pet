@@ -322,7 +322,8 @@ function addRuntime(profile: PetProfile): void {
         window.pet.chatSend(profile.id, text, images);
       },
       onCancel: () => window.pet.chatCancel(profile.id),
-      onApproval: (requestId, allow) => window.pet.chatApproval(profile.id, requestId, allow),
+      onApproval: (requestId, allow, feedback) =>
+        window.pet.chatApproval(profile.id, requestId, allow, feedback),
       onOpenLink: (url) => window.pet.openExternal(url),
       onNewSession: () => window.pet.newSession(profile.id),
       onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path)
@@ -375,7 +376,20 @@ function reconcileProfiles(profiles: PetProfile[]): void {
   }
 }
 
+/** 單寵熱重啟：沿用 renderer 記憶體中的最新 transform，避免 debounce 尚未落盤時跳回舊位置。 */
+function restartRuntime(petId: string): void {
+  const runtime = runtimes.get(petId);
+  if (!runtime) return;
+  const profile: PetProfile = {
+    ...runtime.profile,
+    state: { ...runtime.state },
+  };
+  removeRuntime(petId);
+  addRuntime(profile);
+}
+
 window.pet.onPetProfiles((profiles) => reconcileProfiles(profiles));
+window.pet.onPetRestart(restartRuntime);
 window.pet.getPetCollection().then(({ pets }) => reconcileProfiles(pets));
 
 /** 目前功率檔位(main 的 powerMonitor 推播);晚建立的 runtime 由 addRuntime 補套。 */
@@ -512,11 +526,7 @@ function scheduleBubbleHide(): void {
   if (bubbleHideTimer) return;
   bubbleHideTimer = setTimeout(() => {
     bubbleHideTimer = null;
-    // 160ms 間可能剛開始 turn:busy 中泡泡不藏(對話進行中),只釋放互動
-    if (visiblePetId && runtimes.get(visiblePetId)?.bubble.isBusy()) {
-      setInteractive(false);
-      return;
-    }
+    // 執行中不是常駐條件；只有使用者主動釘選的泡泡才保持展開。
     hideVisibleBubble();
     setInteractive(false);
   }, 160);
@@ -536,8 +546,7 @@ function updateHover(x: number, y: number): void {
   const bubbleHit = bubbleAt(x, y);
   if (hit) {
     cancelBubbleHide();
-    // busy 中的泡泡不因切換到別隻而藏(其 turn 仍進行);只在非 busy 時換泡泡
-    if (visible && visible !== hit && !visible.bubble.isBusy() && !visible.bubble.isPinned()) visible.bubble.hide();
+    if (visible && visible !== hit && !visible.bubble.isPinned()) visible.bubble.hide();
     visiblePetId = hit.profile.id;
     // 定位含整棵骨骼投影(projectedPetBounds),hover 期間 100ms 節流;首次顯示不等
     const now = performance.now();
@@ -552,9 +561,8 @@ function updateHover(x: number, y: number): void {
     visiblePetId = bubbleHit.profile.id;
     setInteractive(true);
   } else if (visible) {
-    if (visible.bubble.isBusy() || visible.bubble.isPinned()) {
-      // running 中移開游標:泡泡留著看進度,但 overlay 轉穿透讓底下視窗可點;
-      // 游標回到泡泡上時 containsPoint 分支恢復互動,可按「停止」。
+    if (visible.bubble.isPinned()) {
+      // 使用者主動釘選時保持展開；overlay 仍轉穿透，避免阻擋底下視窗。
       cancelBubbleHide();
       setInteractive(false);
     } else {

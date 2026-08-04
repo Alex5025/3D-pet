@@ -60,7 +60,7 @@ interface SpeechBubbleOptions {
   /** 停止鈕/Esc 中斷進行中的 turn。 */
   onCancel?: () => void;
   /** 審批按鈕(允許/拒絕)的回覆。 */
-  onApproval?: (requestId: string, allow: boolean) => void;
+  onApproval?: (requestId: string, allow: boolean, feedback?: string) => void;
   /** 回覆區的連結點擊(交給外部瀏覽器開)。 */
   onOpenLink?: (url: string) => void;
   /** 「新對話」鈕:清掉 session,下一句從零開始。 */
@@ -234,6 +234,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   approvalBox.className = 'bubble-approval';
   const approvalText = document.createElement('div');
   approvalText.className = 'approval-text';
+  const approvalFeedback = document.createElement('textarea');
+  approvalFeedback.className = 'approval-feedback';
+  approvalFeedback.rows = 2;
+  approvalFeedback.maxLength = 1000;
+  approvalFeedback.placeholder = '拒絕原因或希望如何調整（選填）';
   const approvalButtons = document.createElement('div');
   approvalButtons.className = 'approval-buttons';
   const allowButton = document.createElement('button');
@@ -245,18 +250,29 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   denyButton.className = 'approval-deny';
   denyButton.textContent = '拒絕';
   approvalButtons.append(allowButton, denyButton);
-  approvalBox.append(approvalText, approvalButtons);
+  approvalBox.append(approvalText, approvalFeedback, approvalButtons);
   let approvalRequestId: string | null = null;
   const answerApproval = (allow: boolean): void => {
     if (!approvalRequestId) return;
     const requestId = approvalRequestId;
+    const feedback = approvalFeedback.value.trim();
     approvalRequestId = null;
+    // textarea 聚焦時 overlay 會暫時攔截鍵盤；收起選擇框前必須主動 blur，
+    // 否則隱藏的欄位仍可能讓透明桌面層卡在輸入模式。
+    approvalFeedback.blur();
     approvalBox.classList.remove('open');
-    setActivity('working', '執行中');
-    options.onApproval?.(requestId, allow);
+    approvalFeedback.value = '';
+    setActivity('working', allow ? '已允許，執行中' : '已拒絕，調整中');
+    options.onApproval?.(requestId, allow, allow ? undefined : feedback);
   };
   allowButton.addEventListener('click', () => answerApproval(true));
   denyButton.addEventListener('click', () => answerApproval(false));
+  approvalFeedback.addEventListener('pointerdown', (event) => {
+    if (!options.requestInputFocus || document.activeElement === approvalFeedback) return;
+    event.preventDefault();
+    void options.requestInputFocus().then(() => approvalFeedback.focus());
+  });
+  approvalFeedback.addEventListener('blur', () => options.releaseInputFocus?.());
 
   // 新對話:turn 進行中不給按(要先停止);按下後就地清空回覆區,視覺上等於「重新開始」
   newSessionBtn.addEventListener('click', () => {
@@ -463,6 +479,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     hide,
     destroy: () => {
       if (activityReadTimer) clearTimeout(activityReadTimer);
+      if (element.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
       hide();
       element.remove();
     },
@@ -510,6 +527,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     showApproval: (requestId, description) => {
       approvalRequestId = requestId;
       approvalText.textContent = description;
+      approvalFeedback.value = '';
       approvalBox.classList.add('open');
       setActivity('approval', '等待核准');
     },

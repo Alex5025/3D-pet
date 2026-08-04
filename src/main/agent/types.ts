@@ -58,7 +58,7 @@ export interface AgentProvider {
   /** 中斷該 session 進行中的 turn(codex: turn/interrupt;claude: 殺該 turn 的行程)。 */
   cancel(sessionId: string): Promise<void>;
   /** 回覆 approval 事件(requestId 來自該事件);只在 permission=ask 時會發生。 */
-  respondApproval(sessionId: string, requestId: string, allow: boolean): Promise<void>;
+  respondApproval(sessionId: string, requestId: string, allow: boolean, feedback?: string): Promise<void>;
   /** 釋放單一 session(寵物休眠/刪除)。 */
   closeSession(sessionId: string): Promise<void>;
   /** 整個 provider 優雅收攤(SIGTERM → 1s → SIGKILL)。 */
