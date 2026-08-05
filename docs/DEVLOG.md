@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-08-04。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-08-06。對應的 commit 見 `git log`。
 
 ---
 
@@ -654,3 +654,17 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 **追加(同日):任務歸屬語意**——使用者釐清:泡泡投入必綁定該寵(從誰的泡泡進來就誰做,模組層強制缺 assignee 拒收);中控台將來可投**不綁定**任務進公用池,任何「啟用中且已設工作目錄」的寵物在自己佇列空檔時領取(claim 時才寫入 assignee)。綁定佇列永遠優先於領公用單;寵物休息只清自己的綁定佇列、公用池不動;喚醒即觸發 dispatchAll 領單。selftest 歸屬 7 項(必綁拒收/公用投單/clear 不動池/claim 最舊/removeUnbound/綁定優先/空檔依序領)全 PASS。
 
 **教訓**:改「樂觀 UI」(先 beginTurn 再送)為「事件驅動 UI」(turnStart 才 beginTurn)時,所有原本綁在樂觀路徑上的副作用(清輸入框、鎖定、清附件)都要逐一重新歸位——它們各自屬於「送出被接受」「開始執行」「結束」三個不同時刻,混在一起就是這次三個坑的根源。
+
+## 42. 新增寵物自動建立預設工作目錄(2026-08-06)
+
+**需求**:新寵物的 `workspacePath` 原本完全不填,只靠建立後自動打開「工作」分頁提醒手動選;使用者忘記調整就會被 bridge 擋下,或隨手選到不該用的目錄造成工作區污染。改為新增寵物當下自動在 `<根位置>/<寵物名>_<建立時間>/` 建好專屬目錄並寫入 profile;根位置是全域設定(預設 `~/Documents/PetWorkspaces`),可在設定面板「工作」分頁變更。
+
+**設計要點**:
+
+1. **全域設定的落點**:專案原本沒有任何全域使用者設定容器——逐寵設定在 `pets/<id>.json`,`app.json` 只有 registry 三欄。新欄位 `defaultWorkspaceRoot` 直接加進 `AppRegistry`(optional、schemaVersion 不升版):persist 是整個 registry `JSON.stringify`,零改動;但 `loadConfigSync` 以字面量嚴格重建 registry,**必須補讀回該欄位否則重啟就被洗掉**(legacy 遷移路徑不用動,不填 = 用預設值)。
+2. **純函式與 fs 分層**(`workspaceDefaults.ts`,循 `sandboxConfig` 先例):名稱消毒(去 `/\:*?"<>|` 與控制字元、空白移除「寵物 3」→「寵物3」、去頭尾點、截 60 字、全空退 `'pet'`)、時間戳 `YYYY-MM-DD_HH-mm-ss`、同秒碰撞加 `-2`/`-3` 序號——這三層是純函式,selftest 直接驗;fs 包裝 `createDefaultWorkspace` 任何失敗(根位置唯讀、磁碟拔除)回 `null`,寵物照建、`workspacePath` 維持未設定,退回原本 bridge 擋門行為,不彈 dialog 不加新錯誤路徑。
+3. **兩個入口零分叉**:Tray「新增寵物」與設定面板 ＋ 鈕都收斂在 `createNewPet()`,只改這一處;建立後照舊自動開「工作」分頁,正好讓使用者看到自動配好的路徑。
+4. **變更根位置只影響之後新增**:`createNewPet` 呼叫當下才讀 `workspaceRoot()`,既有寵物 profile 不碰;刪除寵物也不動已建目錄(裡面可能有 agent 產出、多寵可共用 workspace,循 removePet「只搬 .trash 不硬刪」的保守慣例)。
+5. **IPC 循既有安全慣例**:`choose-workspace-root` 僅接受 settingsWin 的 sender;dialog 前 `app.focus({steal:true})`(背景 app 的 dialog 會被壓住);變更後 `workspace-root-apply` 推播回設定面板即時更新。
+
+**驗證**:typecheck 綠;selftest 補 5 項純函式檢查(消毒去空白/去不合法字元/全符號退 pet/名稱_時間戳格式/同秒碰撞序號)全 PASS;fs 層以 esbuild 轉譯實測:正常建立、同秒連建第二個帶 `-2`、`/System` 下唯讀根位置回 null 留 log。
