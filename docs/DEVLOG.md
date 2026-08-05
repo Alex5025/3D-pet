@@ -603,3 +603,33 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 - **單寵重啟**:右鍵選單可只重建目前角色的 renderer、模型、泡泡與 agent runtime，保留 transform、profile 與已持久化 session；provider 關閉最多等待 2 秒，避免單寵重啟被外部程序卡死。
 - **整體重啟最終方案**:Electron 啟動時將自身 PID 寫入 `runtime-data/pet-system.pid`，選單只觸發固定地端腳本 `scripts/restart-pet-system.sh`。腳本讀 PID，先送 SIGTERM、5 秒未退出再送 SIGKILL，等待 electron-vite 釋放資源後於專案根目錄重新執行 `npm run dev`；過程寫入 `runtime-data/pet-system-restart.log`。不再使用 `app.relaunch()`，也不由 Electron 傳入或推測重啟命令。
 - **實機驗收**:使用者確認地端腳本重啟成功。另通過 shell 語法檢查、`npm run typecheck`、`npm run build` 與 `git diff --check`。
+
+---
+
+## 40. 效能二輪:待機動作成本與 ProMotion 盲點(2026-08-04)
+
+**背景**:待機動作上線後,閒置 renderer CPU 從 P5 基線的 6.5–7.6% 漲回 15–35%。逐項排查發現兩層原因,第二層是所有節流參數共同的盲點。
+
+### 第一層:待機動作的隱性成本(三個修正)
+
+1. **動作結束的全速尾巴**:`finished` 後仍要熬過完整 IDLE_DELAY(3 秒)才進節流——那個緩衝是給「使用者互動後」spring bone 安定用的,動作播完只需 ~0.6 秒。修:`finished` 時回撥 `lastActiveAt`。
+2. **多寵同時播**:各寵 timer 獨立,常兩寵同時全速疊 GPU。修:全域互斥(10 秒窗口),同時只有一寵播,撞鎖順延;輪流動視覺上也更自然。
+3. **待機播放半幀率**:`vrma-play` IPC 加 lowPower 旗標(只有待機排程帶),viewer 播放期跳幀加倍(≈30fps);手動選單與 agent 的 `pet_play_motion` 維持全速。MAX_DT 既有鉗制保護物理。
+
+### 第二層(真正的大頭):節流參數是 60Hz 思維,ProMotion 白燒一倍
+
+**診斷路徑**:對照組(無待機動作)CPU 依然 28–31% → 動作不是主因;新增 `VRM_PET_PERF_LOG=1`(main 每 5 秒 `executeJavaScript` 讀 `window.__perf`,疊層開不了 DevTools 的唯一通道)看 render/rAF 比例——**rAF 計數 1000/5s 曝露螢幕是 ~100–120Hz**:`IDLE_SKIP=6` 在 120Hz 上只降到 20fps(設計是 10fps),「全速」更是直接跑 120fps。
+
+**修**:viewer 以 EMA 估實際幀距(`rafDtEma`),幀距 <12ms(>83Hz)時所有跳幀 ×2,把有效幀率鎖回 60Hz 設計值(活動 ≤60fps、閒置 ~10fps、eco 30fps…全檔位自動適用)。
+
+**量測(兩寵、無待機動作、ProMotion 螢幕)**:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| renderer 閒置 | 28–31% | **9–10%** |
+| GPU 行程 | 21–24% | **5.4%** |
+| 閒置 render/rAF | ≥0.38 | **0.08**(=1/12 ✓) |
+
+另:dragMonitor(拖曳偵測 helper,常駐 0.4–0.9%)接上功率檔位——suspended 或全寵休息時暫停輪詢,與游標輪詢同進退。
+
+**教訓**:所有「每 N 幀」的節流參數都隱含了 60Hz 假設;高更新率螢幕(ProMotion)上 rAF 是 120Hz,固定 N 的實際效果全部砍半。**跳幀參數要用「目標 fps」思維換算,不能用固定除數**;而 rAF 計數本身就是最便宜的螢幕更新率偵測器。

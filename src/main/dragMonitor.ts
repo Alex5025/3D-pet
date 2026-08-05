@@ -42,16 +42,19 @@ while (true) {
 `;
 
 export interface DragMonitor {
+  /** false = 暫停輪詢(鎖屏/睡眠/全寵休息時省 helper 的常駐 CPU);true = 恢復。 */
+  setActive(active: boolean): void;
   dispose(): void;
 }
 
 export function createDragMonitor(handlers: { onStart: () => void; onEnd: () => void }): DragMonitor {
   let child: ChildProcess | null = null;
   let disposed = false;
+  let wanted = true;
   let failures = 0;
 
   function start(): void {
-    if (disposed || process.platform !== 'darwin') return;
+    if (disposed || !wanted || child || process.platform !== 'darwin') return;
     const proc = spawn('osascript', ['-l', 'JavaScript', '-e', JXA_SCRIPT], { stdio: ['ignore', 'pipe', 'pipe'] });
     child = proc;
     proc.stderr?.on('data', () => undefined);
@@ -62,6 +65,7 @@ export function createDragMonitor(handlers: { onStart: () => void; onEnd: () => 
     proc.on('exit', () => {
       if (disposed || child !== proc) return;
       child = null;
+      if (!wanted) return; // setActive(false) 主動停的,不是 crash
       // 連續掛掉就放棄(拖放接收窗失效,其他功能不受影響),偶發掛掉 5 秒後重啟
       failures += 1;
       if (failures <= 5) setTimeout(start, 5_000);
@@ -71,8 +75,21 @@ export function createDragMonitor(handlers: { onStart: () => void; onEnd: () => 
   start();
 
   return {
+    setActive(active) {
+      if (active === wanted) return;
+      wanted = active;
+      if (!active) {
+        const proc = child;
+        child = null;
+        proc?.kill('SIGTERM');
+      } else {
+        failures = 0; // 手動恢復重算失敗次數
+        start();
+      }
+    },
     dispose() {
       disposed = true;
+      wanted = false;
       child?.kill('SIGTERM');
       child = null;
     }

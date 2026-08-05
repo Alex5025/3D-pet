@@ -165,9 +165,9 @@ const api = {
     const bytes: Uint8Array | null = await ipcRenderer.invoke('get-boot-vrm', petId);
     return bytes ? toArrayBuffer(bytes) : null;
   },
-  onVRMA: (callback: (petId: string, buffer: ArrayBuffer) => void) =>
-    ipcRenderer.on('vrma-play', (_event, petId, bytes: Uint8Array) =>
-      callback(petId, toArrayBuffer(bytes))
+  onVRMA: (callback: (petId: string, buffer: ArrayBuffer, lowPower: boolean) => void) =>
+    ipcRenderer.on('vrma-play', (_event, petId, bytes: Uint8Array, lowPower?: boolean) =>
+      callback(petId, toArrayBuffer(bytes), lowPower === true)
     ),
   onVRMAStop: (callback: (petId: string) => void) =>
     ipcRenderer.on('vrma-stop', (_event, petId) => callback(petId)),

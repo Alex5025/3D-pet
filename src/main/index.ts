@@ -433,6 +433,10 @@ const IDLE_MOTION_SPAN_MS = 40_000;
 const idleMotionTimers = new Map<string, NodeJS.Timeout>();
 /** 功率檔位 suspended(鎖屏/睡眠)時暫停播放;power 區塊注入實作。 */
 let idleMotionsPaused: () => boolean = () => false;
+/** 全域錯開:同一時間只有一寵播待機動作(多寵同時全速跑會疊 GPU;輪流動也更自然)。
+ *  動作長度 main 不知道,以保守窗口互斥;撞到的寵物順延重排。 */
+let idleMotionBusyUntil = 0;
+const IDLE_MOTION_LOCK_MS = 10_000;
 
 function scheduleIdleMotion(petId: string): void {
   const old = idleMotionTimers.get(petId);
@@ -445,13 +449,16 @@ function scheduleIdleMotion(petId: string): void {
     void (async () => {
       const current = pets.get(petId);
       const list = (current?.idleMotions ?? []).filter((file) => motionFiles.includes(file));
-      if (current && current.enabled !== false && list.length && !idleMotionsPaused()) {
+      if (current && current.enabled !== false && list.length && !idleMotionsPaused()
+        && Date.now() >= idleMotionBusyUntil) {
+        idleMotionBusyUntil = Date.now() + IDLE_MOTION_LOCK_MS;
         const file = list[Math.floor(Math.random() * list.length)]!;
         try {
-          win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+          // 第三參數 lowPower=true:待機播放以半幀率跑(手動/agent 觸發的播放不帶)
+          win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)), true);
         } catch { /* 檔案剛被移走:這輪跳過,下輪過濾自然排除 */ }
       }
-      scheduleIdleMotion(petId); // 排下一輪(清單被清空/寵物休息時鏈條停止,由 updatePet 的接點重啟)
+      scheduleIdleMotion(petId); // 排下一輪(撞到互斥鎖的這輪不播,順延到下一個隨機間隔)
     })();
   }, delay));
 }
@@ -1122,9 +1129,24 @@ app.whenReady().then(async () => {
   });
 
   let overlayBounds = win.getBounds();
-  screen.on('display-metrics-changed', () => {
-    if (win && !win.isDestroyed()) overlayBounds = win.getBounds();
-  });
+  // 主顯示器變更(換螢幕/改解析度/闔蓋切外接)時,疊層要跟著鋪滿新的主顯示——
+  // 視窗不會自己調整;不同步的話新螢幕比舊視窗寬的部分成為界外,寵物站在那裡就被切掉。
+  function syncOverlayBounds(): void {
+    if (!win || win.isDestroyed()) return;
+    const target = screen.getPrimaryDisplay().bounds;
+    const current = win.getBounds();
+    if (
+      current.x !== target.x || current.y !== target.y ||
+      current.width !== target.width || current.height !== target.height
+    ) {
+      win.setBounds(target);
+    }
+    overlayBounds = win.getBounds();
+  }
+  syncOverlayBounds();
+  screen.on('display-metrics-changed', syncOverlayBounds);
+  screen.on('display-added', syncOverlayBounds);
+  screen.on('display-removed', syncOverlayBounds);
 
   /* ── 游標輪詢中央控制 + 功率檔位(效能優化階段 2)──
    * click-through 視窗收不到被動 mousemove(§平台實證),輪詢是必要之惡;
@@ -1194,10 +1216,12 @@ app.whenReady().then(async () => {
     refreshCursorPoll();
   }
 
-  /** 輪詢頻率 = 檔位 × 有沒有醒著的寵物(全休息時輪詢沒有意義)。 */
+  /** 輪詢頻率 = 檔位 × 有沒有醒著的寵物(全休息時輪詢沒有意義)。拖曳偵測 helper 同進退。 */
   function refreshCursorPoll(): void {
-    if (powerTier === 'suspended' || !anyPetEnabled()) setCursorPoll(null);
+    const alive = powerTier !== 'suspended' && anyPetEnabled();
+    if (!alive) setCursorPoll(null);
     else setCursorPoll(POWER_TIERS[(powerTier ?? 'normal') as keyof typeof POWER_TIERS].pollMs);
+    dragMonitor?.setActive(alive);
   }
   refreshCursorPollHook = refreshCursorPoll; // updatePet(enabled 變更)經此重算
   idleMotionsPaused = () => powerTier === 'suspended'; // 鎖屏/睡眠不播待機動作
@@ -1303,6 +1327,28 @@ app.whenReady().then(async () => {
       }, 300);
     }
   });
+  refreshCursorPoll(); // dragMonitor 建立後同步一次啟停狀態(開機時全寵休息的情境)
+
+  // VRM_PET_PERF_LOG=1:每 5 秒把 renderer 的 render/rAF 比例印到終端機。
+  // 疊層開不了 DevTools(平台限制),這是唯一能在真 overlay 上讀 __perf 的通道;
+  // 比例是節流機制不變量:閒置該 ≈1/idleSkip,持續 ≈1.0 = 有東西一直在喚醒渲染。
+  if (process.env['VRM_PET_PERF_LOG'] === '1') {
+    let last = { raf: 0, ren: 0, pos: 0 };
+    setInterval(() => {
+      void (async () => {
+        try {
+          const perf = await win?.webContents.executeJavaScript('window.__perf') as
+            { rafTicks: number; renderedFrames: number; bubblePositions: number } | undefined;
+          if (!perf) return;
+          const dRaf = perf.rafTicks - last.raf;
+          const dRen = perf.renderedFrames - last.ren;
+          const dPos = perf.bubblePositions - last.pos;
+          last = { raf: perf.rafTicks, ren: perf.renderedFrames, pos: perf.bubblePositions };
+          console.log(`[perf] 5s: rAF=${dRaf} render=${dRen} ratio=${dRaf ? (dRen / dRaf).toFixed(2) : '-'} bubblePos=${dPos}`);
+        } catch { /* renderer 重載間隙 */ }
+      })();
+    }, 5_000);
+  }
 
   const icon = nativeImage.createFromDataURL(TRAY_ICON);
   icon.setTemplateImage(true);

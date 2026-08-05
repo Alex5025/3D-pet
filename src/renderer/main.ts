@@ -359,7 +359,8 @@ function removeRuntime(petId: string): void {
 }
 
 function reconcileProfiles(profiles: PetProfile[]): void {
-  const nextIds = new Set(profiles.filter((profile) => profile.enabled).map((profile) => profile.id));
+  const awakeProfiles = profiles.filter((profile) => profile.enabled);
+  const nextIds = new Set(awakeProfiles.map((profile) => profile.id));
   for (const id of runtimes.keys()) {
     if (!nextIds.has(id)) removeRuntime(id);
   }
@@ -374,6 +375,8 @@ function reconcileProfiles(profiles: PetProfile[]): void {
       runtime.bubble.setAgentInfo(agentInfoText(profile)); // 設定面板換模型/力度即時反映
     }
   }
+  // 用 root data attribute 讓所有泡泡共用同一個響應式上限；vw 會隨螢幕尺寸即時重算。
+  document.documentElement.dataset['awakePetDensity'] = awakeProfiles.length > 4 ? 'crowded' : 'normal';
 }
 
 /** 單寵熱重啟：沿用 renderer 記憶體中的最新 transform，避免 debounce 尚未落盤時跳回舊位置。 */
@@ -415,8 +418,8 @@ window.pet.onVrm(async (petId, buffer) => {
     console.log('[overlay] vrm swap failed', error);
   }
 });
-window.pet.onVRMA((petId, buffer) => {
-  runtimes.get(petId)?.viewer.playVRMA(buffer).catch((error) =>
+window.pet.onVRMA((petId, buffer, lowPower) => {
+  runtimes.get(petId)?.viewer.playVRMA(buffer, lowPower).catch((error) =>
     console.log('[overlay] vrma failed', error)
   );
 });
@@ -535,6 +538,15 @@ function scheduleBubbleHide(): void {
 let lastBubblePosAt = 0;
 
 function updateHover(x: number, y: number): void {
+  // 寬度把手拖曳中:游標可能甩出泡泡範圍(貼緣或超出上限),仍須保持互動且不得收合/重新定位。
+  for (const runtime of runtimes.values()) {
+    if (runtime.bubble.isResizing()) {
+      cancelBubbleHide();
+      visiblePetId = runtime.profile.id;
+      setInteractive(true);
+      return;
+    }
+  }
   if (heldBubblePetId) {
     cancelBubbleHide();
     visiblePetId = heldBubblePetId;

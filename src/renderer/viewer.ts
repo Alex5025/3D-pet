@@ -51,8 +51,9 @@ export interface Viewer {
   setPowerProfile: (profile: { paused: boolean; idleSkip: number; idleDelayMs: number; activeSkip: number }) => void;
   /** 切換情緒表情(官方 expressionManager,VRM 標準 preset:happy/angry/sad/relaxed/surprised;neutral=清除) */
   setExpression: (name: string) => void;
-  /** 播放 VRMA 動作(官方 three-vrm-animation);播一次,播完停在最後一幀,不循環 */
-  playVRMA: (buf: ArrayBuffer) => Promise<void>;
+  /** 播放 VRMA 動作(官方 three-vrm-animation);播一次,播完停在最後一幀,不循環。
+   *  lowPower = 播放期半幀率(≈30fps;待機動作用,手動/agent 觸發維持全速) */
+  playVRMA: (buf: ArrayBuffer, lowPower?: boolean) => Promise<void>;
   /** 停止動作,回到靜止姿勢 */
   stopVRMA: () => void;
   /** 移除這隻寵物的 WebGL 畫布、模型與動畫資源。 */
@@ -331,8 +332,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   /* VRMA 動作播放(官方範例原樣:mixer.update → vrm.update → render) */
   let mixer: THREE.AnimationMixer | null = null;
 
-  async function playVRMA(buf: ArrayBuffer): Promise<void> {
+  async function playVRMA(buf: ArrayBuffer, lowPower = false): Promise<void> {
     if (!vrm) return;
+    motionLowPower = lowPower;
     const gltf = await new Promise<{ userData: { vrmAnimations?: VRMAnimation[] } }>((res, rej) =>
       loader.parse(buf, '', res, rej)
     );
@@ -343,6 +345,10 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     mixer = new THREE.AnimationMixer(vrm.scene);
     mixer.addEventListener('finished', () => {
       mixerActive = false; // 播完(clamp 停在最後一幀)就允許進入 idle 節流
+      // 動作結束不需要完整 IDLE_DELAY 的全速緩衝(那是給使用者互動用的):
+      // 回撥 lastActiveAt,留 0.6 秒讓 spring bone 安定就進節流——待機動作的
+      // 全速尾巴從 3 秒縮到 0.6 秒(效能二輪實測:尾巴是閒置耗電大宗之一)
+      lastActiveAt = Math.min(lastActiveAt, performance.now() - idleDelayMs + 600);
     });
     const action = mixer.clipAction(clip);
     action.setLoop(THREE.LoopOnce, 1); // 播一次就好,不循環
@@ -481,7 +487,12 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const MAX_DT = 1 / 30; // 跳幀後 getDelta 變大:鉗制單步 dt,防 spring bone(Verlet)大步過衝爆掉
   let lastActiveAt = performance.now();
   let frameNo = 0;
+  // 顯示器實際幀距(EMA):節流參數以 60Hz 設計,ProMotion(120Hz)上「全速」會白燒一倍。
+  // 幀距 < 12ms(>83Hz)時所有跳幀加倍,把有效幀率鎖回設計值(活動 ≤60fps、閒置 ~10fps)。
+  let lastRafAt = 0;
+  let rafDtEma = 16.7;
   let mixerActive = false; // 動作播放中 = 持續活動(finished 事件後清除)
+  let motionLowPower = false; // 本次動作以半幀率播放(待機動作;MAX_DT 已護 spring bone)
 
   function wake(): void {
     lastActiveAt = performance.now();
@@ -494,11 +505,17 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     requestAnimationFrame(animate);
     frameNo++;
     perf.rafTicks++;
+    const now = performance.now();
+    if (lastRafAt) rafDtEma = rafDtEma * 0.95 + Math.min(now - lastRafAt, 50) * 0.05;
+    lastRafAt = now;
     if (paused) return; // 鎖屏/睡眠:整個渲染暫停(跳幀要在 getDelta 之前,下同)
     if (mixerActive) wake(); // 播動作期間視為持續活動(角色在動,探針也要每幀重讀)
-    const idle = performance.now() - lastActiveAt > idleDelayMs;
-    if (idle && frameNo % idleSkip !== 0) return; // 跳幀要在 getDelta 之前,delta 才不會被拆碎
-    if (!idle && frameNo % activeSkip !== 0) return; // 降功率檔位的活動幀上限(normal=1 不生效)
+    const refreshScale = rafDtEma < 12 ? 2 : 1; // 高更新率螢幕:跳幀加倍,鎖回 60Hz 設計值
+    const idle = now - lastActiveAt > idleDelayMs;
+    if (idle && frameNo % (idleSkip * refreshScale) !== 0) return; // 跳幀要在 getDelta 之前,delta 才不會被拆碎
+    // 活動幀上限 = 功率檔位;待機動作播放期再疊半幀率(取較嚴者)
+    const effectiveSkip = (mixerActive && motionLowPower ? Math.max(activeSkip, 2) : activeSkip) * refreshScale;
+    if (!idle && frameNo % effectiveSkip !== 0) return;
     perf.renderedFrames++;
 
     anchorLight(); // 拖曳角色時光跟著走(平移不變);旋轉仍會改變受光面
