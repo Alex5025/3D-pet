@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
-import type { ChatImage } from '../shared/chat';
+import type { ChatImage, ChatSendResult } from '../shared/chat';
+import { createChatDispatcher, createChatQueue } from './chatQueue';
 import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
 import { groupPetsByWorkspace } from '../shared/petGroups';
 import type { AgentBridge } from './agent/bridge';
@@ -93,6 +94,8 @@ let motionsWatcher: FSWatcher | null = null;
 let dragMonitor: DragMonitor | null = null;
 /** 游標輪詢重算(功率檔位區塊注入):寵物啟用狀態變更時呼叫,全休息 = 停輪詢。 */
 let refreshCursorPollHook: (() => void) | null = null;
+/** 清空某寵的對話佇列(whenReady 注入):寵物休息/刪除/開新對話時呼叫。 */
+let clearChatQueueHook: ((petId: string) => void) | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -286,6 +289,7 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
   // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
   if (patch.enabled === false) {
     releasePetCaches(id);
+    clearChatQueueHook?.(id); // 休息 = 放下手邊任務,排隊中的一併清掉
     void bridge?.closePetSession(id);
   }
   if (patch.enabled !== undefined) refreshCursorPollHook?.();
@@ -392,6 +396,7 @@ function removePet(id: string): boolean {
   } catch { /* 尚未落盤的新寵物沒有檔案可搬 */ }
   pets.delete(id);
   releasePetCaches(id);
+  clearChatQueueHook?.(id);
   const idleTimer = idleMotionTimers.get(id);
   if (idleTimer) clearTimeout(idleTimer);
   idleMotionTimers.delete(id);
@@ -798,6 +803,23 @@ app.whenReady().then(async () => {
     },
     listMotions: () => motionFiles
   });
+  /* ── 對話佇列(效能與擴展設計見 chatQueue.ts)──
+   * turn 進行中送出的訊息排隊、turn 完自動接續;佇列變更即廣播給泡泡。
+   * 將來中控面板 = 另一條帶 sender 驗證的 enqueue(source:'control')IPC + 訂閱同一個廣播。 */
+  const chatQueue = createChatQueue((petId) => {
+    win?.webContents.send('chat-queue-apply', petId, chatQueue.summaries(petId));
+  });
+  const chatDispatcher = createChatDispatcher({
+    queue: chatQueue,
+    canAccept: (petId) => bridge?.canAccept(petId) ?? false,
+    runTask: (task) => {
+      // turnStart 讓泡泡知道「這一則開始跑了」(beginTurn);非 text 事件,合併器會先 flush 保序
+      sendChatEvent(task.petId, { kind: 'turnStart', text: task.text });
+      bridge?.chatSend(task.petId, task.text, task.images);
+    }
+  });
+  clearChatQueueHook = (petId) => chatQueue.clear(petId);
+
   bridge = createAgentBridge({
     // 淺拷貝合併參考檔(ephemeral,不落盤——persist 走 pets.get 的原物件);資料夾以尾斜線標記
     getPet: (id) => {
@@ -808,7 +830,9 @@ app.whenReady().then(async () => {
     },
     updatePet,
     send: sendChatEvent,
-    providers: createProviders(petToolsHub)
+    providers: createProviders(petToolsHub),
+    // turn 結束(含早退)→ 派發佇列;用 dispatchAll:全域上限釋放的名額可能輪到別隻寵物
+    onTurnFinished: () => chatDispatcher.dispatchAll()
   });
   await refreshMotions();
   for (const id of pets.keys()) scheduleIdleMotion(id); // 開機排程各寵的待機動作
@@ -933,6 +957,7 @@ app.whenReady().then(async () => {
     if (!fromOurWindow) return;
     petRefFiles.delete(id); // 參考檔是「當次對話」的:開新對話一併清空
     sendRefFiles(id);
+    clearChatQueueHook?.(id); // 排隊中的舊對話訊息也一併清掉
     const profile = getPet(id);
     if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
     const { sessionId: _dropped, ...keep } = profile.agent;
@@ -1008,8 +1033,12 @@ app.whenReady().then(async () => {
     void setDefaultPose(petId, typeof file === 'string' ? file : null);
   });
 
-  ipcMain.on('chat-send', (event, petId: string, text: string, rawImages: unknown) => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+  // 對話送出改 invoke:回傳 {queued, position, reason?} 讓泡泡同步得知「立即執行/已排入/被拒」。
+  // 「佇列已滿」不可走 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn。
+  ipcMain.handle('chat-send', (event, petId: string, text: string, rawImages: unknown): ChatSendResult => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) {
+      return { queued: false, position: -1, reason: '無效的請求' };
+    }
     const images: ChatImage[] = [];
     if (Array.isArray(rawImages)) {
       for (const item of rawImages.slice(0, 4)) {
@@ -1026,7 +1055,20 @@ app.whenReady().then(async () => {
         });
       }
     }
-    bridge?.chatSend(petId, String(text).slice(0, 1000), images);
+    const trimmed = String(text).slice(0, 1000).trim();
+    if (!trimmed && !images.length) return { queued: false, position: -1, reason: '訊息是空的' };
+    const result = chatQueue.enqueue({ petId, text: trimmed, images, source: 'bubble' });
+    if (!result.ok) return { queued: false, position: -1, reason: result.reason };
+    chatDispatcher.dispatch(petId);
+    return { queued: true, position: result.position };
+  });
+  ipcMain.on('chat-queue-remove', (event, petId: string, taskId: string) => {
+    if (!win || event.sender !== win.webContents) return;
+    chatQueue.remove(String(petId), String(taskId));
+  });
+  ipcMain.handle('chat-queue-get', (event, petId: string) => {
+    if (!win || event.sender !== win.webContents) return [];
+    return chatQueue.summaries(String(petId));
   });
   ipcMain.on('chat-cancel', (event, petId: string) => {
     if (!win || event.sender !== win.webContents) return;

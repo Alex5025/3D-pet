@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
-import type { ChatImage } from '../shared/chat';
+import type { ChatImage, ChatSendResult, QueuedMessageSummary } from '../shared/chat';
 import type {
   ProjectSandboxSettings,
   ProjectSandboxSettingsInput,
@@ -131,8 +131,14 @@ const api = {
 
   listAgentModels: (kind: AgentKind): Promise<AgentModelInfo[]> =>
     ipcRenderer.invoke('agent-models', kind),
-  chatSend: (petId: string, text: string, images: ChatImage[] = []) =>
-    ipcRenderer.send('chat-send', petId, text, images),
+  chatSend: (petId: string, text: string, images: ChatImage[] = []): Promise<ChatSendResult> =>
+    ipcRenderer.invoke('chat-send', petId, text, images),
+  removeQueuedMessage: (petId: string, taskId: string) =>
+    ipcRenderer.send('chat-queue-remove', petId, taskId),
+  getChatQueue: (petId: string): Promise<QueuedMessageSummary[]> =>
+    ipcRenderer.invoke('chat-queue-get', petId),
+  onChatQueue: (callback: (petId: string, list: QueuedMessageSummary[]) => void) =>
+    ipcRenderer.on('chat-queue-apply', (_event, petId, list) => callback(petId, list)),
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
   chatApproval: (petId: string, requestId: string, allow: boolean, feedback?: string) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow, feedback),
