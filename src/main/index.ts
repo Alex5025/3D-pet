@@ -17,6 +17,7 @@ import type { PetToolsHub } from './agent/petToolsHub';
 import { createProviders } from './agent/providers';
 import { runAgentSelftest, runClaudeE2E, runCodexE2E } from './agent/selftest';
 import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
+import { createDefaultWorkspace } from './workspaceDefaults';
 
 interface PetState {
   x: number;
@@ -67,6 +68,8 @@ interface AppRegistry {
   schemaVersion: 2;
   selectedPetId: string;
   petIds: string[];
+  /** 新寵物預設工作目錄的根位置(全域);未設定時用 ~/Documents/PetWorkspaces。 */
+  defaultWorkspaceRoot?: string;
 }
 
 type LegacyConfig = Omit<PetProfile, 'id' | 'name' | 'enabled'> & {
@@ -113,6 +116,9 @@ const petPath = (id: string): string => join(petsDir(), `${id}.json`);
 const legacyRuntimeConfigPath = (): string => join(runtimeDataDir(), 'config.json');
 const legacyRootConfigPath = (): string => join(dataDir(), 'config.json');
 const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
+/** 有效的新寵物預設工作根目錄:全域設定優先,否則 ~/Documents/PetWorkspaces。 */
+const workspaceRoot = (): string =>
+  registry.defaultWorkspaceRoot ?? join(app.getPath('documents'), 'PetWorkspaces');
 
 /** 地端重啟腳本只需要這份 PID 紀錄；啟動命令固定寫在腳本內。 */
 function writeSystemPidRecord(): void {
@@ -235,10 +241,15 @@ function loadConfigSync(): void {
     });
     if (pets.size) {
       const requested = typeof rawRegistry['selectedPetId'] === 'string' ? rawRegistry['selectedPetId'] : '';
+      // 全域設定要讀回保留,否則重建 registry 時會被洗掉
+      const savedRoot = typeof rawRegistry['defaultWorkspaceRoot'] === 'string' && rawRegistry['defaultWorkspaceRoot']
+        ? rawRegistry['defaultWorkspaceRoot']
+        : undefined;
       registry = {
         schemaVersion: 2,
         selectedPetId: pets.has(requested) ? requested : pets.keys().next().value!,
-        petIds: [...pets.keys()]
+        petIds: [...pets.keys()],
+        ...(savedRoot ? { defaultWorkspaceRoot: savedRoot } : {})
       };
       persistConfigSync();
       return;
@@ -382,6 +393,9 @@ async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<s
 
 function createNewPet(): PetProfile {
   const profile = createProfile();
+  // 自動建立預設工作目錄:避免忘記選目錄造成工作區污染;失敗時維持未設定(bridge 原擋門行為)
+  const workspace = createDefaultWorkspace(workspaceRoot(), profile.name);
+  if (workspace) profile.workspacePath = workspace;
   pets.set(profile.id, profile);
   registry.petIds.push(profile.id);
   registry.selectedPetId = profile.id;
@@ -981,6 +995,29 @@ app.whenReady().then(async () => {
       ? settingsWin
       : event.sender === sandboxSettingsWin?.webContents ? sandboxSettingsWin : undefined;
     return chooseWorkspace(id, parent ?? undefined);
+  });
+
+  /* ── 全域:新寵物預設工作根目錄 ── */
+  ipcMain.handle('workspace-root-get', () => workspaceRoot());
+
+  ipcMain.handle('choose-workspace-root', async (event): Promise<string> => {
+    // 僅設定視窗可變更(循 choose-workspace 的 sender 驗證慣例)
+    if (!settingsWin || event.sender !== settingsWin.webContents) return workspaceRoot();
+    app.focus({ steal: true }); // 背景 app 的 dialog 會被壓在其他視窗底下
+    settingsWin.focus();
+    const result = await dialog.showOpenDialog(settingsWin, {
+      title: '選擇新寵物的預設工作根目錄',
+      buttonLabel: '選擇',
+      defaultPath: workspaceRoot(),
+      properties: ['openDirectory', 'createDirectory']
+    });
+    const path = result.filePaths[0];
+    if (result.canceled || !path) return workspaceRoot();
+    registry.defaultWorkspaceRoot = path;
+    registryDirty = true;
+    scheduleConfigFlush();
+    settingsWin?.webContents.send('workspace-root-apply', path);
+    return path;
   });
 
   /* ── 專案 Codex 沙盒設定──

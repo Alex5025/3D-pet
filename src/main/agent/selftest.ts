@@ -11,6 +11,7 @@ import { createCodexProvider } from './codexProvider';
 import { createMockProvider } from './mockProvider';
 import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
 import { parseProjectSandboxConfig, updateProjectSandboxConfig } from '../sandboxConfig';
+import { resolveWorkspaceDirName, sanitizeWorkspaceName } from '../workspaceDefaults';
 
 /**
  * Headless 回歸自驗(VRM_PET_AGENT_SELFTEST=1 觸發,不開視窗):
@@ -285,6 +286,16 @@ export async function runAgentSelftest(): Promise<boolean> {
     sandboxUpdated.includes('writable_roots = ["/tmp"]') && sandboxUpdated.includes('command = "demo"'));
   check('沙盒設定寫入與讀回一致', sandboxParsed.approvalPolicy === 'on-request' &&
     sandboxParsed.sandboxMode === 'workspace-write' && sandboxParsed.networkAccess === true);
+
+  // 新寵物預設工作目錄:純函式層(消毒、時間戳、碰撞)
+  check('工作目錄:消毒去空白', sanitizeWorkspaceName('寵物 3') === '寵物3');
+  check('工作目錄:消毒去不合法字元', sanitizeWorkspaceName('a/b:c*?') === 'abc');
+  check('工作目錄:全符號名退回 pet', sanitizeWorkspaceName('///') === 'pet');
+  const wsDate = new Date(2026, 7, 6, 14, 30, 52);
+  check('工作目錄:名稱_時間戳格式',
+    resolveWorkspaceDirName('寵物 3', wsDate, () => false) === '寵物3_2026-08-06_14-30-52');
+  check('工作目錄:同秒碰撞加序號',
+    resolveWorkspaceDirName('寵物 3', wsDate, (d) => !d.endsWith('-3')) === '寵物3_2026-08-06_14-30-52-3');
 
   const profile: AgentPetProfile = { id: 'p1', workspacePath: '/tmp', agent: { kind: 'claude' } };
   const events: AgentEvent[] = [];

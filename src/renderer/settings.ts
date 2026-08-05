@@ -321,6 +321,22 @@ el('change-workspace').addEventListener('click', async () => {
   }
 });
 
+/* 全域:新寵物預設工作根目錄(只影響之後新增的寵物;既有寵物的工作目錄不動) */
+function renderWorkspaceRoot(root: string): void {
+  el('workspace-root').textContent = root;
+}
+void window.pet.getWorkspaceRoot().then(renderWorkspaceRoot);
+window.pet.onWorkspaceRoot(renderWorkspaceRoot);
+el('change-workspace-root').addEventListener('click', async () => {
+  const button = el('change-workspace-root') as HTMLButtonElement;
+  button.disabled = true; // 防連點(循 change-workspace 慣例)
+  try {
+    renderWorkspaceRoot(await window.pet.chooseWorkspaceRoot());
+  } finally {
+    button.disabled = false;
+  }
+});
+
 window.pet.onPetProfiles(syncProfiles);
 window.pet.onSelectedPet((petId) => {
   if (!profiles.some((profile) => profile.id === petId)) return;

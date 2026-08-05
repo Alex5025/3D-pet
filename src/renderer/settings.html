@@ -175,7 +175,8 @@
       .text-input { width: 100%; user-select: text; }
       .toggle-field { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: #c9c9d2; }
       .toggle-field input { accent-color: #6d64d8; }
-      #workspace-path {
+      #workspace-path,
+      #workspace-root {
         display: block;
         box-sizing: border-box;
         width: 100%;
@@ -190,7 +191,9 @@
         user-select: text;
       }
       #workspace-path.empty { color: #777783; }
-      #change-workspace[disabled] { opacity: 0.55; cursor: wait; }
+      #change-workspace[disabled],
+      #change-workspace-root[disabled] { opacity: 0.55; cursor: wait; }
+      #workspace-root { min-height: 0; margin-bottom: 8px; }
     </style>
   </head>
   <body>
@@ -333,6 +336,13 @@
           <div class="workspace-label">工作目錄</div>
           <code id="workspace-path" class="empty">尚未選擇工作目錄</code>
           <button class="wide" id="change-workspace">選擇工作目錄…</button>
+        </div>
+
+        <h3 style="margin-top: 18px;">全域：新寵物預設位置</h3>
+        <div class="workspace-card">
+          <div class="workspace-label">新增寵物時會自動在此根目錄下建立「寵物名_時間」資料夾（只影響之後新增的寵物）</div>
+          <code id="workspace-root">載入中…</code>
+          <button class="wide" id="change-workspace-root">變更…</button>
         </div>
       </div>
 

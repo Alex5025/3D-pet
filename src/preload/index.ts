@@ -122,6 +122,10 @@ const api = {
 
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
+  getWorkspaceRoot: (): Promise<string> => ipcRenderer.invoke('workspace-root-get'),
+  chooseWorkspaceRoot: (): Promise<string> => ipcRenderer.invoke('choose-workspace-root'),
+  onWorkspaceRoot: (callback: (root: string) => void) =>
+    ipcRenderer.on('workspace-root-apply', (_event, root) => callback(root)),
   getProjectSandboxSettings: (petId: string): Promise<ProjectSandboxSettingsResult> =>
     ipcRenderer.invoke('sandbox-settings-get', petId),
   setProjectSandboxSettings: (
