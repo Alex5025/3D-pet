@@ -20,6 +20,7 @@ export interface AgentBinding {
 }
 
 export type AgentEvent =
+  | { kind: 'turnStart'; text: string } // 佇列任務開始執行(bridge 不發;僅 main 的 dispatcher 發,renderer 據此 beginTurn)
   | { kind: 'session'; sessionId: string } // 首個帶 session id 的事件;main 已回存 profile,renderer 僅供顯示用
   | { kind: 'thinking' } // 泡泡:「思考中…」
   | { kind: 'tool'; name: string } // 泡泡:「正在執行 ○○」(也用於「仍在執行…」看門狗提示)

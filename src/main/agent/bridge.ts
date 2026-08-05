@@ -18,10 +18,14 @@ export interface AgentBridgeDeps {
   /** 事件推回泡泡;index.ts 綁 win?.webContents.send('chat-event-apply', petId, event)。 */
   send(petId: string, event: AgentEvent): void;
   providers: Record<AgentKind, AgentProvider>;
+  /** turn 結束(含早退路徑)後回呼:對話佇列據此派發下一則。時序保證在 running=false 之後。 */
+  onTurnFinished?(petId: string): void;
 }
 
 export interface AgentBridge {
   chatSend(petId: string, text: string, images?: ChatImage[]): void;
+  /** 這隻寵物現在能不能開新 turn(未在跑 && 全域上限內)——dispatcher 派發前的閘門。 */
+  canAccept(petId: string): boolean;
   chatCancel(petId: string): void;
   /** 泡泡審批按鈕的回覆(requestId 來自 approval 事件)。 */
   respondApproval(petId: string, requestId: string, allow: boolean, feedback?: string): void;
@@ -166,8 +170,15 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
   return {
     chatSend(petId, text, images = []) {
       const trimmed = text.trim();
-      if (!trimmed && !images.length) return;
-      void runTurn(petId, trimmed, images);
+      if (!trimmed && !images.length) return; // 空訊息不觸發 onTurnFinished(佇列端 enqueue 已擋空,不會漏派)
+      // hook 掛在 promise 的 finally 而非 runTurn 內部——早退路徑(無 workspace 等)不經
+      // runTurn 的 try/finally,掛裡面佇列會永久卡死;掛這裡任何路徑都觸發,
+      // 且在 runTurn 自身 finally(running=false)之後的 microtask 執行,時序正確。
+      void runTurn(petId, trimmed, images).finally(() => deps.onTurnFinished?.(petId));
+    },
+    canAccept(petId) {
+      // 審批等待期間 running 維持 true → 自動不派發,佇列自然等待
+      return !states.get(petId)?.running && runningCount() < MAX_CONCURRENT_TURNS;
     },
     chatCancel(petId) {
       const state = states.get(petId);

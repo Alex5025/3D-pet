@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { AgentEvent } from './types';
 import type { AgentPetProfile } from './bridge';
 import { createAgentBridge } from './bridge';
+import { createChatDispatcher, createChatQueue } from '../chatQueue';
 import { createClaudeProvider } from './claudeProvider';
 import { createCodexProvider } from './codexProvider';
 import { createMockProvider } from './mockProvider';
@@ -384,6 +385,94 @@ export async function runAgentSelftest(): Promise<boolean> {
 
   await bridge.dispose();
   check('dispose 傳到 provider', mockClaude.log.includes('disposed') && mockCodex.log.includes('disposed'));
+
+  // 6. 對話佇列:純邏輯
+  {
+    const changed: string[] = [];
+    const queue = createChatQueue((petId) => changed.push(petId));
+    const enqueueText = (petId: string, text: string) =>
+      queue.enqueue({ petId, text, images: [], source: 'selftest' });
+    check('佇列:position 遞增', enqueueText('q1', 'a').position === 0 && enqueueText('q1', 'b').position === 1);
+    check('佇列:onChanged 有觸發', changed.length === 2);
+    const longText = 'x'.repeat(100);
+    enqueueText('q1', longText);
+    const summary = queue.summaries('q1')[2];
+    check('佇列:摘要截 80 字', !!summary && summary.text.length === 81 && summary.text.endsWith('…'));
+    const removeTarget = queue.summaries('q1')[1]!.id;
+    check('佇列:remove 指定則', queue.remove('q1', removeTarget) && queue.size('q1') === 2 && queue.summaries('q1')[1]!.text.startsWith('x'));
+    for (let i = 0; i < 8; i++) enqueueText('q1', `fill-${i}`);
+    check('佇列:滿 10 拒收且給 reason', !enqueueText('q1', '第11則').ok && !!enqueueText('q1', '第11則').reason);
+    const withImages = (n: number) => queue.enqueue({ petId: 'q2', text: '圖', images: Array.from({ length: n }, () => ({ mimeType: 'image/png' as const, data: 'x' })), source: 'selftest' });
+    check('佇列:圖片總數 8 封頂', withImages(4).ok && withImages(4).ok && !withImages(1).ok);
+    queue.clear('q1');
+    check('佇列:clear 後空且 petsWithTasks 只剩 q2', queue.size('q1') === 0 && queue.petsWithTasks().join() === 'q2');
+    queue.clear('q2');
+  }
+
+  // 7. 佇列 + dispatcher + mock bridge 全鏈:排 3 則依序執行、中途移除、cancel 後續行
+  {
+    const qProfile: AgentPetProfile = { id: 'qp', workspacePath: '/tmp', agent: { kind: 'claude' } };
+    const qEvents: AgentEvent[] = [];
+    const qMock = createMockProvider('claude');
+    const ran: string[] = [];
+    let qBridge!: ReturnType<typeof createAgentBridge>;
+    const queue = createChatQueue();
+    const dispatcher = createChatDispatcher({
+      queue,
+      canAccept: (petId) => qBridge.canAccept(petId),
+      runTask: (task) => {
+        ran.push(task.text);
+        qEvents.push({ kind: 'turnStart', text: task.text });
+        qBridge.chatSend(task.petId, task.text, task.images);
+      }
+    });
+    qBridge = createAgentBridge({
+      getPet: (id) => (id === qProfile.id ? qProfile : null),
+      updatePet: (_id, patch) => { qProfile.agent = patch.agent; return qProfile; },
+      send: (_petId, event) => qEvents.push(event),
+      providers: { claude: qMock, codex: qMock },
+      onTurnFinished: () => dispatcher.dispatchAll()
+    });
+    const qTerminal = (): number => qEvents.filter((e) => e.kind === 'done' || e.kind === 'error').length;
+    const qWait = async (count: number, timeoutMs = 6000): Promise<void> => {
+      const deadline = Date.now() + timeoutMs;
+      while (qTerminal() < count && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    };
+    const push = (text: string) => {
+      const result = queue.enqueue({ petId: 'qp', text, images: [], source: 'selftest' });
+      dispatcher.dispatch('qp');
+      return result;
+    };
+    // 排 3 則:第 1 則立即執行,2/3 排隊,turn 結束自動接續
+    push('SLOW 第一則');
+    await new Promise((r) => setTimeout(r, 80)); // 進入 running
+    const second = push('第二則');
+    const third = push('第三則');
+    check('佇列:running 中排入不立即執行', second.position === 0 && third.position === 1 && ran.length === 1);
+    // 中途移除第二則
+    const secondId = queue.summaries('qp')[0]!.id;
+    queue.remove('qp', secondId);
+    await qWait(2);
+    check('佇列:turn 完自動接續且跳過被移除者', ran.join('|') === 'SLOW 第一則|第三則');
+    check('佇列:每則各有終結事件', qTerminal() === 2);
+    check('佇列:turnStart 在前一則 done 之後', (() => {
+      const kinds = qEvents.map((e) => e.kind);
+      const firstDone = kinds.indexOf('done');
+      const secondStart = kinds.indexOf('turnStart', 1);
+      return firstDone >= 0 && secondStart > firstDone;
+    })());
+    // cancel 當前 → done ok:false → 佇列續行
+    qEvents.length = 0;
+    ran.length = 0;
+    push('SLOW 會被取消');
+    await new Promise((r) => setTimeout(r, 80));
+    push('取消後接續');
+    qBridge.chatCancel('qp');
+    await qWait(2);
+    check('佇列:cancel 後自動續行', ran.join('|') === 'SLOW 會被取消|取消後接續' &&
+      qEvents.some((e) => e.kind === 'done' && !e.ok) && qEvents.some((e) => e.kind === 'done' && e.ok));
+    await qBridge.dispose();
+  }
 
   const pass = failures.length === 0;
   console.log(`[agent-selftest] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
