@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-08-03。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-08-04。對應的 commit 見 `git log`。
 
 ---
 
