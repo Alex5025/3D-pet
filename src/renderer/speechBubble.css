@@ -545,6 +545,55 @@
   color: #4b4458;
 }
 
+/* 排隊中的訊息清單(輸入框上方) */
+.pet-speech-bubble .bubble-queue {
+  display: none;
+  margin: 8px 0 6px;
+  max-height: 110px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: #5d5470;
+}
+
+.pet-speech-bubble .bubble-queue.open {
+  display: block;
+}
+
+.pet-speech-bubble .queue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border-left: 2px solid #b9aed6;
+  background: rgba(128, 96, 160, 0.07);
+  margin-top: 3px;
+}
+
+.pet-speech-bubble .queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-speech-bubble .queue-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: #a49bb0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.pet-speech-bubble .queue-remove:hover {
+  color: #d3455b;
+}
+
 /* 參考檔案清單(泡泡最下方) */
 .pet-speech-bubble .bubble-refs {
   display: none;

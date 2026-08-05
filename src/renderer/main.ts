@@ -312,26 +312,36 @@ function addRuntime(profile: PetProfile): void {
       onSend: (text, images) => {
         const current = runtimes.get(profile.id);
         if (!current) return;
-        // workspacePath 就地提示(main 端仍二次把關)
+        // workspacePath 就地提示(main 端仍二次把關);showError 不動 busy,不會誤終結進行中 turn
         if (!current.profile.workspacePath) {
-          current.bubble.endTurn(false, '請先在「工作設定」選擇工作目錄');
+          current.bubble.showError('請先在「工作設定」選擇工作目錄');
           return;
         }
-        current.bubble.beginTurn();
-        current.bubble.setStatus('連線中…');
-        window.pet.chatSend(profile.id, text, images);
+        // 不再樂觀 beginTurn:訊息可能被排入佇列,beginTurn 改由 turnStart 事件觸發
+        void window.pet.chatSend(profile.id, text, images).then((result) => {
+          const bubble = runtimes.get(profile.id)?.bubble;
+          if (!bubble) return;
+          if (result.queued) {
+            bubble.clearComposer(); // 送出被接受才清(排隊接續時不可洗掉正在打的字)
+          } else {
+            bubble.showError(result.reason ?? '訊息未送出'); // 拒收:保留輸入內容讓使用者再試
+          }
+        });
       },
       onCancel: () => window.pet.chatCancel(profile.id),
       onApproval: (requestId, allow, feedback) =>
         window.pet.chatApproval(profile.id, requestId, allow, feedback),
       onOpenLink: (url) => window.pet.openExternal(url),
       onNewSession: () => window.pet.newSession(profile.id),
-      onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path)
+      onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path),
+      onRemoveQueued: (taskId) => window.pet.removeQueuedMessage(profile.id, taskId)
     })
   };
   runtimes.set(profile.id, runtime);
   refreshOrderedRuntimes();
   runtime.bubble.setAgentInfo(agentInfoText(profile));
+  // 泡泡重建(renderer crash reload / 單寵熱重啟)後主動拉一次佇列現況——廣播式推播蓋不到重建
+  void window.pet.getChatQueue(profile.id).then((list) => runtimes.get(profile.id)?.bubble.setQueue(list));
   viewer.setLighting(profile.lighting ?? {});
   viewer.setSway(profile.sway ?? {});
   applyState(runtime);
@@ -444,6 +454,10 @@ window.pet.onChatEvent((petId, event) => {
   if (!bubble) return;
   // AgentEvent → 泡泡方法的對映(泡泡是笨元件,不認識事件型別)
   switch (event.kind) {
+    case 'turnStart': // 佇列任務開始執行(dispatcher 專發):原樂觀 beginTurn 搬到這裡
+      bubble.beginTurn();
+      bubble.setStatus('連線中…');
+      break;
     case 'session':
       break; // main 已回存 sessionId,renderer 不需處理
     case 'thinking':
@@ -746,6 +760,10 @@ addEventListener('drop', async (event) => {
   } catch (error) {
     console.log('[overlay] dropped file failed', error);
   }
+});
+
+window.pet.onChatQueue((petId, list) => {
+  runtimes.get(petId)?.bubble.setQueue(list);
 });
 
 window.pet.onRefFiles((petId, list) => {

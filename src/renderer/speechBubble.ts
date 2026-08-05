@@ -25,6 +25,12 @@ export interface SpeechBubble {
   isPinned: () => boolean;
   /** 寬度把手拖曳中(hover 邏輯須保持互動、不得收合或重新定位)。 */
   isResizing: () => boolean;
+  /** 清空輸入框與待送附件(送出被 main 接受後由 renderer 呼叫;不綁在 beginTurn——佇列接續時會洗掉正在打的字)。 */
+  clearComposer: () => void;
+  /** 排隊中的訊息清單(輸入框上方;每則 ✕ → onRemoveQueued);空陣列收合。 */
+  setQueue: (list: { id: string; text: string; hasImages: boolean }[]) => void;
+  /** 就地錯誤(workspace 未設定/佇列滿):回覆區紅字 + activity 提示,不動 busy 狀態。 */
+  showError: (message: string) => void;
   /** turn 開始:鎖輸入框、清回覆區、顯示狀態列。 */
   beginTurn: () => void;
   /** 回覆文字增量(自動展開回覆區並捲到底)。 */
@@ -69,6 +75,8 @@ interface SpeechBubbleOptions {
   onNewSession?: () => void;
   /** 參考檔案清單的 ✕(移除該路徑)。 */
   onRemoveRef?: (path: string) => void;
+  /** 佇列清單的 ✕(移除該則排隊訊息)。 */
+  onRemoveQueued?: (taskId: string) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -321,7 +329,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   stop.textContent = '停止';
   statusRow.append(status, stop);
 
-  element.append(pinHotspot, activity, label, workspace, agentInfo, reply, approvalBox, statusRow, imagesBox, input, refsBox);
+  // 佇列清單(輸入框上方):turn 進行中再送出的訊息排在這裡,每則可 ✕ 移除
+  const queueBox = document.createElement('div');
+  queueBox.className = 'bubble-queue';
+
+  element.append(pinHotspot, activity, label, workspace, agentInfo, reply, approvalBox, statusRow, imagesBox, queueBox, input, refsBox);
 
   // 左右邊緣的寬度把手：拖曳＝手動設定這顆泡泡的寬度上限（內容少時照樣縮小、多時撐到這裡為止）；
   // 雙擊還原純密度上限。只存記憶體，寵物重啟後回到自動。
@@ -420,12 +432,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       // Shift+Enter = 換行(交給 textarea 預設行為);IME 選字的 Enter(注音/日文)不可觸發送出
       if (event.shiftKey || event.isComposing) return;
       event.preventDefault();
-      if (!busy && (input.value.trim() || pendingImages.length)) {
+      // busy 中也可送出:main 端會排入佇列(是否清空輸入框由 invoke 回覆決定)
+      if (input.value.trim() || pendingImages.length) {
         options.onSend?.(input.value.trim(), [...pendingImages]);
       }
       return;
     }
-    // busy 中 input 已 disabled 收不到 Esc,中斷以停止鈕為主;這裡保留非 busy 的收合行為。
+    // Esc 只收鍵盤焦點;中斷執行以停止鈕為主
     if (event.key === 'Escape') input.blur();
   });
   stop.addEventListener('click', () => options.onCancel?.());
@@ -557,17 +570,50 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     beginTurn: () => {
       busy = true;
       setActivity('working', '執行中');
-      pendingImages = [];
-      updateImagesBox();
-      input.value = '';
-      input.style.height = 'auto'; // 多行送出後收回單行高度
-      input.disabled = true; // 會觸發 blur → releaseInputFocus,running 中不需要鍵盤
+      // 不清 input/附件、不 disable——佇列接續時使用者可能正在打下一句;
+      // composer 的清空由「送出被接受」時的 clearComposer() 負責
       replyRaw = '';
       reply.replaceChildren(mdBox); // 清掉上一輪的錯誤列,保留 md 容器
       mdBox.innerHTML = '';
       reply.classList.remove('open');
       status.textContent = '';
       statusRow.classList.add('open');
+    },
+    clearComposer: () => {
+      input.value = '';
+      input.style.height = 'auto'; // 多行送出後收回單行高度
+      pendingImages = [];
+      updateImagesBox();
+    },
+    setQueue: (list) => {
+      queueBox.replaceChildren();
+      queueBox.classList.toggle('open', list.length > 0);
+      list.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'queue-row';
+        const name = document.createElement('span');
+        name.className = 'queue-text';
+        name.textContent = `${index + 1}. ${item.text}${item.hasImages ? ' 📎' : ''}`;
+        name.title = item.text;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'queue-remove';
+        remove.textContent = '✕';
+        remove.title = '從佇列移除這則訊息';
+        remove.addEventListener('click', () => options.onRemoveQueued?.(item.id));
+        row.append(name, remove);
+        queueBox.append(row);
+      });
+    },
+    showError: (message) => {
+      // 不動 busy:進行中 turn 的 UI 不能被就地錯誤(如 workspace 未設定、佇列滿)誤終結
+      setActivity('error', message);
+      reply.classList.add('open');
+      const line = document.createElement('div');
+      line.className = 'reply-error';
+      line.textContent = message;
+      reply.append(line);
+      reply.scrollTop = reply.scrollHeight;
     },
     setAgentInfo: (text) => {
       agentInfoText.textContent = text ?? '';
@@ -613,7 +659,6 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     endTurn: (ok, errorMessage) => {
       busy = false;
       setActivity(ok ? 'done' : 'error', ok ? '已完成' : (errorMessage || '執行失敗'));
-      input.disabled = false;
       statusRow.classList.remove('open');
       status.textContent = '';
       approvalRequestId = null;
