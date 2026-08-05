@@ -633,3 +633,22 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 另:dragMonitor(拖曳偵測 helper,常駐 0.4–0.9%)接上功率檔位——suspended 或全寵休息時暫停輪詢,與游標輪詢同進退。
 
 **教訓**:所有「每 N 幀」的節流參數都隱含了 60Hz 假設;高更新率螢幕(ProMotion)上 rAF 是 120Hz,固定 N 的實際效果全部砍半。**跳幀參數要用「目標 fps」思維換算,不能用固定除數**;而 rAF 計數本身就是最便宜的螢幕更新率偵測器。
+
+---
+
+## 41. 對話佇列:輸入不鎖、排隊接續(2026-08-04)
+
+**需求**:turn 進行中不鎖輸入框,再送出的訊息排隊;turn 完自動取下一則;泡泡列出排隊訊息可逐則 ✕;停止只停當前、佇列續行;架構預留中控面板(對各寵指派任務)。
+
+**設計要點與踩掉的坑**(細節見 AGENT-BRIDGE-DESIGN §10):
+
+1. **onTurnFinished 不能掛 runTurn 內部的 finally**——早退路徑(無 workspace、backstop)不經 try/finally,掛錯位置佇列會永久卡死。掛在 `chatSend` 的 `runTurn().finally(...)`:任何路徑都觸發,且在 running=false 之後的 microtask,時序天然正確。
+2. **「佇列已滿」不可走 error 事件**——renderer 對任何 error 無條件 `endTurn`,會把進行中 turn 的 UI 誤終結。`chat-send` 改 `ipcMain.handle`,泡泡同步拿 `{queued, position, reason}`。
+3. **beginTurn 不可再清輸入框**——佇列自動接續時使用者可能正在打下一句,原本的清空會洗字。清空移到「invoke 回覆已接受」時(`clearComposer`);同理 beginTurn/endTurn 不再 disable/enable 輸入框。
+4. **全域上限釋放要 dispatchAll**——上限 4 是跨寵計數,寵 A 結束釋放的名額可能輪到寵 B;依各寵隊首等候時間排序防飢餓。
+5. **turnStart 事件解耦「送出」與「開始執行」**:只由 main dispatcher 發(bridge 不發),renderer 據此 beginTurn;與 33ms text 合併器天然保序(非 text 事件先 flush;done 在 finally 前、turnStart 在 finally 後)。
+6. 就地錯誤(workspace 未設)原本用 `endTurn(false)` 顯示——busy 中會誤終結,新增 `showError`(不動 busy)。
+
+**驗證**:selftest 佇列 12 項(純邏輯 + mock 全鏈:排 3 依序接續、中途移除、cancel 續行、turnStart 保序)、bubbletest 7 項(busy 可打字、打字不被接續洗掉、✕ 回呼、showError 不動 busy 等)、typecheck/build 全綠。
+
+**教訓**:改「樂觀 UI」(先 beginTurn 再送)為「事件驅動 UI」(turnStart 才 beginTurn)時,所有原本綁在樂觀路徑上的副作用(清輸入框、鎖定、清附件)都要逐一重新歸位——它們各自屬於「送出被接受」「開始執行」「結束」三個不同時刻,混在一起就是這次三個坑的根源。

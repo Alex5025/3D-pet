@@ -143,3 +143,21 @@ agent?: { kind: 'codex' | 'claude'; sessionId?: string }
 1. **v0 查證先行**(上表)——猜格式必錯,是舊 spike 用真金白銀買來的教訓。
 2. **MockProvider**(實作 `AgentProvider`、照腳本吐事件)headless 驗整條鏈:chat-send → 事件 → 泡泡渲染 → session 回存 → cancel → approval UI,不依賴真 runtime、不耗額度;也是日後回歸測試的基座。
 3. 真 runtime 端到端:各問一題;resume(連兩問同 session + 重啟 app 後再問);中斷;休眠寵物時 session 被關;`npm run typecheck` + `npm run build`。
+
+## 10. 對話佇列(2026-08 加入)
+
+turn 進行中送出的訊息不再被拒,改排入 **main 端逐寵 FIFO**(`src/main/chatQueue.ts`,純邏輯、不 import electron):
+
+```
+泡泡 Enter ──invoke chat-send──▶ 消毒 → queue.enqueue(source:'bubble') → dispatcher.dispatch(petId)
+                                    │                                        │ canAccept?(bridge:未在跑 && 全域<4)
+                    {queued, position, reason}                               ▼
+                                                            sendChatEvent(turnStart) → bridge.chatSend
+bridge.chatSend ──runTurn().finally──▶ onTurnFinished → dispatcher.dispatchAll()(隊首等最久的寵物優先)
+```
+
+- **turnStart 事件只由 dispatcher 發**(bridge 不發),renderer 據此 beginTurn——「送出」與「開始執行」解耦。
+- **回饋走 invoke 回傳**,不走 error 事件(renderer 對 error 無條件 endTurn,會誤終結進行中 turn)。
+- 上限:每寵 10 則、佇列含圖總數 8 張;審批等待期間 running=true → 自動不派發。
+- 清佇列:寵物休息/刪除/開新對話;單寵熱重啟**不清**(重啟是修 runtime 不是放棄任務),泡泡重建後以 `chat-queue-get` pull 現況。
+- **中控面板擴展約定**:將來新增一條帶 sender 驗證的 enqueue IPC(source:'control')+ 訂閱既有 `chat-queue-apply` 廣播即可對各寵指派任務——佇列/派發/廣播的形狀已按此切分,中控只是另一個 producer 與 observer。
