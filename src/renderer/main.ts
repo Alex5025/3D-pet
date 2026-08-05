@@ -626,6 +626,11 @@ window.pet.onCursor(({ x, y }) => {
 
 addEventListener('mousedown', (event) => {
   lastPointerAt = performance.now();
+  // 寬度把手拖曳中(把手凸出泡泡外 6px,bubbleAt 的 rect 判定不涵蓋):
+  // 不得落入 runtimeAt 分支誤觸發拖寵物
+  for (const runtime of runtimes.values()) {
+    if (runtime.bubble.isResizing()) return;
+  }
   const visible = visiblePetId ? runtimes.get(visiblePetId) : null;
   if (visible?.bubble.isVisible()) {
     heldBubblePetId = visible.profile.id;

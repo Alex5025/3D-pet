@@ -23,6 +23,8 @@ export interface SpeechBubble {
   isBusy: () => boolean;
   /** 使用者是否將泡泡切成常駐展開。 */
   isPinned: () => boolean;
+  /** 寬度把手拖曳中(hover 邏輯須保持互動、不得收合或重新定位)。 */
+  isResizing: () => boolean;
   /** turn 開始:鎖輸入框、清回覆區、顯示狀態列。 */
   beginTurn: () => void;
   /** 回覆文字增量(自動展開回覆區並捲到底)。 */
@@ -320,6 +322,56 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   statusRow.append(status, stop);
 
   element.append(pinHotspot, activity, label, workspace, agentInfo, reply, approvalBox, statusRow, imagesBox, input, refsBox);
+
+  // 左右邊緣的寬度把手：拖曳＝手動設定這顆泡泡的寬度上限（內容少時照樣縮小、多時撐到這裡為止）；
+  // 雙擊還原純密度上限。只存記憶體，寵物重啟後回到自動。
+  let resizing = false;
+  const makeResizeHandle = (side: 'left' | 'right'): HTMLDivElement => {
+    const handle = document.createElement('div');
+    handle.className = `bubble-resize ${side}`;
+    handle.title = '拖曳調整泡泡寬度（雙擊還原自動）';
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || resizing) return;
+      event.preventDefault();
+      const startRect = element.getBoundingClientRect();
+      resizing = true;
+      // 先把目前寬度固定成 inline width、再清掉上次的手動 max-width——
+      // max-width 永遠壓過 width,不清的話調窄後就再也拉不寬。
+      element.style.width = `${Math.round(startRect.width)}px`;
+      element.style.maxWidth = '';
+      // move/up 掛 window,不用 setPointerCapture:實測疊層視窗(type: panel、不可聚焦)的
+      // pointer capture 會靜默失敗(hasPointerCapture 為 false),游標一離開把手事件就斷。
+      const onMove = (move: PointerEvent): void => {
+        // 拖曳中固定對側邊緣、寬度直接跟著游標（CSS min/max-width 會夾限）；收手後才交還 showAt 重新定位。
+        const width = side === 'right'
+          ? move.clientX - startRect.left
+          : startRect.right - move.clientX;
+        element.style.width = `${Math.round(width)}px`;
+        if (side === 'left') element.style.left = `${Math.round(startRect.right - element.offsetWidth)}px`;
+      };
+      const onUp = (): void => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        window.removeEventListener('blur', onUp);
+        resizing = false;
+        // 夾限後的實際寬度轉成上限；包進 min() 讓密度上限(半屏/三分之一屏)仍然有效。
+        element.style.maxWidth = `min(${element.offsetWidth}px, var(--bubble-max-width, calc(50vw - 24px)))`;
+        element.style.width = '';
+        showAt(lastAnchorX, lastAnchorY, lastAvoidRect);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+      window.addEventListener('blur', onUp);
+    });
+    handle.addEventListener('dblclick', () => {
+      element.style.maxWidth = '';
+      showAt(lastAnchorX, lastAnchorY, lastAvoidRect);
+    });
+    return handle;
+  };
+  element.append(makeResizeHandle('left'), makeResizeHandle('right'));
   document.body.appendChild(element);
 
   let busy = false;
@@ -378,7 +430,14 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   });
   stop.addEventListener('click', () => options.onCancel?.());
 
+  let lastAnchorX = 0;
+  let lastAnchorY = 0;
+  let lastAvoidRect: SpeechBubbleAvoidRect | undefined;
+
   function showAt(anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect): void {
+    lastAnchorX = anchorX;
+    lastAnchorY = anchorY;
+    lastAvoidRect = avoidRect;
     const width = element.offsetWidth;
     const height = element.offsetHeight;
     const avoided = avoidRect ?? {
@@ -447,6 +506,14 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     cachedRect = null; // 位置剛變,舊 rect 作廢
   }
 
+  // 寬度改為隨內容伸縮（max-content + 上限）：串流回覆會讓尺寸中途變化，
+  // 用上次錨點重新定位，避免泡泡長出螢幕邊緣。showAt 只動 left/top，不會造成觀察迴圈。
+  const resizeObserver = new ResizeObserver(() => {
+    if (resizing) return; // 拖曳中位置由把手直接控制,收手時會補一次 showAt
+    if (element.classList.contains('visible')) showAt(lastAnchorX, lastAnchorY, lastAvoidRect);
+  });
+  resizeObserver.observe(element);
+
   function hide(): void {
     if (document.activeElement === input) input.blur();
     element.classList.remove('visible');
@@ -478,6 +545,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     showAt,
     hide,
     destroy: () => {
+      resizeObserver.disconnect();
       if (activityReadTimer) clearTimeout(activityReadTimer);
       if (element.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
       hide();
@@ -485,6 +553,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     },
     isBusy: () => busy,
     isPinned: () => pinned,
+    isResizing: () => resizing,
     beginTurn: () => {
       busy = true;
       setActivity('working', '執行中');
