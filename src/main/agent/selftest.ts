@@ -388,10 +388,10 @@ export async function runAgentSelftest(): Promise<boolean> {
 
   // 6. 對話佇列:純邏輯
   {
-    const changed: string[] = [];
+    const changed: (string | undefined)[] = [];
     const queue = createChatQueue((petId) => changed.push(petId));
     const enqueueText = (petId: string, text: string) =>
-      queue.enqueue({ petId, text, images: [], source: 'selftest' });
+      queue.enqueue({ assignee: petId, text, images: [], source: 'selftest' });
     check('佇列:position 遞增', enqueueText('q1', 'a').position === 0 && enqueueText('q1', 'b').position === 1);
     check('佇列:onChanged 有觸發', changed.length === 2);
     const longText = 'x'.repeat(100);
@@ -402,11 +402,20 @@ export async function runAgentSelftest(): Promise<boolean> {
     check('佇列:remove 指定則', queue.remove('q1', removeTarget) && queue.size('q1') === 2 && queue.summaries('q1')[1]!.text.startsWith('x'));
     for (let i = 0; i < 8; i++) enqueueText('q1', `fill-${i}`);
     check('佇列:滿 10 拒收且給 reason', !enqueueText('q1', '第11則').ok && !!enqueueText('q1', '第11則').reason);
-    const withImages = (n: number) => queue.enqueue({ petId: 'q2', text: '圖', images: Array.from({ length: n }, () => ({ mimeType: 'image/png' as const, data: 'x' })), source: 'selftest' });
+    const withImages = (n: number) => queue.enqueue({ assignee: 'q2', text: '圖', images: Array.from({ length: n }, () => ({ mimeType: 'image/png' as const, data: 'x' })), source: 'selftest' });
     check('佇列:圖片總數 8 封頂', withImages(4).ok && withImages(4).ok && !withImages(1).ok);
     queue.clear('q1');
     check('佇列:clear 後空且 petsWithTasks 只剩 q2', queue.size('q1') === 0 && queue.petsWithTasks().join() === 'q2');
     queue.clear('q2');
+
+    // 歸屬語意:泡泡必綁定;公用池 claim/remove/clear 邊界
+    check('歸屬:bubble 缺 assignee 拒收', !queue.enqueue({ text: '無主泡泡訊息', images: [], source: 'bubble' }).ok);
+    check('歸屬:公用池投單', queue.enqueue({ text: '公用一', images: [], source: 'selftest' }).ok && queue.hasUnbound());
+    queue.enqueue({ text: '公用二', images: [], source: 'selftest' });
+    check('歸屬:clear(petId) 不動公用池', (queue.clear('q1'), queue.unboundSummaries().length === 2));
+    const claimed = queue.claimUnbound('q9');
+    check('歸屬:claim 取最舊且寫入 assignee', claimed?.text === '公用一' && claimed?.assignee === 'q9' && queue.unboundSummaries().length === 1);
+    check('歸屬:removeUnbound', queue.removeUnbound(queue.unboundSummaries()[0]!.id) && !queue.hasUnbound());
   }
 
   // 7. 佇列 + dispatcher + mock bridge 全鏈:排 3 則依序執行、中途移除、cancel 後續行
@@ -420,10 +429,11 @@ export async function runAgentSelftest(): Promise<boolean> {
     const dispatcher = createChatDispatcher({
       queue,
       canAccept: (petId) => qBridge.canAccept(petId),
-      runTask: (task) => {
-        ran.push(task.text);
+      unboundCandidates: () => ['qp'],
+      runTask: (petId, task) => {
+        ran.push(`${petId}:${task.text}`);
         qEvents.push({ kind: 'turnStart', text: task.text });
-        qBridge.chatSend(task.petId, task.text, task.images);
+        qBridge.chatSend(petId, task.text, task.images);
       }
     });
     qBridge = createAgentBridge({
@@ -439,7 +449,7 @@ export async function runAgentSelftest(): Promise<boolean> {
       while (qTerminal() < count && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
     };
     const push = (text: string) => {
-      const result = queue.enqueue({ petId: 'qp', text, images: [], source: 'selftest' });
+      const result = queue.enqueue({ assignee: 'qp', text, images: [], source: 'selftest' });
       dispatcher.dispatch('qp');
       return result;
     };
@@ -453,7 +463,7 @@ export async function runAgentSelftest(): Promise<boolean> {
     const secondId = queue.summaries('qp')[0]!.id;
     queue.remove('qp', secondId);
     await qWait(2);
-    check('佇列:turn 完自動接續且跳過被移除者', ran.join('|') === 'SLOW 第一則|第三則');
+    check('佇列:turn 完自動接續且跳過被移除者', ran.join('|') === 'qp:SLOW 第一則|qp:第三則');
     check('佇列:每則各有終結事件', qTerminal() === 2);
     check('佇列:turnStart 在前一則 done 之後', (() => {
       const kinds = qEvents.map((e) => e.kind);
@@ -469,8 +479,23 @@ export async function runAgentSelftest(): Promise<boolean> {
     push('取消後接續');
     qBridge.chatCancel('qp');
     await qWait(2);
-    check('佇列:cancel 後自動續行', ran.join('|') === 'SLOW 會被取消|取消後接續' &&
+    check('佇列:cancel 後自動續行', ran.join('|') === 'qp:SLOW 會被取消|qp:取消後接續' &&
       qEvents.some((e) => e.kind === 'done' && !e.ok) && qEvents.some((e) => e.kind === 'done' && e.ok));
+
+    // 8. 公用池全鏈:綁定優先、閒者領單、資格過濾
+    qEvents.length = 0;
+    ran.length = 0;
+    // 情境:qp 有綁定任務;公用池兩單;candidates 只有 qp(qx 無資格)
+    queue.enqueue({ assignee: 'qp', text: 'SLOW 綁定優先', images: [], source: 'selftest' });
+    queue.enqueue({ text: '公用A', images: [], source: 'selftest' });
+    queue.enqueue({ text: '公用B', images: [], source: 'selftest' });
+    dispatcher.dispatchAll();
+    await new Promise((r) => setTimeout(r, 80));
+    check('歸屬:綁定任務先跑、公用單等待', ran.length === 1 && ran[0] === 'qp:SLOW 綁定優先' && queue.unboundSummaries().length === 2);
+    await qWait(1);
+    await qWait(2); // 綁定完 → onTurnFinished → 領公用A;公用A 完 → 領公用B
+    await qWait(3, 8000);
+    check('歸屬:佇列空檔依序領公用池(最舊優先)', ran.join('|') === 'qp:SLOW 綁定優先|qp:公用A|qp:公用B' && !queue.hasUnbound());
     await qBridge.dispose();
   }
 

@@ -651,4 +651,6 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 
 **驗證**:selftest 佇列 12 項(純邏輯 + mock 全鏈:排 3 依序接續、中途移除、cancel 續行、turnStart 保序)、bubbletest 7 項(busy 可打字、打字不被接續洗掉、✕ 回呼、showError 不動 busy 等)、typecheck/build 全綠。
 
+**追加(同日):任務歸屬語意**——使用者釐清:泡泡投入必綁定該寵(從誰的泡泡進來就誰做,模組層強制缺 assignee 拒收);中控台將來可投**不綁定**任務進公用池,任何「啟用中且已設工作目錄」的寵物在自己佇列空檔時領取(claim 時才寫入 assignee)。綁定佇列永遠優先於領公用單;寵物休息只清自己的綁定佇列、公用池不動;喚醒即觸發 dispatchAll 領單。selftest 歸屬 7 項(必綁拒收/公用投單/clear 不動池/claim 最舊/removeUnbound/綁定優先/空檔依序領)全 PASS。
+
 **教訓**:改「樂觀 UI」(先 beginTurn 再送)為「事件驅動 UI」(turnStart 才 beginTurn)時,所有原本綁在樂觀路徑上的副作用(清輸入框、鎖定、清附件)都要逐一重新歸位——它們各自屬於「送出被接受」「開始執行」「結束」三個不同時刻,混在一起就是這次三個坑的根源。

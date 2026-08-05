@@ -96,6 +96,8 @@ let dragMonitor: DragMonitor | null = null;
 let refreshCursorPollHook: (() => void) | null = null;
 /** 清空某寵的對話佇列(whenReady 注入):寵物休息/刪除/開新對話時呼叫。 */
 let clearChatQueueHook: ((petId: string) => void) | null = null;
+/** 全域派發(whenReady 注入):寵物喚醒時呼叫——醒來的寵物可領公用池的單。 */
+let dispatchAllHook: (() => void) | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -289,8 +291,10 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
   // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
   if (patch.enabled === false) {
     releasePetCaches(id);
-    clearChatQueueHook?.(id); // 休息 = 放下手邊任務,排隊中的一併清掉
+    clearChatQueueHook?.(id); // 休息 = 放下手邊任務,排隊中的一併清掉(公用池不受影響)
     void bridge?.closePetSession(id);
+  } else if (patch.enabled === true) {
+    dispatchAllHook?.(); // 喚醒的寵物可以去領公用池的單
   }
   if (patch.enabled !== undefined) refreshCursorPollHook?.();
   if (patch.enabled !== undefined || 'idleMotions' in patch) scheduleIdleMotion(id);
@@ -807,18 +811,24 @@ app.whenReady().then(async () => {
    * turn 進行中送出的訊息排隊、turn 完自動接續;佇列變更即廣播給泡泡。
    * 將來中控面板 = 另一條帶 sender 驗證的 enqueue(source:'control')IPC + 訂閱同一個廣播。 */
   const chatQueue = createChatQueue((petId) => {
-    win?.webContents.send('chat-queue-apply', petId, chatQueue.summaries(petId));
+    // petId = undefined 表公用池變更:目前無 UI 訂閱(中控面板之後接),先不廣播
+    if (petId) win?.webContents.send('chat-queue-apply', petId, chatQueue.summaries(petId));
   });
   const chatDispatcher = createChatDispatcher({
     queue: chatQueue,
     canAccept: (petId) => bridge?.canAccept(petId) ?? false,
-    runTask: (task) => {
+    // 領公用池的資格:啟用中且已設工作目錄
+    unboundCandidates: () => [...pets.values()]
+      .filter((profile) => profile.enabled !== false && !!profile.workspacePath)
+      .map((profile) => profile.id),
+    runTask: (petId, task) => {
       // turnStart 讓泡泡知道「這一則開始跑了」(beginTurn);非 text 事件,合併器會先 flush 保序
-      sendChatEvent(task.petId, { kind: 'turnStart', text: task.text });
-      bridge?.chatSend(task.petId, task.text, task.images);
+      sendChatEvent(petId, { kind: 'turnStart', text: task.text });
+      bridge?.chatSend(petId, task.text, task.images);
     }
   });
   clearChatQueueHook = (petId) => chatQueue.clear(petId);
+  dispatchAllHook = () => chatDispatcher.dispatchAll();
 
   bridge = createAgentBridge({
     // 淺拷貝合併參考檔(ephemeral,不落盤——persist 走 pets.get 的原物件);資料夾以尾斜線標記
@@ -1057,7 +1067,7 @@ app.whenReady().then(async () => {
     }
     const trimmed = String(text).slice(0, 1000).trim();
     if (!trimmed && !images.length) return { queued: false, position: -1, reason: '訊息是空的' };
-    const result = chatQueue.enqueue({ petId, text: trimmed, images, source: 'bubble' });
+    const result = chatQueue.enqueue({ assignee: petId, text: trimmed, images, source: 'bubble' });
     if (!result.ok) return { queued: false, position: -1, reason: result.reason };
     chatDispatcher.dispatch(petId);
     return { queued: true, position: result.position };

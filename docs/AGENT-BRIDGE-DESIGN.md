@@ -160,4 +160,7 @@ bridge.chatSend ──runTurn().finally──▶ onTurnFinished → dispatcher.d
 - **回饋走 invoke 回傳**,不走 error 事件(renderer 對 error 無條件 endTurn,會誤終結進行中 turn)。
 - 上限:每寵 10 則、佇列含圖總數 8 張;審批等待期間 running=true → 自動不派發。
 - 清佇列:寵物休息/刪除/開新對話;單寵熱重啟**不清**(重啟是修 runtime 不是放棄任務),泡泡重建後以 `chat-queue-get` pull 現況。
-- **中控面板擴展約定**:將來新增一條帶 sender 驗證的 enqueue IPC(source:'control')+ 訂閱既有 `chat-queue-apply` 廣播即可對各寵指派任務——佇列/派發/廣播的形狀已按此切分,中控只是另一個 producer 與 observer。
+- **任務歸屬語意**:`assignee` 有值 = 綁定該寵(只有它會執行);缺 = 進**公用池**(誰領都行)。
+  泡泡投入(source:'bubble')**必綁定**——模組層強制(缺 assignee 拒收),從誰的泡泡進來就誰做。
+  公用池領單資格:**啟用中且已設 workspacePath** 的寵物;自己的綁定佇列**永遠優先**,空檔才領公用池最舊的一單(claim 時寫入 assignee)。寵物休息只清自己的綁定佇列,公用池不受影響;喚醒時觸發 dispatchAll 讓它可立即領單。
+- **中控面板擴展約定**:將來新增一條帶 sender 驗證的 enqueue IPC(source:'control',assignee 可指定寵物或留空進公用池)+ 訂閱既有 `chat-queue-apply` 與公用池變更廣播——佇列/派發/廣播的形狀已按此切分,中控只是另一個 producer 與 observer。
