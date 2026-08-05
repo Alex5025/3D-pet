@@ -36,6 +36,7 @@ electron-vite 三段式(`electron.vite.config.ts`):main / preload / renderer,輸
 - 背景 app(dock 隱藏)開 dialog 會被壓在其他視窗底下——`chooseVrm()` 先 `app.focus({ steal: true })`。
 - 疊層視窗開不了 DevTools——renderer 的 console 經 `console-message` 事件轉發到終端機。
 - VRM 檔經 IPC 傳遞用 buffer(主行程 `readFileSync` 後 send),renderer 走官方 `loader.parse` 路徑,不依賴檔案路徑。
+- 疊層視窗的 `setPointerCapture` 會靜默失敗(呼叫不丟錯但 `hasPointerCapture` 為 false)——拖曳互動一律把 move/up 掛在 window 上(寵物拖曳與泡泡寬度把手皆如此)。泡泡的瀏覽器自驗頁是 `bubbletest.html`(掛 `window.__bubble`)。
 
 ## 慣例
 
