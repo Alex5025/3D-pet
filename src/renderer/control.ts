@@ -1,5 +1,5 @@
 import type { ControlPetStatus, ControlStatusSnapshot, ControlTaskRecord } from '../shared/chat';
-import { groupPetsByWorkspace, normalizeWorkspacePath, workspaceFolderName } from '../shared/petGroups';
+import { normalizeWorkspacePath, workspaceFolderName } from '../shared/petGroups';
 import type { ApprovalPolicy, ProjectSandboxSettingsResult, SandboxMode } from '../shared/sandboxSettings';
 
 /* 中控面板 v2:逐寵列表(清醒/休息分區,最後回報新→舊)+ 公用任務發佈(可限定工作區)+ 任務帳本。
@@ -320,7 +320,12 @@ function applySnapshot(next: ControlStatusSnapshot): void {
   renderPetRows();
   renderPublishWorkspaces();
   renderTasks();
-  renderSandboxPetSelect(); // 沙盒分頁的寵物清單跟著快照更新(表單值不動,避免洗掉編輯中的選項)
+  // 沙盒列只在名單/名稱/工作目錄變化時重建——快照每次狀態變更都推,無條件重建會洗掉編輯中的選項
+  const signature = snapshot.pets.map((pet) => `${pet.petId}:${pet.name}:${pet.workspacePath ?? ''}`).join('|');
+  if (signature !== sandboxSignature) {
+    sandboxSignature = signature;
+    if (sandboxTabOpened) renderSandboxRows();
+  }
 }
 
 /* ---------- 分頁 ---------- */
@@ -336,19 +341,7 @@ document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((button) =>
   button.addEventListener('click', () => activateTab(button.dataset['tab']!));
 });
 
-/* ---------- 沙盒設定分頁(逐寵;高風險讀寫仍由 main 直改 .codex/config.toml) ---------- */
-const select = (id: string): HTMLSelectElement => el(id) as HTMLSelectElement;
-const checkbox = (id: string): HTMLInputElement => el(id) as HTMLInputElement;
-
-let sbPetId = '';
-let sbLoadToken = 0;
-
-function setSbStatus(message: string, kind: 'neutral' | 'success' | 'warning' | 'error' = 'neutral'): void {
-  const status = el('sb-status');
-  status.textContent = message;
-  status.className = `status${kind === 'neutral' ? '' : ` ${kind}`}`;
-}
-
+/* ---------- 沙盒設定分頁(逐寵直列,不折疊;高風險讀寫仍由 main 直改 .codex/config.toml) ---------- */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
@@ -359,115 +352,166 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
-function sbSelectedPet(): ControlPetStatus | null {
-  return snapshot.pets.find((pet) => pet.petId === sbPetId) ?? null;
+/** 寵物集合簽名:只有名單/名稱/工作目錄變了才重建沙盒列——快照每次狀態變更都會推,
+ *  無條件重建會洗掉使用者正在編輯的 select 值。 */
+let sandboxSignature = '';
+/** 逐寵 loadToken:防過期回應蓋掉新值(每列獨立)。 */
+const sandboxLoadTokens = new Map<string, number>();
+let sandboxTabOpened = false;
+
+interface SandboxRowRefs {
+  policy: HTMLSelectElement;
+  mode: HTMLSelectElement;
+  network: HTMLInputElement;
+  apply: HTMLButtonElement;
+  status: HTMLElement;
+}
+const sandboxRowRefs = new Map<string, SandboxRowRefs>();
+
+function setRowStatus(refs: SandboxRowRefs, message: string, kind: 'neutral' | 'success' | 'warning' | 'error' = 'neutral'): void {
+  refs.status.textContent = message;
+  refs.status.className = `sandbox-status${kind === 'neutral' ? '' : ` ${kind}`}`;
 }
 
-/** 沙盒分頁的寵物下拉:依工作目錄分組;快照更新時重建並保留選取。 */
-function renderSandboxPetSelect(): void {
-  const picker = select('sb-pet');
-  const previous = sbPetId || picker.value;
-  picker.innerHTML = '';
-  const groupable = snapshot.pets.map((pet) => ({ ...pet, id: pet.petId }));
-  for (const group of groupPetsByWorkspace(groupable)) {
-    const options = document.createElement('optgroup');
-    options.label = `📁 ${group.name}`;
-    for (const pet of group.pets) {
-      options.append(new Option(`${pet.enabled ? '' : '（休息中）'}${pet.name}`, pet.petId));
+function sandboxRow(pet: ControlPetStatus): HTMLElement {
+  const row = document.createElement('div');
+  row.className = `sandbox-row${pet.workspacePath ? '' : ' no-workspace'}`;
+
+  const nameCell = document.createElement('div');
+  nameCell.className = 'pet-name-cell';
+  const dot = document.createElement('span');
+  dot.className = `dot ${pet.phase}`;
+  const name = document.createElement('span');
+  name.className = 'pet-name';
+  name.textContent = pet.name;
+  name.title = pet.name;
+  nameCell.append(dot, name);
+
+  const workspace = document.createElement('div');
+  workspace.className = 'pet-workspace';
+  const folder = workspaceFolderName(pet.workspacePath);
+  workspace.textContent = folder ? `📁 ${folder}` : '未設定';
+  if (pet.workspacePath) workspace.title = pet.workspacePath;
+
+  const policy = document.createElement('select');
+  policy.append(
+    new Option('需要時詢問（建議）', 'on-request'),
+    new Option('只自動允許受信任操作', 'untrusted'),
+    new Option('永不詢問（受限操作直接失敗）', 'never')
+  );
+  const mode = document.createElement('select');
+  mode.append(
+    new Option('可寫工作目錄（建議）', 'workspace-write'),
+    new Option('唯讀', 'read-only'),
+    new Option('完整存取（高風險）', 'danger-full-access')
+  );
+  const networkLabel = document.createElement('label');
+  networkLabel.className = 'toggle';
+  const network = document.createElement('input');
+  network.type = 'checkbox';
+  networkLabel.append(network, '網路');
+  networkLabel.title = '允許工作區沙盒連線網路(例如 git push)';
+
+  const apply = document.createElement('button');
+  apply.className = 'sandbox-apply';
+  apply.textContent = '套用';
+  const status = document.createElement('div');
+  status.className = 'sandbox-status';
+
+  const refs: SandboxRowRefs = { policy, mode, network, apply, status };
+  sandboxRowRefs.set(pet.petId, refs);
+
+  const noWorkspace = !pet.workspacePath;
+  policy.disabled = mode.disabled = network.disabled = apply.disabled = noWorkspace;
+  if (noWorkspace) setRowStatus(refs, '尚未設定工作目錄,先到總覽分頁選「目錄」', 'warning');
+
+  mode.addEventListener('change', () => {
+    if (mode.value === 'danger-full-access') {
+      setRowStatus(refs, '完整存取會移除一般檔案與網路沙盒限制,只應用於完全信任的專案', 'warning');
     }
-    picker.append(options);
-  }
-  sbPetId = [...picker.options].some((option) => option.value === previous)
-    ? previous
-    : (snapshot.pets[0]?.petId ?? '');
-  picker.value = sbPetId;
+  });
+  apply.addEventListener('click', async () => {
+    const sandboxMode = mode.value as SandboxMode;
+    if (sandboxMode === 'danger-full-access' &&
+      !window.confirm(`完整存取會移除一般沙盒限制。確定要套用到「${pet.name}」的專案嗎?`)) return;
+    apply.disabled = true;
+    setRowStatus(refs, '正在直接寫入專案設定…');
+    try {
+      const result = await withTimeout(window.pet.setProjectSandboxSettings(pet.petId, {
+        approvalPolicy: policy.value as ApprovalPolicy,
+        sandboxMode,
+        networkAccess: network.checked,
+      }), 8_000, '寫入逾時；請確認工作目錄所在磁碟是否可用');
+      if (!result.ok || !result.settings) setRowStatus(refs, result.message, 'error');
+      else setRowStatus(refs, result.message, 'success');
+    } catch (error) {
+      setRowStatus(refs, error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      apply.disabled = false;
+    }
+  });
+
+  row.append(nameCell, workspace, policy, mode, networkLabel, apply, status);
+  return row;
 }
 
-async function loadSandboxSettings(): Promise<void> {
-  const pet = sbSelectedPet();
-  const workspace = el('sb-workspace');
-  workspace.textContent = pet?.workspacePath ?? '尚未選擇工作目錄';
-  workspace.classList.toggle('empty', !pet?.workspacePath);
-  const button = el('sb-apply') as HTMLButtonElement;
-  if (!pet?.workspacePath) {
-    el('sb-config-path').textContent = '選擇工作目錄後顯示';
-    button.disabled = true;
-    setSbStatus(pet ? '這隻寵物尚未設定工作目錄' : '', pet ? 'error' : 'neutral');
-    return;
-  }
-  const token = ++sbLoadToken;
-  button.disabled = true;
-  setSbStatus('正在讀取專案設定…');
+async function loadSandboxRow(pet: ControlPetStatus): Promise<void> {
+  const refs = sandboxRowRefs.get(pet.petId);
+  if (!refs || !pet.workspacePath) return;
+  const token = (sandboxLoadTokens.get(pet.petId) ?? 0) + 1;
+  sandboxLoadTokens.set(pet.petId, token);
+  setRowStatus(refs, '正在讀取專案設定…');
   let result: ProjectSandboxSettingsResult;
   try {
     result = await withTimeout(
       window.pet.getProjectSandboxSettings(pet.petId),
       4_000,
-      '讀取逾時；選項仍可操作,你可以直接套用重試',
+      '讀取逾時；選項仍可操作,可直接套用重試',
     );
   } catch (error) {
-    if (token !== sbLoadToken || sbPetId !== pet.petId) return;
-    button.disabled = false;
-    setSbStatus(error instanceof Error ? error.message : String(error), 'warning');
+    if (sandboxLoadTokens.get(pet.petId) !== token || !sandboxRowRefs.has(pet.petId)) return;
+    setRowStatus(refs, error instanceof Error ? error.message : String(error), 'warning');
     return;
   }
-  if (token !== sbLoadToken || sbPetId !== pet.petId) return;
-  button.disabled = false;
+  if (sandboxLoadTokens.get(pet.petId) !== token || sandboxRowRefs.get(pet.petId) !== refs) return;
   if (!result.ok || !result.settings) {
-    setSbStatus(result.message, 'error');
+    setRowStatus(refs, result.message, 'error');
     return;
   }
   const settings = result.settings;
-  select('sb-approval-policy').value = settings.approvalPolicy ?? 'on-request';
-  select('sb-sandbox-mode').value = settings.sandboxMode ?? 'workspace-write';
-  checkbox('sb-network').checked = settings.networkAccess ?? true;
-  el('sb-config-path').textContent = settings.configPath;
-  updateSandboxDangerWarning();
-  setSbStatus(
+  refs.policy.value = settings.approvalPolicy ?? 'on-request';
+  refs.mode.value = settings.sandboxMode ?? 'workspace-write';
+  refs.network.checked = settings.networkAccess ?? true;
+  refs.status.title = settings.configPath;
+  setRowStatus(refs,
     settings.warnings?.join('；') ??
-      (settings.exists ? '已載入目前的專案設定' : '設定檔尚未建立；套用時會安全建立'),
-    settings.warnings?.length ? 'warning' : 'neutral',
-  );
+      (settings.exists ? `已載入 ${settings.configPath}` : '設定檔尚未建立；套用時會安全建立'),
+    settings.warnings?.length ? 'warning' : 'neutral');
 }
 
-function updateSandboxDangerWarning(): void {
-  el('sb-danger').hidden = select('sb-sandbox-mode').value !== 'danger-full-access';
-}
-
-select('sb-pet').addEventListener('change', () => {
-  sbPetId = select('sb-pet').value; // 中控的選取是分頁內局部狀態,不動全域 selectedPet
-  void loadSandboxSettings();
-});
-select('sb-sandbox-mode').addEventListener('change', updateSandboxDangerWarning);
-
-el('sb-apply').addEventListener('click', async () => {
-  const pet = sbSelectedPet();
-  if (!pet?.workspacePath) return;
-  const sandboxMode = select('sb-sandbox-mode').value as SandboxMode;
-  if (sandboxMode === 'danger-full-access' &&
-    !window.confirm('完整存取會移除一般沙盒限制。確定要套用到這個專案嗎?')) return;
-  const button = el('sb-apply') as HTMLButtonElement;
-  button.disabled = true;
-  setSbStatus('正在直接寫入專案設定…');
-  try {
-    const result = await withTimeout(window.pet.setProjectSandboxSettings(pet.petId, {
-      approvalPolicy: select('sb-approval-policy').value as ApprovalPolicy,
-      sandboxMode,
-      networkAccess: checkbox('sb-network').checked,
-    }), 8_000, '寫入逾時；請確認工作目錄所在磁碟是否可用');
-    if (sbPetId !== pet.petId) return;
-    if (!result.ok || !result.settings) {
-      setSbStatus(result.message, 'error');
-      return;
-    }
-    el('sb-config-path').textContent = result.settings.configPath;
-    setSbStatus(result.message, 'success');
-  } catch (error) {
-    if (sbPetId === pet.petId) setSbStatus(error instanceof Error ? error.message : String(error), 'error');
-  } finally {
-    if (sbPetId === pet.petId) button.disabled = false;
+function renderSandboxRows(): void {
+  const container = el('sandbox-rows');
+  container.innerHTML = '';
+  sandboxRowRefs.clear();
+  const ordered = [
+    ...snapshot.pets.filter((pet) => pet.enabled).sort(byLastActivity),
+    ...snapshot.pets.filter((pet) => !pet.enabled).sort(byLastActivity)
+  ];
+  if (!ordered.length) {
+    const note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = '沒有寵物';
+    container.append(note);
+    return;
   }
-});
+  for (const pet of ordered) container.append(sandboxRow(pet));
+  for (const pet of ordered) void loadSandboxRow(pet); // 並行載入各寵現值
+}
+
+function loadSandboxSettings(): void {
+  sandboxTabOpened = true;
+  renderSandboxRows();
+}
 
 /* ---------- 系統操作 ---------- */
 el('system-restart').addEventListener('click', () => window.pet.systemRestart());

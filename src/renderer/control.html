@@ -92,24 +92,20 @@
       .tab { display: none; }
       .tab.active { display: block; }
 
-      /* ── 沙盒設定分頁 ── */
-      .sandbox-card { max-width: 560px; padding: 16px; border: 1px solid #363640; border-radius: 12px; background: #202027; }
-      .sandbox-card label { display: block; margin-bottom: 13px; color: #c9c9d2; font-size: 13px; }
-      .sandbox-card label > span { display: block; margin-bottom: 6px; }
-      .sandbox-card select { width: 100%; min-height: 36px; }
-      .path-label { margin: 14px 0 5px; color: #92929e; font-size: 11px; }
-      .sandbox-card code { display: block; padding: 8px 9px; border-radius: 7px; color: #b8b8e8; background: #18181d; overflow-wrap: anywhere; user-select: text; font-size: 12px; }
-      .sandbox-card code.empty { color: #777783; }
-      .toggle { display: flex; align-items: center; gap: 8px; }
+      /* ── 沙盒設定分頁(逐寵直列,不折疊) ── */
+      .sandbox-rows { display: flex; flex-direction: column; gap: 6px; }
+      .sandbox-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) minmax(150px, 1fr) minmax(140px, 1fr) auto auto; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid #363640; border-radius: 10px; background: #202027; }
+      .sandbox-row.no-workspace { opacity: 0.55; }
+      .sandbox-row select { min-height: 30px; font-size: 12px; }
+      .toggle { display: flex; align-items: center; gap: 6px; color: #c9c9d2; font-size: 12px; white-space: nowrap; }
       .toggle input { accent-color: #6d64d8; }
-      .warning { margin: 8px 0 13px; padding: 9px 10px; border: 1px solid rgba(240,164,60,.38); border-radius: 8px; color: #ffd38a; background: rgba(194,120,24,.13); font-size: 12px; }
-      #sb-apply { width: 100%; margin-top: 12px; border-color: #675bd0; background: #5147b8; }
-      #sb-apply:hover { background: #6156ca; }
-      .status { min-height: 20px; margin-top: 9px; color: #aaaab5; font-size: 12px; user-select: text; }
-      .status.success { color: #78d6a0; }
-      .status.error { color: #ff8c96; }
-      .status.warning { color: #ffd38a; }
-      .risk-label { display: inline-block; margin: 0 0 12px; padding: 3px 8px; border: 1px solid #9b6b31; border-radius: 999px; color: #ffd38a; font-size: 11px; }
+      .sandbox-apply { border-color: #675bd0; background: #5147b8; min-height: 28px; font-size: 12px; }
+      .sandbox-apply:hover { background: #6156ca; }
+      .sandbox-status { grid-column: 1 / -1; min-height: 0; color: #aaaab5; font-size: 11px; user-select: text; overflow-wrap: anywhere; }
+      .sandbox-status.success { color: #78d6a0; }
+      .sandbox-status.error { color: #ff8c96; }
+      .sandbox-status.warning { color: #ffd38a; }
+      .risk-label { display: inline-block; margin: 0 0 10px; padding: 3px 8px; border: 1px solid #9b6b31; border-radius: 999px; color: #ffd38a; font-size: 11px; }
     </style>
   </head>
   <body>
@@ -150,32 +146,8 @@
 
       <div class="tab" id="tab-sandbox">
         <h2>沙盒設定（逐寵）</h2>
-        <div class="sandbox-card">
-          <span class="risk-label">進階・高風險設定</span>
-          <label><span>寵物／專案</span><select id="sb-pet"></select></label>
-          <div class="path-label">工作目錄</div>
-          <code id="sb-workspace" class="empty">尚未選擇工作目錄</code>
-          <label style="margin-top: 13px;"><span>核准策略</span>
-            <select id="sb-approval-policy">
-              <option value="on-request">需要時詢問（建議）</option>
-              <option value="untrusted">只自動允許受信任操作</option>
-              <option value="never">永不詢問（受限操作直接失敗）</option>
-            </select>
-          </label>
-          <label><span>沙盒模式</span>
-            <select id="sb-sandbox-mode">
-              <option value="workspace-write">可寫工作目錄（建議）</option>
-              <option value="read-only">唯讀</option>
-              <option value="danger-full-access">完整存取（高風險）</option>
-            </select>
-          </label>
-          <label class="toggle"><input type="checkbox" id="sb-network" />允許工作區沙盒連線網路（例如 git push）</label>
-          <div class="warning" id="sb-danger" hidden>完整存取會移除一般檔案與網路沙盒限制。只應用於你完全信任的專案。</div>
-          <div class="path-label">設定檔</div>
-          <code id="sb-config-path">選擇工作目錄後顯示</code>
-          <button id="sb-apply">套用到專案</button>
-          <div class="status" id="sb-status" role="status"></div>
-        </div>
+        <span class="risk-label">進階・高風險設定：套用時由主程序直接寫入該寵工作目錄的 .codex/config.toml</span>
+        <div class="sandbox-rows" id="sandbox-rows"></div>
       </div>
     </main>
     <script type="module" src="./control.ts"></script>
