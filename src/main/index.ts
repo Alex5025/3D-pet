@@ -1141,8 +1141,10 @@ app.whenReady().then(async () => {
   /* ── 專案 Codex 沙盒設定──
    * 設定視窗明確按下後由 main 直接讀寫 <workspace>/.codex/config.toml；不啟動 agent、不跑 shell。 */
   ipcMain.handle('sandbox-settings-get', async (event, id: string): Promise<ProjectSandboxSettingsResult> => {
-    if (!sandboxSettingsWin || event.sender !== sandboxSettingsWin.webContents) {
-      return { ok: false, message: '沙盒設定只能從獨立安全視窗操作' };
+    // 高風險通道只開放兩個具名視窗:獨立沙盒視窗與中控面板的「沙盒設定」分頁
+    const fromSandboxUi = event.sender === sandboxSettingsWin?.webContents || event.sender === controlWin?.webContents;
+    if (!fromSandboxUi) {
+      return { ok: false, message: '沙盒設定只能從沙盒視窗或中控面板操作' };
     }
     const profile = getPet(id);
     if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
@@ -1159,8 +1161,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'sandbox-settings-set',
     async (event, id: string, settings: ProjectSandboxSettingsInput): Promise<ProjectSandboxSettingsResult> => {
-      if (!sandboxSettingsWin || event.sender !== sandboxSettingsWin.webContents) {
-        return { ok: false, message: '沙盒設定只能從獨立安全視窗操作' };
+      const fromSandboxUi = event.sender === sandboxSettingsWin?.webContents || event.sender === controlWin?.webContents;
+      if (!fromSandboxUi) {
+        return { ok: false, message: '沙盒設定只能從沙盒視窗或中控面板操作' };
       }
       const profile = getPet(id);
       if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
@@ -1327,11 +1330,6 @@ app.whenReady().then(async () => {
     const removed = chatQueue.removeUnbound(String(taskId)); // 內部 onChanged(undefined) 會自動重推快照
     if (removed) markLedgerRemoved(String(taskId));
     return removed;
-  });
-  ipcMain.on('open-sandbox-settings', (event, petId: string) => {
-    if (!settingsWin || event.sender !== settingsWin.webContents) return;
-    // 設定面板「工作」分頁的入口:只開既有獨立視窗,不內嵌——沙盒視窗隔離是刻意的安全設計
-    openSandboxSettings(String(petId));
   });
   ipcMain.on('system-restart', (event) => {
     if (!controlWin || event.sender !== controlWin.webContents) return;

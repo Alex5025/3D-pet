@@ -321,12 +321,6 @@ el('change-workspace').addEventListener('click', async () => {
   }
 });
 
-/* 沙盒設定入口:開既有獨立視窗(高風險設定維持視窗隔離,不內嵌分頁) */
-el('open-sandbox').addEventListener('click', () => {
-  const profile = selectedProfile();
-  if (profile) window.pet.openSandboxSettingsWindow(profile.id);
-});
-
 /* 全域:新寵物預設工作根目錄(只影響之後新增的寵物;既有寵物的工作目錄不動) */
 function renderWorkspaceRoot(root: string): void {
   el('workspace-root').textContent = root;

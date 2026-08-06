@@ -1,5 +1,6 @@
 import type { ControlPetStatus, ControlStatusSnapshot, ControlTaskRecord } from '../shared/chat';
-import { normalizeWorkspacePath, workspaceFolderName } from '../shared/petGroups';
+import { groupPetsByWorkspace, normalizeWorkspacePath, workspaceFolderName } from '../shared/petGroups';
+import type { ApprovalPolicy, ProjectSandboxSettingsResult, SandboxMode } from '../shared/sandboxSettings';
 
 /* 中控面板 v2:逐寵列表(清醒/休息分區,最後回報新→舊)+ 公用任務發佈(可限定工作區)+ 任務帳本。
  * 資料流:開窗 getControlStatus() 拿 snapshot,之後只訂 control-status-apply 全量快照整區重繪。
@@ -319,7 +320,154 @@ function applySnapshot(next: ControlStatusSnapshot): void {
   renderPetRows();
   renderPublishWorkspaces();
   renderTasks();
+  renderSandboxPetSelect(); // 沙盒分頁的寵物清單跟著快照更新(表單值不動,避免洗掉編輯中的選項)
 }
+
+/* ---------- 分頁 ---------- */
+function activateTab(name: string): void {
+  document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((button) => {
+    button.classList.toggle('active', button.dataset['tab'] === name);
+  });
+  document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
+  el(`tab-${name}`).classList.add('active');
+  if (name === 'sandbox') void loadSandboxSettings(); // 切進沙盒分頁時讀取目前寵物的專案設定
+}
+document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((button) => {
+  button.addEventListener('click', () => activateTab(button.dataset['tab']!));
+});
+
+/* ---------- 沙盒設定分頁(逐寵;高風險讀寫仍由 main 直改 .codex/config.toml) ---------- */
+const select = (id: string): HTMLSelectElement => el(id) as HTMLSelectElement;
+const checkbox = (id: string): HTMLInputElement => el(id) as HTMLInputElement;
+
+let sbPetId = '';
+let sbLoadToken = 0;
+
+function setSbStatus(message: string, kind: 'neutral' | 'success' | 'warning' | 'error' = 'neutral'): void {
+  const status = el('sb-status');
+  status.textContent = message;
+  status.className = `status${kind === 'neutral' ? '' : ` ${kind}`}`;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+function sbSelectedPet(): ControlPetStatus | null {
+  return snapshot.pets.find((pet) => pet.petId === sbPetId) ?? null;
+}
+
+/** 沙盒分頁的寵物下拉:依工作目錄分組;快照更新時重建並保留選取。 */
+function renderSandboxPetSelect(): void {
+  const picker = select('sb-pet');
+  const previous = sbPetId || picker.value;
+  picker.innerHTML = '';
+  const groupable = snapshot.pets.map((pet) => ({ ...pet, id: pet.petId }));
+  for (const group of groupPetsByWorkspace(groupable)) {
+    const options = document.createElement('optgroup');
+    options.label = `📁 ${group.name}`;
+    for (const pet of group.pets) {
+      options.append(new Option(`${pet.enabled ? '' : '（休息中）'}${pet.name}`, pet.petId));
+    }
+    picker.append(options);
+  }
+  sbPetId = [...picker.options].some((option) => option.value === previous)
+    ? previous
+    : (snapshot.pets[0]?.petId ?? '');
+  picker.value = sbPetId;
+}
+
+async function loadSandboxSettings(): Promise<void> {
+  const pet = sbSelectedPet();
+  const workspace = el('sb-workspace');
+  workspace.textContent = pet?.workspacePath ?? '尚未選擇工作目錄';
+  workspace.classList.toggle('empty', !pet?.workspacePath);
+  const button = el('sb-apply') as HTMLButtonElement;
+  if (!pet?.workspacePath) {
+    el('sb-config-path').textContent = '選擇工作目錄後顯示';
+    button.disabled = true;
+    setSbStatus(pet ? '這隻寵物尚未設定工作目錄' : '', pet ? 'error' : 'neutral');
+    return;
+  }
+  const token = ++sbLoadToken;
+  button.disabled = true;
+  setSbStatus('正在讀取專案設定…');
+  let result: ProjectSandboxSettingsResult;
+  try {
+    result = await withTimeout(
+      window.pet.getProjectSandboxSettings(pet.petId),
+      4_000,
+      '讀取逾時；選項仍可操作,你可以直接套用重試',
+    );
+  } catch (error) {
+    if (token !== sbLoadToken || sbPetId !== pet.petId) return;
+    button.disabled = false;
+    setSbStatus(error instanceof Error ? error.message : String(error), 'warning');
+    return;
+  }
+  if (token !== sbLoadToken || sbPetId !== pet.petId) return;
+  button.disabled = false;
+  if (!result.ok || !result.settings) {
+    setSbStatus(result.message, 'error');
+    return;
+  }
+  const settings = result.settings;
+  select('sb-approval-policy').value = settings.approvalPolicy ?? 'on-request';
+  select('sb-sandbox-mode').value = settings.sandboxMode ?? 'workspace-write';
+  checkbox('sb-network').checked = settings.networkAccess ?? true;
+  el('sb-config-path').textContent = settings.configPath;
+  updateSandboxDangerWarning();
+  setSbStatus(
+    settings.warnings?.join('；') ??
+      (settings.exists ? '已載入目前的專案設定' : '設定檔尚未建立；套用時會安全建立'),
+    settings.warnings?.length ? 'warning' : 'neutral',
+  );
+}
+
+function updateSandboxDangerWarning(): void {
+  el('sb-danger').hidden = select('sb-sandbox-mode').value !== 'danger-full-access';
+}
+
+select('sb-pet').addEventListener('change', () => {
+  sbPetId = select('sb-pet').value; // 中控的選取是分頁內局部狀態,不動全域 selectedPet
+  void loadSandboxSettings();
+});
+select('sb-sandbox-mode').addEventListener('change', updateSandboxDangerWarning);
+
+el('sb-apply').addEventListener('click', async () => {
+  const pet = sbSelectedPet();
+  if (!pet?.workspacePath) return;
+  const sandboxMode = select('sb-sandbox-mode').value as SandboxMode;
+  if (sandboxMode === 'danger-full-access' &&
+    !window.confirm('完整存取會移除一般沙盒限制。確定要套用到這個專案嗎?')) return;
+  const button = el('sb-apply') as HTMLButtonElement;
+  button.disabled = true;
+  setSbStatus('正在直接寫入專案設定…');
+  try {
+    const result = await withTimeout(window.pet.setProjectSandboxSettings(pet.petId, {
+      approvalPolicy: select('sb-approval-policy').value as ApprovalPolicy,
+      sandboxMode,
+      networkAccess: checkbox('sb-network').checked,
+    }), 8_000, '寫入逾時；請確認工作目錄所在磁碟是否可用');
+    if (sbPetId !== pet.petId) return;
+    if (!result.ok || !result.settings) {
+      setSbStatus(result.message, 'error');
+      return;
+    }
+    el('sb-config-path').textContent = result.settings.configPath;
+    setSbStatus(result.message, 'success');
+  } catch (error) {
+    if (sbPetId === pet.petId) setSbStatus(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    if (sbPetId === pet.petId) button.disabled = false;
+  }
+});
 
 /* ---------- 系統操作 ---------- */
 el('system-restart').addEventListener('click', () => window.pet.systemRestart());
