@@ -683,3 +683,5 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 6. **刻意不做**:頭像(無 invoke getter)、公用池投圖片、審批 feedback 欄、controltest 自驗頁(UI 全依賴 window.pet,瀏覽器開不了,mock 整層 preload 成本超過收益)。
 
 **驗證**:typecheck 綠;selftest 補 7 項(中控帶/缺 assignee 歸屬、池滿 20 拒收、removeUnbound 不存在回 false、petStates 審批快照、錯誤 requestId 被忽略、approvalResolved 事件、回覆後清空)全 PASS(共 52 項);`npm run build` 確認 control.html 進 bundle(vite renderer input 漏加會 dev 正常 build 白畫面的已知坑);dev 短跑無啟動錯誤。
+
+**追加(同日):v2 改版——逐寵列表與任務帳本**。使用者定案:版面改為逐寵一列(名稱/工作區/喚醒休息/狀態/逐寵指令輸入),清醒與休息分區、各按最後回報新→舊(bridge petStates 補 lastActivity;休息列輸入禁用);公用任務發佈可**限定工作區 = 指定運行路徑**(`restrictWorkspace` 進 QueuedTask,`claimUnbound(petId, workspacePath)` 跳過不合格單取最舊合格,dispatcher 補 `workspaceOf` dep;領單寵物本來就在自己 workspacePath 執行,限定即保證 cwd);新增**任務帳本**回答「誰收到/在哪執行/執行狀態」——佇列的單被領走就消失,無從追蹤,帳本(`ControlTaskRecord`,只收中控投的任務)記 queued→running→done/failed/removed 全程,公用池單在**領走那一刻**補接收者與執行位置,`runningTaskByPet` 把逐寵的 done/error 事件對回任務 id(泡泡任務不進帳本、不進這張表,天然不干擾);已終結保留 50 筆、記憶體不落盤。`enqueue` 回傳 id 供帳本鍵;中控全量重繪會清 DOM,各列輸入框草稿與焦點以 petId 暫存重繪後回填。selftest 補 5 項(enqueue id、限定工作區跳過/normalize/全池不合格)全 PASS。
