@@ -1328,11 +1328,6 @@ app.whenReady().then(async () => {
     if (removed) markLedgerRemoved(String(taskId));
     return removed;
   });
-  ipcMain.on('open-sandbox-settings', (event, petId: string) => {
-    if (!controlWin || event.sender !== controlWin.webContents) return;
-    // 只開既有獨立視窗,不內嵌——sandbox-settings-get/set 的視窗隔離是刻意的安全設計
-    openSandboxSettings(String(petId));
-  });
   ipcMain.on('system-restart', (event) => {
     if (!controlWin || event.sender !== controlWin.webContents) return;
     restartApp();

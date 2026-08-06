@@ -157,7 +157,6 @@ const api = {
     ipcRenderer.on('control-status-apply', (_event, snapshot) => callback(snapshot)),
   removeUnboundTask: (taskId: string): Promise<boolean> =>
     ipcRenderer.invoke('chat-unbound-remove', taskId),
-  openSandboxSettingsWindow: (petId: string) => ipcRenderer.send('open-sandbox-settings', petId),
   systemRestart: () => ipcRenderer.send('system-restart'),
   systemQuit: () => ipcRenderer.send('system-quit'),
 

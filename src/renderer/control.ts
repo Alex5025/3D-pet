@@ -126,7 +126,7 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   inputLine.append(input, send);
   inputCell.append(inputLine, feedback);
 
-  // 次要操作
+  // 次要操作(靠左,緊鄰喚醒/休息鈕;沙盒設定仍走 Tray,不放中控)
   const more = document.createElement('div');
   more.className = 'pet-more';
   const fresh = document.createElement('button');
@@ -139,13 +139,9 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   chooseDir.textContent = '目錄';
   chooseDir.title = '選擇工作目錄';
   chooseDir.addEventListener('click', () => void window.pet.chooseWorkspace(pet.petId));
-  const sandbox = document.createElement('button');
-  sandbox.textContent = '沙盒';
-  sandbox.title = '沙盒設定(獨立視窗)';
-  sandbox.addEventListener('click', () => window.pet.openSandboxSettingsWindow(pet.petId));
-  more.append(fresh, chooseDir, sandbox);
+  more.append(fresh, chooseDir);
 
-  row.append(nameCell, workspace, toggle, status, inputCell, more);
+  row.append(nameCell, workspace, toggle, more, status, inputCell);
 
   // 等審批:整列下方展開描述 + 允許/拒絕
   if (pet.pendingApproval) {

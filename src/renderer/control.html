@@ -28,7 +28,7 @@
 
       /* ── 寵物列 ── */
       .pet-rows { display: flex; flex-direction: column; gap: 6px; }
-      .pet-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) auto minmax(110px, 1fr) minmax(200px, 280px) auto; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid #363640; border-radius: 10px; background: #202027; }
+      .pet-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) auto auto minmax(100px, 1fr) minmax(200px, 280px); gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid #363640; border-radius: 10px; background: #202027; }
       .pet-row.resting { opacity: 0.55; }
       .pet-name-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
       .pet-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -48,7 +48,7 @@
       .pet-feedback.error { color: #ff8c96; }
       .pet-feedback.success { color: #78d6a0; }
       .pet-more { display: flex; gap: 4px; }
-      .pet-more button { min-height: 26px; padding: 0 8px; font-size: 11px; color: #b8b8c2; }
+      .pet-more button { min-height: 26px; padding: 0 8px; font-size: 11px; color: #b8b8c2; white-space: nowrap; }
       /* 審批列(等審批時出現在該寵列下方) */
       .approval-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid rgba(240, 192, 74, 0.4); border-radius: 8px; background: rgba(194, 150, 24, 0.12); }
       .approval-desc { flex: 1; margin: 0; color: #ffd38a; font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
