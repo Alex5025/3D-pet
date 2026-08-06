@@ -685,3 +685,13 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 **驗證**:typecheck 綠;selftest 補 7 項(中控帶/缺 assignee 歸屬、池滿 20 拒收、removeUnbound 不存在回 false、petStates 審批快照、錯誤 requestId 被忽略、approvalResolved 事件、回覆後清空)全 PASS(共 52 項);`npm run build` 確認 control.html 進 bundle(vite renderer input 漏加會 dev 正常 build 白畫面的已知坑);dev 短跑無啟動錯誤。
 
 **追加(同日):v2 改版——逐寵列表與任務帳本**。使用者定案:版面改為逐寵一列(名稱/工作區/喚醒休息/狀態/逐寵指令輸入),清醒與休息分區、各按最後回報新→舊(bridge petStates 補 lastActivity;休息列輸入禁用);公用任務發佈可**限定工作區 = 指定運行路徑**(`restrictWorkspace` 進 QueuedTask,`claimUnbound(petId, workspacePath)` 跳過不合格單取最舊合格,dispatcher 補 `workspaceOf` dep;領單寵物本來就在自己 workspacePath 執行,限定即保證 cwd);新增**任務帳本**回答「誰收到/在哪執行/執行狀態」——佇列的單被領走就消失,無從追蹤,帳本(`ControlTaskRecord`,只收中控投的任務)記 queued→running→done/failed/removed 全程,公用池單在**領走那一刻**補接收者與執行位置,`runningTaskByPet` 把逐寵的 done/error 事件對回任務 id(泡泡任務不進帳本、不進這張表,天然不干擾);已終結保留 50 筆、記憶體不落盤。`enqueue` 回傳 id 供帳本鍵;中控全量重繪會清 DOM,各列輸入框草稿與焦點以 petId 暫存重繪後回填。selftest 補 5 項(enqueue id、限定工作區跳過/normalize/全池不合格)全 PASS。
+
+## 44. 狀態膠囊已讀前不隨泡泡收合消失(2026-08-06)
+
+**症狀**:寵物完成/失敗任務時,泡泡外側下角的狀態膠囊(§36 的外側狀態提示)會在游標移開、泡泡 160ms 自動收合(§39 busy 不再常駐)時一起消失——使用者沒看到結果就不見了。
+
+**根因**:膠囊 DOM 是 `.pet-speech-bubble` 的子節點,收合時父層 `opacity: 0; visibility: hidden` 整棵蓋掉。狀態資料其實沒被清(endTurn 後無 reset timer),純可見性問題。
+
+**處理**:父層隱藏拿掉 `opacity: 0` 只留 `visibility: hidden`(CSS visibility 可被子元素覆寫,opacity 不行——這就是差別所在);加規則讓「已定位過(.placed)且未讀(:not(.read))」的膠囊在泡泡收合後 `visibility: visible` 突圍留在原位。已讀機制照舊(hover 500ms 標 read 淡出)。配套:(1) `showAt` 加 `reveal` 參數與 `.placed` 標記,`positionSpeechBubble` 新增 placeOnly 模式——泡泡從未打開過(如從中控派工)時,turnStart/approval/done/error 事件會把膠囊定位到寵物旁,否則會停在未定位的 0,0;done 時順便校正位置(執行期間寵物可能被拖走)。(2) `containsPoint` 在泡泡收合時改判膠囊 rect(有自己的 100ms 快取)——游標壓上殘留膠囊時視窗才會轉互動,`updateHover` 的 bubbleHit 分支順勢重新展開泡泡看內容。
+
+**教訓(自驗環境)**:bubbletest 在背景分頁跑時 `document.visibilityState === 'hidden'`,**CSS transition 不推進**,computed style 永遠停在起始值——量測 visibility 前要先把 `getAnimations()` 的 CSSTransition `finish()` 掉(infinite keyframes 如脈動點不能 finish,要過濾),否則會把轉場延遲誤判成規則沒生效。瀏覽器自驗 5 項(收合留存/已讀淡出/失敗紅膠囊/containsPoint 命中語意/執行中膠囊)全過。

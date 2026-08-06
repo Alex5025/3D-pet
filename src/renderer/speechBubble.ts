@@ -16,7 +16,8 @@ export interface SpeechBubble {
   setPetName: (name: string) => void;
   /** 顯示工作目錄最後一層名稱；完整路徑保留在 hover 提示。 */
   setWorkspacePath: (path?: string) => void;
-  showAt: (anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect) => void;
+  /** 定位並顯示;reveal=false 只定位不顯示(供收合狀態下把未讀狀態膠囊放到寵物旁)。 */
+  showAt: (anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect, reveal?: boolean) => void;
   hide: () => void;
   destroy: () => void;
   /** 對話進行中(泡泡不因移開游標而隱藏;Enter 送出被擋)。 */
@@ -212,6 +213,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   /** containsPoint 的 rect 快取(100ms):見 containsPoint 內註解。 */
   let cachedRect: DOMRect | null = null;
   let cachedRectAt = 0;
+  /** 收合後殘留狀態膠囊的 rect 快取(同 100ms 節奏)。 */
+  let cachedActivityRect: DOMRect | null = null;
+  let cachedActivityRectAt = 0;
   /** 回覆全文上限:超過就截頭保尾(切在段落邊界;截掉奇數個 ``` 圍欄要補回,防剩餘內文全被當 code block)。 */
   const MAX_REPLY_CHARS = 60_000;
   const truncateReplyRaw = (): void => {
@@ -449,7 +453,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   let lastAnchorY = 0;
   let lastAvoidRect: SpeechBubbleAvoidRect | undefined;
 
-  function showAt(anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect): void {
+  function showAt(anchorX: number, anchorY: number, avoidRect?: SpeechBubbleAvoidRect, reveal = true): void {
     lastAnchorX = anchorX;
     lastAnchorY = anchorY;
     lastAvoidRect = avoidRect;
@@ -516,9 +520,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     if (placement === 'right') element.classList.add('right-of');
     element.classList.toggle('outer-left', left + width / 2 < window.innerWidth / 2);
     element.classList.toggle('outer-right', left + width / 2 >= window.innerWidth / 2);
-    element.classList.add('visible');
-    element.setAttribute('aria-hidden', 'false');
+    element.classList.add('placed'); // 定位過:收合後未讀狀態膠囊才有正確位置可駐留
+    if (reveal) {
+      element.classList.add('visible');
+      element.setAttribute('aria-hidden', 'false');
+    }
     cachedRect = null; // 位置剛變,舊 rect 作廢
+    cachedActivityRect = null;
   }
 
   // 寬度改為隨內容伸縮（max-content + 上限）：串流回覆會讓尺寸中途變化，
@@ -541,7 +549,17 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     input,
     isVisible: () => element.classList.contains('visible'),
     containsPoint: (x, y) => {
-      if (!element.classList.contains('visible')) return false;
+      if (!element.classList.contains('visible')) {
+        // 收合後殘留的未讀狀態膠囊也要能互動(hover 重新展開、停 500ms 標已讀)
+        if (!element.classList.contains('placed') || activity.classList.contains('read')) return false;
+        const now = performance.now();
+        if (!cachedActivityRect || now - cachedActivityRectAt > 100) {
+          cachedActivityRect = activity.getBoundingClientRect();
+          cachedActivityRectAt = now;
+        }
+        return x >= cachedActivityRect.left - 6 && x <= cachedActivityRect.right + 6 &&
+          y >= cachedActivityRect.top - 6 && y <= cachedActivityRect.bottom + 6;
+      }
       // getBoundingClientRect 會強制 layout,而 containsPoint 在游標輪詢/滑動中高頻呼叫:
       // 快取 100ms(泡泡位置與尺寸在這個尺度內幾乎不變;過期或剛 showAt 時才重量)
       const now = performance.now();

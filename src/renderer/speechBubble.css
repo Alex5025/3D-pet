@@ -16,13 +16,13 @@
   border: 1px solid rgba(111, 93, 128, 0.24);
   border-radius: 18px;
   box-shadow: 0 10px 28px rgba(40, 27, 52, 0.2);
-  opacity: 0;
+  /* 隱藏只用 visibility 不用 opacity:opacity:0 會蓋掉整棵子樹,
+   * 未讀狀態膠囊(.bubble-activity)要能在收合後用 visibility:visible 突圍。 */
   visibility: hidden;
   pointer-events: none;
   transform: translateY(6px) scale(0.96);
   transform-origin: var(--tail-left) bottom;
   transition:
-    opacity 120ms ease,
     transform 120ms ease,
     visibility 0s linear 120ms;
 }
@@ -136,7 +136,6 @@
 }
 
 .pet-speech-bubble.visible {
-  opacity: 1;
   visibility: visible;
   pointer-events: auto;
   transform: translateY(0) scale(1);
@@ -261,6 +260,13 @@
   opacity: 0;
   transform: translateY(-3px);
   transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
+}
+
+/* 已讀前不隨泡泡收合消失:泡泡收起後,未讀的狀態膠囊留在原位(要定位過 .placed 才有正確位置),
+ * 游標移上去可重新展開泡泡、停 500ms 依既有機制標已讀淡出。 */
+.pet-speech-bubble.placed:not(.visible) .bubble-activity:not(.read) {
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .pet-speech-bubble .bubble-activity-dot {

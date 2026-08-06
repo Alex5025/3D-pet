@@ -117,8 +117,8 @@ function projectedPetBounds(runtime: PetRuntime): SpeechBubbleAvoidRect {
   };
 }
 
-function positionSpeechBubble(runtime: PetRuntime, show = false): void {
-  if (!runtime.baseBoxReady || (!show && !runtime.bubble.isVisible())) return;
+function positionSpeechBubble(runtime: PetRuntime, show = false, placeOnly = false): void {
+  if (!runtime.baseBoxReady || (!show && !placeOnly && !runtime.bubble.isVisible())) return;
   const { baseBox, viewer } = runtime;
   bubbleAnchor
     .set(
@@ -132,6 +132,7 @@ function positionSpeechBubble(runtime: PetRuntime, show = false): void {
     (bubbleAnchor.x * 0.5 + 0.5) * innerWidth,
     (-bubbleAnchor.y * 0.5 + 0.5) * innerHeight,
     projectedPetBounds(runtime),
+    !placeOnly, // placeOnly = 只定位不展開:收合狀態下把未讀狀態膠囊放到寵物旁
   );
 }
 
@@ -450,13 +451,19 @@ window.pet.onWardrobe((petId, states) => {
   applyWardrobe(runtime);
 });
 window.pet.onChatEvent((petId, event) => {
-  const bubble = runtimes.get(petId)?.bubble;
-  if (!bubble) return;
+  const runtime = runtimes.get(petId);
+  const bubble = runtime?.bubble;
+  if (!runtime || !bubble) return;
+  // 狀態膠囊「已讀前不隨泡泡收合消失」:泡泡收合時把膠囊定位到寵物旁(泡泡從未打開過也要有位置)
+  const placeActivity = (): void => {
+    if (!bubble.isVisible()) positionSpeechBubble(runtime, false, true);
+  };
   // AgentEvent → 泡泡方法的對映(泡泡是笨元件,不認識事件型別)
   switch (event.kind) {
     case 'turnStart': // 佇列任務開始執行(dispatcher 專發):原樂觀 beginTurn 搬到這裡
       bubble.beginTurn();
       bubble.setStatus('連線中…');
+      placeActivity();
       break;
     case 'session':
       break; // main 已回存 sessionId,renderer 不需處理
@@ -473,15 +480,18 @@ window.pet.onChatEvent((petId, event) => {
     case 'approval':
       bubble.setStatus('等待你的核准…');
       bubble.showApproval(event.requestId, event.description);
+      placeActivity();
       break;
     case 'approvalResolved':
       bubble.hideApproval(event.requestId); // 非終結事件:只收合審批 UI,不得 endTurn
       break;
     case 'done':
       bubble.endTurn(event.ok, event.ok ? undefined : '已中斷');
+      placeActivity(); // 順便把膠囊校正到寵物目前位置(執行期間寵物可能被拖走)
       break;
     case 'error':
       bubble.endTurn(false, event.message);
+      placeActivity();
       break;
   }
 });
@@ -588,6 +598,8 @@ function updateHover(x: number, y: number): void {
     // 游標在任一可見泡泡上(含審批中的幽靈泡泡)→ 恢復互動;認領回 visiblePetId 讓離開時的收合正常
     cancelBubbleHide();
     visiblePetId = bubbleHit.profile.id;
+    // 命中的是收合後殘留的未讀狀態膠囊 → 重新展開泡泡看內容(停 500ms 照舊標已讀)
+    if (!bubbleHit.bubble.isVisible()) positionSpeechBubble(bubbleHit, true);
     setInteractive(true);
   } else if (visible) {
     if (visible.bubble.isPinned()) {
