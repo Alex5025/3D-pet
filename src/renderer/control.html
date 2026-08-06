@@ -106,6 +106,8 @@
       .sandbox-status.error { color: #ff8c96; }
       .sandbox-status.warning { color: #ffd38a; }
       .risk-label { display: inline-block; margin: 0 0 10px; padding: 3px 8px; border: 1px solid #9b6b31; border-radius: 999px; color: #ffd38a; font-size: 11px; }
+      .sandbox-note { margin: 0 0 14px; color: #aaaab5; font-size: 12px; line-height: 1.55; }
+      .sandbox-note code { padding: 1px 5px; border-radius: 5px; color: #b8b8e8; background: #18181d; }
     </style>
   </head>
   <body>
@@ -146,7 +148,8 @@
 
       <div class="tab" id="tab-sandbox">
         <h2>沙盒設定（逐寵）</h2>
-        <span class="risk-label">進階・高風險設定：套用時由主程序直接寫入該寵工作目錄的 .codex/config.toml</span>
+        <span class="risk-label">進階・高風險設定</span>
+        <p class="sandbox-note">這是進階的安全設定，不屬於一般桌寵設定。套用時由桌寵主程序直接修改該寵工作目錄中的 <code>.codex/config.toml</code>，不會交給 AI 或執行任意腳本。完整存取會移除一般檔案與網路沙盒限制，只應用於你完全信任的專案。</p>
         <div class="sandbox-rows" id="sandbox-rows"></div>
       </div>
     </main>
