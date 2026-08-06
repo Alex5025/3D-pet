@@ -157,6 +157,8 @@ const api = {
     ipcRenderer.on('control-status-apply', (_event, snapshot) => callback(snapshot)),
   removeUnboundTask: (taskId: string): Promise<boolean> =>
     ipcRenderer.invoke('chat-unbound-remove', taskId),
+  /** 設定面板「工作」分頁用:開既有的獨立沙盒設定視窗。 */
+  openSandboxSettingsWindow: (petId: string) => ipcRenderer.send('open-sandbox-settings', petId),
   systemRestart: () => ipcRenderer.send('system-restart'),
   systemQuit: () => ipcRenderer.send('system-quit'),
 
