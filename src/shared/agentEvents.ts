@@ -26,5 +26,6 @@ export type AgentEvent =
   | { kind: 'tool'; name: string } // 泡泡:「正在執行 ○○」(也用於「仍在執行…」看門狗提示)
   | { kind: 'text'; text: string } // 助手回覆文字(增量或整段)
   | { kind: 'approval'; requestId: string; description: string } // v2:泡泡顯示 允許/拒絕
+  | { kind: 'approvalResolved'; requestId: string } // 審批已由任一 UI(泡泡/中控)回覆:非終結事件,renderer 只收合審批 UI,不得 endTurn
   | { kind: 'done'; ok: boolean } // 終結事件:每個 turn 恰有一個 done 或 error
   | { kind: 'error'; message: string };

@@ -474,6 +474,9 @@ window.pet.onChatEvent((petId, event) => {
       bubble.setStatus('等待你的核准…');
       bubble.showApproval(event.requestId, event.description);
       break;
+    case 'approvalResolved':
+      bubble.hideApproval(event.requestId); // 非終結事件:只收合審批 UI,不得 endTurn
+      break;
     case 'done':
       bubble.endTurn(event.ok, event.ok ? undefined : '已中斷');
       break;

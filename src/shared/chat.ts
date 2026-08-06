@@ -6,12 +6,33 @@ export interface ChatSendResult {
   reason?: string;
 }
 
+/** 佇列任務來源:泡泡投入 / 中控面板投入 / selftest。聯集只維護這一份(chatQueue 與中控標色共用)。 */
+export type ChatTaskSource = 'bubble' | 'control' | 'selftest';
+
 /** 佇列廣播給泡泡的摘要(不含圖片內容)。 */
 export interface QueuedMessageSummary {
   id: string;
   text: string;
   hasImages: boolean;
-  source: string;
+  source: ChatTaskSource;
+}
+
+/** 中控面板的每寵狀態(只有狀態燈號,不含回覆文字)。 */
+export interface ControlPetStatus {
+  petId: string;
+  name: string;
+  enabled: boolean;
+  workspacePath?: string;
+  /** resting=休息 / idle=閒置 / working=工作中 / awaitingApproval=等審批 */
+  phase: 'resting' | 'idle' | 'working' | 'awaitingApproval';
+  queue: QueuedMessageSummary[];
+  pendingApproval?: { requestId: string; description: string };
+}
+
+/** 中控面板的全量快照:開窗初始化與每次變更都推整份(量小,全量重繪比事件差分省心)。 */
+export interface ControlStatusSnapshot {
+  pets: ControlPetStatus[];
+  unbound: QueuedMessageSummary[];
 }
 
 /** 從對話泡泡貼上的圖片；只在當輪訊息中傳遞，不落盤。 */

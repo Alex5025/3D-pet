@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>中控面板</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #e7e7ec; background: #17171c; }
+      main { max-width: 980px; margin: 0 auto; padding: 20px 24px 28px; }
+      h1 { margin: 0; font-size: 21px; }
+      h2 { margin: 22px 0 10px; font-size: 14px; color: #c9c9d2; }
+      .topbar { display: flex; align-items: center; gap: 10px; }
+      .topbar .spacer { flex: 1; }
+      .card { padding: 14px 16px; border: 1px solid #363640; border-radius: 12px; background: #202027; }
+      button { min-height: 32px; padding: 0 14px; border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; font-size: 13px; cursor: pointer; }
+      button:hover { background: #383843; }
+      button:disabled { cursor: wait; opacity: 0.55; }
+      button.danger { border-color: #8a4a52; }
+      button.danger:hover { background: #55333a; }
+      textarea, select { width: 100%; border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; }
+      textarea { min-height: 64px; padding: 8px 10px; resize: vertical; }
+      select { min-height: 34px; padding: 0 9px; }
+      .assign-row { display: flex; gap: 10px; margin-top: 10px; }
+      .assign-row select { flex: 1; }
+      .assign-row button { border-color: #675bd0; background: #5147b8; }
+      .assign-row button:hover { background: #6156ca; }
+      .assign-feedback { min-height: 18px; margin-top: 8px; color: #aaaab5; font-size: 12px; user-select: text; }
+      .assign-feedback.success { color: #78d6a0; }
+      .assign-feedback.error { color: #ff8c96; }
+      .empty-note { color: #777783; font-size: 12px; }
+      .queue-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid #2c2c34; font-size: 12px; }
+      .queue-row:first-child { border-top: 0; }
+      .queue-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9c9d2; }
+      .queue-remove { min-height: 22px; padding: 0 8px; font-size: 11px; }
+      .badge { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 10px; }
+      .badge.control { color: #cfc6ff; background: rgba(109, 100, 216, 0.28); }
+      .badge.bubble { color: #a9d2ff; background: rgba(70, 130, 200, 0.28); }
+      .badge.selftest { color: #b8b8c2; background: rgba(140, 140, 150, 0.25); }
+      #pet-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+      .pet-card { padding: 12px 14px; border: 1px solid #363640; border-radius: 12px; background: #202027; }
+      .pet-head { display: flex; align-items: center; gap: 8px; }
+      .pet-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pet-workspace { margin: 3px 0 0 18px; color: #92929e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+      .dot.resting { background: #4a4a55; }
+      .dot.idle { background: #8b8b98; }
+      .dot.working { background: #58c98a; box-shadow: 0 0 6px rgba(88, 201, 138, 0.55); }
+      .dot.awaitingApproval { background: #f0c04a; box-shadow: 0 0 6px rgba(240, 192, 74, 0.55); }
+      .phase-text { flex: none; color: #aaaab5; font-size: 12px; }
+      .approval-box { margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(240, 192, 74, 0.4); border-radius: 8px; background: rgba(194, 150, 24, 0.12); }
+      .approval-desc { margin: 0 0 8px; color: #ffd38a; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
+      .approval-buttons { display: flex; gap: 8px; }
+      .approval-buttons .allow { border-color: #3f7d5a; background: #2c5c42; }
+      .approval-buttons .allow:hover { background: #367052; }
+      .approval-buttons .deny { border-color: #8a4a52; }
+      .approval-buttons .deny:hover { background: #55333a; }
+      .pet-queue { margin-top: 8px; }
+      .pet-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+      .pet-actions button { min-height: 26px; padding: 0 10px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="topbar">
+        <h1>中控面板</h1>
+        <div class="spacer"></div>
+        <button id="system-restart">重啟寵物系統</button>
+        <button id="system-quit" class="danger">結束</button>
+      </div>
+
+      <h2>指派任務</h2>
+      <div class="card">
+        <textarea id="assign-text" maxlength="1000" placeholder="輸入要指派的任務…"></textarea>
+        <div class="assign-row">
+          <select id="assign-target"></select>
+          <button id="assign-send">指派</button>
+        </div>
+        <div class="assign-feedback" id="assign-feedback" role="status"></div>
+      </div>
+
+      <h2 id="unbound-title">公用池</h2>
+      <div class="card" id="unbound-list"></div>
+
+      <h2>寵物</h2>
+      <div id="pet-cards"></div>
+    </main>
+    <script type="module" src="./control.ts"></script>
+  </body>
+</html>

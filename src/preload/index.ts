@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult, QueuedMessageSummary } from '../shared/chat';
+import type { ChatImage, ChatSendResult, ControlStatusSnapshot, QueuedMessageSummary } from '../shared/chat';
 import type {
   ProjectSandboxSettings,
   ProjectSandboxSettingsInput,
@@ -147,6 +147,19 @@ const api = {
   chatApproval: (petId: string, requestId: string, allow: boolean, feedback?: string) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow, feedback),
   newSession: (petId: string) => ipcRenderer.send('new-session', petId),
+
+  /* 中控面板專用:指派任務(assignee 缺 = 投公用池)、全量狀態快照、公用池撤單、系統操作。 */
+  controlEnqueue: (text: string, assignee?: string): Promise<ChatSendResult> =>
+    ipcRenderer.invoke('control-enqueue', text, assignee),
+  getControlStatus: (): Promise<ControlStatusSnapshot | null> =>
+    ipcRenderer.invoke('control-status-get'),
+  onControlStatus: (callback: (snapshot: ControlStatusSnapshot) => void) =>
+    ipcRenderer.on('control-status-apply', (_event, snapshot) => callback(snapshot)),
+  removeUnboundTask: (taskId: string): Promise<boolean> =>
+    ipcRenderer.invoke('chat-unbound-remove', taskId),
+  openSandboxSettingsWindow: (petId: string) => ipcRenderer.send('open-sandbox-settings', petId),
+  systemRestart: () => ipcRenderer.send('system-restart'),
+  systemQuit: () => ipcRenderer.send('system-quit'),
 
   /* 參考檔案(拖放到寵物身上;當次對話有效,不落盤)。
    * Electron 33 已移除 File.path,取絕對路徑必須經 preload 的 webUtils。 */

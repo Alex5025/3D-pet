@@ -364,10 +364,21 @@ export async function runAgentSelftest(): Promise<boolean> {
   }
   const approvalEvent = events.find((e): e is Extract<AgentEvent, { kind: 'approval' }> => e.kind === 'approval');
   check('收到 approval 事件(含描述)', !!approvalEvent && approvalEvent.description.includes('touch'));
+  // 中控面板依賴的快照與 guard:petStates 拿得到掛著的審批;錯誤 requestId 被忽略(雙 UI race)
+  const pendingSnap = bridge.petStates().find((s) => s.petId === 'p1');
+  check('petStates:審批中 running 且 pendingApproval 相符',
+    pendingSnap?.running === true && pendingSnap?.pendingApproval?.requestId === approvalEvent?.requestId &&
+    !!pendingSnap?.pendingApproval?.description.includes('touch'));
+  bridge.respondApproval('p1', 'wrong-request-id', true);
+  check('審批 guard:錯誤 requestId 被忽略', !mockClaude.log.some((l) => l.endsWith(':true')) &&
+    bridge.petStates().find((s) => s.petId === 'p1')?.pendingApproval !== null);
   bridge.respondApproval('p1', approvalEvent?.requestId ?? '', true);
   await waitTerminal(1, 3000);
   check('允許後 turn 完成', events.some((e) => e.kind === 'done' && e.ok));
   check('mock 收到允許決定', mockClaude.log.some((l) => l.endsWith(':true')));
+  check('審批回覆後事件流有 approvalResolved', events.some((e) => e.kind === 'approvalResolved'));
+  check('petStates:回覆後 pendingApproval 清空',
+    bridge.petStates().find((s) => s.petId === 'p1')?.pendingApproval === null);
   check('sessionId 回存不洗掉 model/permission', profile.agent?.model === 'mock-model' && profile.agent?.permission === 'ask');
 
   events.length = 0;
@@ -427,6 +438,18 @@ export async function runAgentSelftest(): Promise<boolean> {
     const claimed = queue.claimUnbound('q9');
     check('歸屬:claim 取最舊且寫入 assignee', claimed?.text === '公用一' && claimed?.assignee === 'q9' && queue.unboundSummaries().length === 1);
     check('歸屬:removeUnbound', queue.removeUnbound(queue.unboundSummaries()[0]!.id) && !queue.hasUnbound());
+    check('歸屬:removeUnbound 不存在的 id 回 false', !queue.removeUnbound('no-such-id'));
+
+    // 中控來源:帶 assignee 綁定、缺 assignee 進公用池;公用池上限 20
+    const controlBound = queue.enqueue({ assignee: 'q1', text: '中控綁定單', images: [], source: 'control' });
+    check('中控:帶 assignee 進綁定佇列', controlBound.ok && queue.size('q1') === 1 && !queue.hasUnbound());
+    const controlPool = queue.enqueue({ text: '中控公用單', images: [], source: 'control' });
+    check('中控:缺 assignee 進公用池', controlPool.ok && queue.unboundSummaries()[0]?.source === 'control');
+    queue.clear('q1');
+    queue.removeUnbound(queue.unboundSummaries()[0]!.id);
+    for (let i = 0; i < 20; i++) queue.enqueue({ text: `pool-${i}`, images: [], source: 'control' });
+    const poolFull = queue.enqueue({ text: '第21單', images: [], source: 'control' });
+    check('中控:公用池滿 20 拒收且給 reason', !poolFull.ok && !!poolFull.reason);
   }
 
   // 7. 佇列 + dispatcher + mock bridge 全鏈:排 3 則依序執行、中途移除、cancel 後續行

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult } from '../shared/chat';
+import type { ChatImage, ChatSendResult, ControlStatusSnapshot, ControlPetStatus } from '../shared/chat';
 import { createChatDispatcher, createChatQueue } from './chatQueue';
 import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
 import { groupPetsByWorkspace } from '../shared/petGroups';
@@ -84,6 +84,7 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settingsWin: BrowserWindow | null = null;
 let sandboxSettingsWin: BrowserWindow | null = null;
+let controlWin: BrowserWindow | null = null;
 let overlayInteractive = false;
 let overlayInputMode = false;
 let registry: AppRegistry;
@@ -101,6 +102,8 @@ let refreshCursorPollHook: (() => void) | null = null;
 let clearChatQueueHook: ((petId: string) => void) | null = null;
 /** 全域派發(whenReady 注入):寵物喚醒時呼叫——醒來的寵物可領公用池的單。 */
 let dispatchAllHook: (() => void) | null = null;
+/** 中控面板快照重推(whenReady 注入,50ms debounce):寵物/佇列/agent 狀態變更時呼叫。 */
+let scheduleControlStatusHook: (() => void) | null = null;
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -331,6 +334,8 @@ function sendPetProfiles(): void {
   win?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   settingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   sandboxSettingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
+  controlWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
+  scheduleControlStatusHook?.(); // 名稱/啟用/工作目錄變更都經過這裡,中控快照跟著重推
   refreshTray();
 }
 
@@ -620,6 +625,7 @@ function petMenu(requestedId?: string): Menu {
         { label: '動作…', click: () => openSettings('motion', petId) }
       ]
     },
+    { label: '中控面板…', click: () => openControlPanel() },
     { label: '沙盒設定…', click: () => openSandboxSettings(petId) },
     { label: '重置位置與大小', click: () => resetState(petId) },
     {
@@ -707,6 +713,32 @@ function openSandboxSettings(petId?: string): void {
   app.focus({ steal: true });
 }
 
+/** 中控面板:多寵狀態總覽、指派任務(綁定/公用池)、佇列撤單、審批代答、系統操作。 */
+function openControlPanel(): void {
+  if (controlWin && !controlWin.isDestroyed()) {
+    controlWin.show();
+    controlWin.focus();
+    return;
+  }
+  controlWin = new BrowserWindow({
+    width: 760,
+    height: 620,
+    minWidth: 560,
+    minHeight: 420,
+    title: '中控面板', // 常駐工作視窗:可縮放、不置頂(疊層在 screen-saver 層且點擊穿透,不衝突)
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  controlWin.on('closed', () => (controlWin = null));
+  const dev = process.env['ELECTRON_RENDERER_URL'];
+  if (dev) controlWin.loadURL(`${dev}/control.html`);
+  else controlWin.loadFile(join(__dirname, '../renderer/control.html'));
+  app.focus({ steal: true });
+}
+
 function createOverlay(): BrowserWindow {
   const display = screen.getPrimaryDisplay();
   const overlay = new BrowserWindow({
@@ -788,12 +820,14 @@ app.whenReady().then(async () => {
   }
   function sendChatEvent(petId: string, event: AgentEvent): void {
     if (event.kind === 'text') {
+      // text 增量一律不推中控:中控只顯示狀態燈號,33ms 合併節奏的高頻 IPC 不打第二個視窗
       chatTextBuffers.set(petId, (chatTextBuffers.get(petId) ?? '') + event.text);
       chatFlushTimer ??= setTimeout(flushChatText, 33);
       return;
     }
     flushChatText();
     win?.webContents.send('chat-event-apply', petId, event);
+    scheduleControlStatusHook?.(); // 非 text 事件(turnStart/approval/done…)= 狀態燈號可能變了
   }
 
   // 寵物工具中樞(v3):agent 經 MCP 呼叫 → socket 回連這裡 → 操縱桌寵
@@ -825,8 +859,8 @@ app.whenReady().then(async () => {
    * turn 進行中送出的訊息排隊、turn 完自動接續;佇列變更即廣播給泡泡。
    * 將來中控面板 = 另一條帶 sender 驗證的 enqueue(source:'control')IPC + 訂閱同一個廣播。 */
   const chatQueue = createChatQueue((petId) => {
-    // petId = undefined 表公用池變更:目前無 UI 訂閱(中控面板之後接),先不廣播
     if (petId) win?.webContents.send('chat-queue-apply', petId, chatQueue.summaries(petId));
+    scheduleControlStatusHook?.(); // 綁定佇列與公用池(petId=undefined)變更都重推中控快照
   });
   const chatDispatcher = createChatDispatcher({
     queue: chatQueue,
@@ -858,6 +892,36 @@ app.whenReady().then(async () => {
     // turn 結束(含早退)→ 派發佇列;用 dispatchAll:全域上限釋放的名額可能輪到別隻寵物
     onTurnFinished: () => chatDispatcher.dispatchAll()
   });
+
+  /* ── 中控面板快照:全量組裝、50ms trailing debounce 推播 ──
+   * 中控吃整份快照而非逐寵事件差分——量小(寵物十數隻、佇列 ≤10/寵),全量重繪省心且天然避開漏接。 */
+  function buildControlStatus(): ControlStatusSnapshot {
+    const agentStates = new Map((bridge?.petStates() ?? []).map((s) => [s.petId, s]));
+    const petsStatus: ControlPetStatus[] = [...pets.values()].map((profile) => {
+      const agent = agentStates.get(profile.id);
+      const phase: ControlPetStatus['phase'] = profile.enabled === false
+        ? 'resting'
+        : agent?.pendingApproval ? 'awaitingApproval' : agent?.running ? 'working' : 'idle';
+      return {
+        petId: profile.id,
+        name: profile.name,
+        enabled: profile.enabled !== false,
+        ...(profile.workspacePath ? { workspacePath: profile.workspacePath } : {}),
+        phase,
+        queue: chatQueue.summaries(profile.id),
+        ...(agent?.pendingApproval ? { pendingApproval: agent.pendingApproval } : {})
+      };
+    });
+    return { pets: petsStatus, unbound: chatQueue.unboundSummaries() };
+  }
+  let controlStatusTimer: NodeJS.Timeout | null = null;
+  scheduleControlStatusHook = () => {
+    if (!controlWin || controlStatusTimer) return;
+    controlStatusTimer = setTimeout(() => {
+      controlStatusTimer = null;
+      controlWin?.webContents.send('control-status-apply', buildControlStatus());
+    }, 50);
+  };
   await refreshMotions();
   for (const id of pets.keys()) scheduleIdleMotion(id); // 開機排程各寵的待機動作
   try {
@@ -977,7 +1041,8 @@ app.whenReady().then(async () => {
   /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
    *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
   ipcMain.on('new-session', (event, id: string) => {
-    const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents;
+    const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents
+      || event.sender === controlWin?.webContents;
     if (!fromOurWindow) return;
     petRefFiles.delete(id); // 參考檔是「當次對話」的:開新對話一併清空
     sendRefFiles(id);
@@ -993,7 +1058,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('choose-workspace', (event, id: string) => {
     const parent = event.sender === settingsWin?.webContents
       ? settingsWin
-      : event.sender === sandboxSettingsWin?.webContents ? sandboxSettingsWin : undefined;
+      : event.sender === sandboxSettingsWin?.webContents
+        ? sandboxSettingsWin
+        : event.sender === controlWin?.webContents ? controlWin : undefined;
     return chooseWorkspace(id, parent ?? undefined);
   });
 
@@ -1110,7 +1177,8 @@ app.whenReady().then(async () => {
     return { queued: true, position: result.position };
   });
   ipcMain.on('chat-queue-remove', (event, petId: string, taskId: string) => {
-    if (!win || event.sender !== win.webContents) return;
+    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
+    if (!fromOurWindow) return; // 綁定佇列撤單:泡泡與中控共用
     chatQueue.remove(String(petId), String(taskId));
   });
   ipcMain.handle('chat-queue-get', (event, petId: string) => {
@@ -1122,7 +1190,9 @@ app.whenReady().then(async () => {
     bridge?.chatCancel(petId);
   });
   ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean, feedback?: string) => {
-    if (!win || event.sender !== win.webContents) return;
+    // 泡泡與中控都可回覆;requestId 與掛著審批的相符性由 bridge 把關(雙 UI race 在源頭擋)
+    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
+    if (!fromOurWindow) return;
     bridge?.respondApproval(
       petId,
       String(requestId),
@@ -1133,6 +1203,56 @@ app.whenReady().then(async () => {
   ipcMain.on('open-external', (event, url: string) => {
     if (!win || event.sender !== win.webContents) return;
     if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url);
+  });
+
+  /* ── 中控面板專用 IPC(sender 一律限 controlWin)──
+   * 指派任務走自己的 enqueue 通道(chat-send 保持泡泡專用);一切失敗回饋走 invoke 回傳,
+   * 絕不發 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn(§10 鐵律)。 */
+  ipcMain.handle('control-enqueue', (event, text: string, assignee?: string): ChatSendResult => {
+    if (!controlWin || event.sender !== controlWin.webContents) {
+      return { queued: false, position: -1, reason: '無效的請求' };
+    }
+    const trimmed = String(text).slice(0, 1000).trim();
+    if (!trimmed) return { queued: false, position: -1, reason: '訊息是空的' };
+    let target: string | undefined;
+    if (assignee !== undefined && assignee !== '') {
+      const profile = pets.get(String(assignee));
+      if (!profile) return { queued: false, position: -1, reason: '找不到該寵物' };
+      if (profile.enabled === false) {
+        // 投給休息中寵物的綁定單會躺死或在喚醒前被 clear,直接拒收
+        return { queued: false, position: -1, reason: '該寵物休息中,請先喚醒或投入公用池' };
+      }
+      target = profile.id;
+    }
+    const result = chatQueue.enqueue({ assignee: target, text: trimmed, images: [], source: 'control' });
+    if (!result.ok) return { queued: false, position: -1, reason: result.reason };
+    // enqueue 不自動派發:綁定單派給指定寵;公用池單讓任一合格閒置寵立刻領走
+    if (target) chatDispatcher.dispatch(target);
+    else chatDispatcher.dispatchAll();
+    return { queued: true, position: result.position };
+  });
+  ipcMain.handle('control-status-get', (event) => {
+    if (!controlWin || event.sender !== controlWin.webContents) return null;
+    return buildControlStatus(); // 開窗初始化:晚開視窗只靠事件流會漏掉進行中的 turn
+  });
+  ipcMain.handle('chat-unbound-remove', (event, taskId: string): boolean => {
+    if (!controlWin || event.sender !== controlWin.webContents) return false;
+    return chatQueue.removeUnbound(String(taskId)); // 內部 onChanged(undefined) 會自動重推快照
+  });
+  ipcMain.on('open-sandbox-settings', (event, petId: string) => {
+    if (!controlWin || event.sender !== controlWin.webContents) return;
+    // 只開既有獨立視窗,不內嵌——sandbox-settings-get/set 的視窗隔離是刻意的安全設計
+    openSandboxSettings(String(petId));
+  });
+  ipcMain.on('system-restart', (event) => {
+    if (!controlWin || event.sender !== controlWin.webContents) return;
+    restartApp();
+  });
+  ipcMain.on('system-quit', (event) => {
+    if (!controlWin || event.sender !== controlWin.webContents) return;
+    // app.exit 不觸發 before-quit,清理要自己做(同 Tray 結束;已知坑,見 DEVLOG §22)
+    shutdownSync();
+    app.exit(0);
   });
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);

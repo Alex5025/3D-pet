@@ -41,6 +41,8 @@ export interface SpeechBubble {
   endTurn: (ok: boolean, errorMessage?: string) => void;
   /** 顯示審批請求(描述 + 允許/拒絕);使用者按鈕後觸發 onApproval 並收合。 */
   showApproval: (requestId: string, description: string) => void;
+  /** 審批已由別的 UI(中控面板)回覆:只收合審批區,不動 busy;requestId 不符或已收合則無事。 */
+  hideApproval: (requestId: string) => void;
   /** 顯示目前的模型/力度徽章(如「Codex · gpt-5.6-sol · low」);null 隱藏。 */
   setAgentInfo: (text: string | null) => void;
   /** 參考檔案清單(拖放到寵物身上的絕對路徑;泡泡最下方);空陣列隱藏區塊。 */
@@ -645,6 +647,15 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       approvalFeedback.value = '';
       approvalBox.classList.add('open');
       setActivity('approval', '等待核准');
+    },
+    hideApproval: (requestId) => {
+      // 自己按鈕回覆時 approvalRequestId 已清空(answerApproval),這裡只處理「中控代答」的收合
+      if (approvalRequestId !== requestId) return;
+      approvalRequestId = null;
+      approvalFeedback.blur(); // 同 answerApproval:收合前必須 blur,否則透明層卡在輸入模式
+      approvalBox.classList.remove('open');
+      approvalFeedback.value = '';
+      setActivity('working', '已在中控面板處理,執行中');
     },
     appendText: (chunk) => {
       reply.classList.add('open');

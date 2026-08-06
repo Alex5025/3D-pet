@@ -27,8 +27,10 @@ export interface AgentBridge {
   /** 這隻寵物現在能不能開新 turn(未在跑 && 全域上限內)——dispatcher 派發前的閘門。 */
   canAccept(petId: string): boolean;
   chatCancel(petId: string): void;
-  /** 泡泡審批按鈕的回覆(requestId 來自 approval 事件)。 */
+  /** 泡泡/中控審批按鈕的回覆(requestId 來自 approval 事件;不符目前掛著的審批則忽略——防雙 UI race)。 */
   respondApproval(petId: string, requestId: string, allow: boolean, feedback?: string): void;
+  /** 每寵執行狀態快照(中控面板開窗初始化用;晚開視窗只靠事件流會漏掉進行中 turn)。 */
+  petStates(): PetAgentSnapshot[];
   /** 設定面板下拉用;provider 不支援或失敗回空清單。 */
   listModels(kind: AgentKind): Promise<AgentModelInfo[]>;
   /** 寵物休眠/刪除/換 agent 種類時關閉 session。 */
@@ -48,8 +50,18 @@ interface PetAgentState {
   running: boolean;
   /** 有審批請求掛著等使用者點頭:看門狗暫停計時(等人不是卡死)。 */
   awaitingApproval: boolean;
+  /** 掛著的審批內容(中控面板晚開窗要能拿到 description;回覆或 turn 終結時清空)。 */
+  pendingApproval: { requestId: string; description: string } | null;
   /** 最後一次事件時間(看門狗依據;回覆審批時重置)。 */
   lastActivity: number;
+}
+
+/** petStates() 回傳的每寵快照(淺拷貝,states Map 不外洩)。 */
+export interface PetAgentSnapshot {
+  petId: string;
+  running: boolean;
+  awaitingApproval: boolean;
+  pendingApproval: { requestId: string; description: string } | null;
 }
 
 /** 未設定 agent 的寵物預設走 codex(與舊 codexSessionId 欄位的血緣一致;設定面板可改)。 */
@@ -63,7 +75,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
   function stateFor(petId: string, kind: AgentKind): PetAgentState {
     let state = states.get(petId);
     if (!state || state.kind !== kind) {
-      state = { kind, sessionId: null, running: false, awaitingApproval: false, lastActivity: Date.now() };
+      state = { kind, sessionId: null, running: false, awaitingApproval: false, pendingApproval: null, lastActivity: Date.now() };
       states.set(petId, state);
     }
     return state;
@@ -145,7 +157,10 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
         state.lastActivity = Date.now();
         noticed = false;
-        if (event.kind === 'approval') state.awaitingApproval = true;
+        if (event.kind === 'approval') {
+          state.awaitingApproval = true;
+          state.pendingApproval = { requestId: event.requestId, description: event.description };
+        }
         if (event.kind === 'session') {
           state.sessionId = event.sessionId;
           if (profile.agent?.kind !== kind || profile.agent?.sessionId !== event.sessionId) {
@@ -164,6 +179,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       clearInterval(watchdog);
       state.running = false;
       state.awaitingApproval = false;
+      state.pendingApproval = null; // turn 終結 = 審批必然已了結或作廢
     }
   }
 
@@ -180,6 +196,14 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       // 審批等待期間 running 維持 true → 自動不派發,佇列自然等待
       return !states.get(petId)?.running && runningCount() < MAX_CONCURRENT_TURNS;
     },
+    petStates() {
+      return [...states.entries()].map(([petId, state]) => ({
+        petId,
+        running: state.running,
+        awaitingApproval: state.awaitingApproval,
+        pendingApproval: state.pendingApproval ? { ...state.pendingApproval } : null
+      }));
+    },
     chatCancel(petId) {
       const state = states.get(petId);
       if (!state?.running || !state.sessionId) return;
@@ -188,8 +212,13 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
     respondApproval(petId, requestId, allow, feedback) {
       const state = states.get(petId);
       if (!state?.sessionId) return;
+      // requestId 必須與掛著的審批相符——泡泡與中控雙 UI 並存,一邊回覆後另一邊按下過期按鈕要忽略
+      // (過期 id 打到 provider 會走 catch → error 事件 + cancel,誤殺進行中 turn)
+      if (state.pendingApproval?.requestId !== requestId) return;
+      state.pendingApproval = null;
       state.awaitingApproval = false;
       state.lastActivity = Date.now();
+      deps.send(petId, { kind: 'approvalResolved', requestId }); // 讓兩邊 UI 同步收合
       void deps.providers[state.kind].respondApproval(state.sessionId, requestId, allow, feedback).catch(async (error) => {
         console.log('[agent] respondApproval 失敗:', error);
         deps.send(petId, { kind: 'error', message: `回覆操作選擇失敗：${String(error)}` });

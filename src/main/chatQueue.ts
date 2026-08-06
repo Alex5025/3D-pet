@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatImage } from '../shared/chat';
+import type { ChatImage, ChatTaskSource } from '../shared/chat';
 
 /**
  * 對話佇列 + 派發器:turn 進行中送出的訊息排隊,turn 結束自動取下一則。
@@ -17,7 +17,7 @@ export interface QueuedTask {
   assignee?: string;
   text: string;
   images: ChatImage[];
-  source: 'bubble' | 'control' | 'selftest';
+  source: ChatTaskSource;
   enqueuedAt: number;
 }
 
