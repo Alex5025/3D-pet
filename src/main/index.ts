@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult, ControlStatusSnapshot, ControlPetStatus } from '../shared/chat';
+import type { ChatImage, ChatSendResult, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
 import { createChatDispatcher, createChatQueue } from './chatQueue';
 import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
-import { groupPetsByWorkspace } from '../shared/petGroups';
+import { groupPetsByWorkspace, normalizeWorkspacePath } from '../shared/petGroups';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
 import { createDragMonitor, type DragMonitor } from './dragMonitor';
@@ -818,6 +818,36 @@ app.whenReady().then(async () => {
     }
     chatTextBuffers.clear();
   }
+  /* ── 中控任務帳本:只追蹤中控投的任務(泡泡對話不進帳本);記憶體保留、不落盤,重啟即清空。
+   * 佇列的單被領走就消失,「誰收到/在哪執行/執行狀態」的全生命週期靠這份紀錄。 ── */
+  const taskLedger = new Map<string, ControlTaskRecord>();
+  /** petId → 進行中的帳本任務 id(done/error 事件對回任務用;泡泡任務不在帳本,不會進這張表)。 */
+  const runningTaskByPet = new Map<string, string>();
+  const LEDGER_FINISHED_CAP = 50;
+  const ledgerSummary = (text: string): string => (text.length > 80 ? `${text.slice(0, 80)}…` : text);
+  function finishLedgerTask(petId: string, ok: boolean): void {
+    const taskId = runningTaskByPet.get(petId);
+    if (!taskId) return;
+    runningTaskByPet.delete(petId);
+    const record = taskLedger.get(taskId);
+    if (!record) return;
+    record.status = ok ? 'done' : 'failed';
+    record.finishedAt = Date.now();
+    // 已終結(含已移除)超過上限 → 砍最舊,帳本不無限長大
+    const finished = [...taskLedger.values()].filter((r) => r.finishedAt !== undefined);
+    if (finished.length > LEDGER_FINISHED_CAP) {
+      finished.sort((a, b) => a.finishedAt! - b.finishedAt!);
+      for (const old of finished.slice(0, finished.length - LEDGER_FINISHED_CAP)) taskLedger.delete(old.id);
+    }
+  }
+  function markLedgerRemoved(taskId: string): void {
+    const record = taskLedger.get(taskId);
+    if (record?.status === 'queued') {
+      record.status = 'removed';
+      record.finishedAt = Date.now();
+    }
+  }
+
   function sendChatEvent(petId: string, event: AgentEvent): void {
     if (event.kind === 'text') {
       // text 增量一律不推中控:中控只顯示狀態燈號,33ms 合併節奏的高頻 IPC 不打第二個視窗
@@ -825,6 +855,8 @@ app.whenReady().then(async () => {
       chatFlushTimer ??= setTimeout(flushChatText, 33);
       return;
     }
+    if (event.kind === 'done') finishLedgerTask(petId, event.ok);
+    else if (event.kind === 'error') finishLedgerTask(petId, false);
     flushChatText();
     win?.webContents.send('chat-event-apply', petId, event);
     scheduleControlStatusHook?.(); // 非 text 事件(turnStart/approval/done…)= 狀態燈號可能變了
@@ -869,7 +901,18 @@ app.whenReady().then(async () => {
     unboundCandidates: () => [...pets.values()]
       .filter((profile) => profile.enabled !== false && !!profile.workspacePath)
       .map((profile) => profile.id),
+    workspaceOf: (petId) => pets.get(petId)?.workspacePath,
     runTask: (petId, task) => {
+      // 中控投的任務進帳本:標執行中、補接收者與實際執行位置(公用池單在領走的這一刻才確定)
+      const record = taskLedger.get(task.id);
+      if (record) {
+        const profile = pets.get(petId);
+        record.status = 'running';
+        record.assignee = petId;
+        if (profile?.name) record.assigneeName = profile.name;
+        if (profile?.workspacePath) record.workspacePath = profile.workspacePath;
+        runningTaskByPet.set(petId, task.id);
+      }
       // turnStart 讓泡泡知道「這一則開始跑了」(beginTurn);非 text 事件,合併器會先 flush 保序
       sendChatEvent(petId, { kind: 'turnStart', text: task.text });
       bridge?.chatSend(petId, task.text, task.images);
@@ -908,11 +951,19 @@ app.whenReady().then(async () => {
         enabled: profile.enabled !== false,
         ...(profile.workspacePath ? { workspacePath: profile.workspacePath } : {}),
         phase,
+        lastActivity: agent?.lastActivity ?? 0, // 從未對話 = 0(renderer 排最後)
         queue: chatQueue.summaries(profile.id),
         ...(agent?.pendingApproval ? { pendingApproval: agent.pendingApproval } : {})
       };
     });
-    return { pets: petsStatus, unbound: chatQueue.unboundSummaries() };
+    // 帳本:未終結在前,各自新→舊;排序歸 main(帳本是 main 的資料),清醒/休息分組歸 renderer(顯示邏輯)
+    const tasks = [...taskLedger.values()].sort((a, b) => {
+      const aFinished = a.finishedAt !== undefined ? 1 : 0;
+      const bFinished = b.finishedAt !== undefined ? 1 : 0;
+      if (aFinished !== bFinished) return aFinished - bFinished;
+      return b.enqueuedAt - a.enqueuedAt;
+    });
+    return { pets: petsStatus, tasks };
   }
   let controlStatusTimer: NodeJS.Timeout | null = null;
   scheduleControlStatusHook = () => {
@@ -1179,7 +1230,7 @@ app.whenReady().then(async () => {
   ipcMain.on('chat-queue-remove', (event, petId: string, taskId: string) => {
     const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
     if (!fromOurWindow) return; // 綁定佇列撤單:泡泡與中控共用
-    chatQueue.remove(String(petId), String(taskId));
+    if (chatQueue.remove(String(petId), String(taskId))) markLedgerRemoved(String(taskId));
   });
   ipcMain.handle('chat-queue-get', (event, petId: string) => {
     if (!win || event.sender !== win.webContents) return [];
@@ -1208,7 +1259,7 @@ app.whenReady().then(async () => {
   /* ── 中控面板專用 IPC(sender 一律限 controlWin)──
    * 指派任務走自己的 enqueue 通道(chat-send 保持泡泡專用);一切失敗回饋走 invoke 回傳,
    * 絕不發 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn(§10 鐵律)。 */
-  ipcMain.handle('control-enqueue', (event, text: string, assignee?: string): ChatSendResult => {
+  ipcMain.handle('control-enqueue', (event, text: string, assignee?: string, restrictWorkspace?: string): ChatSendResult => {
     if (!controlWin || event.sender !== controlWin.webContents) {
       return { queued: false, position: -1, reason: '無效的請求' };
     }
@@ -1224,11 +1275,47 @@ app.whenReady().then(async () => {
       }
       target = profile.id;
     }
-    const result = chatQueue.enqueue({ assignee: target, text: trimmed, images: [], source: 'control' });
-    if (!result.ok) return { queued: false, position: -1, reason: result.reason };
+    // 公用池單可限定工作區(= 發佈者指定運行路徑);必須是某寵物實際的工作區,亂傳拒收
+    let restrict: string | undefined;
+    if (!target && typeof restrictWorkspace === 'string' && restrictWorkspace) {
+      const normalized = normalizeWorkspacePath(restrictWorkspace);
+      const known = new Set(
+        [...pets.values()].map((p) => normalizeWorkspacePath(p.workspacePath)).filter((p): p is string => !!p)
+      );
+      if (!normalized || !known.has(normalized)) {
+        return { queued: false, position: -1, reason: '限定的工作區不存在' };
+      }
+      restrict = normalized;
+    }
+    const result = chatQueue.enqueue({
+      assignee: target,
+      ...(restrict ? { restrictWorkspace: restrict } : {}),
+      text: trimmed,
+      images: [],
+      source: 'control'
+    });
+    if (!result.ok || !result.id) return { queued: false, position: -1, reason: result.reason };
+    // 中控投的任務進帳本(status queued;綁定單即知接收者,公用池單記限定工作區)
+    const record: ControlTaskRecord = {
+      id: result.id,
+      text: ledgerSummary(trimmed),
+      source: 'control',
+      status: 'queued',
+      enqueuedAt: Date.now()
+    };
+    if (target) {
+      record.assignee = target;
+      const profile = pets.get(target);
+      if (profile?.name) record.assigneeName = profile.name;
+      if (profile?.workspacePath) record.workspacePath = profile.workspacePath;
+    } else if (restrict) {
+      record.workspacePath = restrict;
+    }
+    taskLedger.set(record.id, record);
     // enqueue 不自動派發:綁定單派給指定寵;公用池單讓任一合格閒置寵立刻領走
     if (target) chatDispatcher.dispatch(target);
     else chatDispatcher.dispatchAll();
+    scheduleControlStatusHook?.();
     return { queued: true, position: result.position };
   });
   ipcMain.handle('control-status-get', (event) => {
@@ -1237,7 +1324,9 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('chat-unbound-remove', (event, taskId: string): boolean => {
     if (!controlWin || event.sender !== controlWin.webContents) return false;
-    return chatQueue.removeUnbound(String(taskId)); // 內部 onChanged(undefined) 會自動重推快照
+    const removed = chatQueue.removeUnbound(String(taskId)); // 內部 onChanged(undefined) 會自動重推快照
+    if (removed) markLedgerRemoved(String(taskId));
+    return removed;
   });
   ipcMain.on('open-sandbox-settings', (event, petId: string) => {
     if (!controlWin || event.sender !== controlWin.webContents) return;

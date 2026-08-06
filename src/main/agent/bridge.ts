@@ -62,6 +62,8 @@ export interface PetAgentSnapshot {
   running: boolean;
   awaitingApproval: boolean;
   pendingApproval: { requestId: string; description: string } | null;
+  /** 最後回報時間(最後一次 agent 事件;中控依此排序)。 */
+  lastActivity: number;
 }
 
 /** 未設定 agent 的寵物預設走 codex(與舊 codexSessionId 欄位的血緣一致;設定面板可改)。 */
@@ -201,7 +203,8 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         petId,
         running: state.running,
         awaitingApproval: state.awaitingApproval,
-        pendingApproval: state.pendingApproval ? { ...state.pendingApproval } : null
+        pendingApproval: state.pendingApproval ? { ...state.pendingApproval } : null,
+        lastActivity: state.lastActivity
       }));
     },
     chatCancel(petId) {

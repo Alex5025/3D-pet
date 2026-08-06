@@ -7,58 +7,82 @@
     <style>
       :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       * { box-sizing: border-box; }
-      body { margin: 0; color: #e7e7ec; background: #17171c; }
-      main { max-width: 980px; margin: 0 auto; padding: 20px 24px 28px; }
+      body { margin: 0; color: #e7e7ec; background: #17171c; overflow-x: auto; }
+      main { min-width: 680px; max-width: 1100px; margin: 0 auto; padding: 20px 24px 28px; }
       h1 { margin: 0; font-size: 21px; }
-      h2 { margin: 22px 0 10px; font-size: 14px; color: #c9c9d2; }
+      h2 { margin: 22px 0 8px; font-size: 14px; color: #c9c9d2; }
+      h2 .count { color: #777783; font-weight: normal; }
       .topbar { display: flex; align-items: center; gap: 10px; }
       .topbar .spacer { flex: 1; }
-      .card { padding: 14px 16px; border: 1px solid #363640; border-radius: 12px; background: #202027; }
-      button { min-height: 32px; padding: 0 14px; border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; font-size: 13px; cursor: pointer; }
+      button { min-height: 30px; padding: 0 12px; border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; font-size: 13px; cursor: pointer; }
       button:hover { background: #383843; }
-      button:disabled { cursor: wait; opacity: 0.55; }
+      button:disabled { cursor: not-allowed; opacity: 0.5; }
       button.danger { border-color: #8a4a52; }
       button.danger:hover { background: #55333a; }
-      textarea, select { width: 100%; border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; }
-      textarea { min-height: 64px; padding: 8px 10px; resize: vertical; }
-      select { min-height: 34px; padding: 0 9px; }
-      .assign-row { display: flex; gap: 10px; margin-top: 10px; }
-      .assign-row select { flex: 1; }
-      .assign-row button { border-color: #675bd0; background: #5147b8; }
-      .assign-row button:hover { background: #6156ca; }
-      .assign-feedback { min-height: 18px; margin-top: 8px; color: #aaaab5; font-size: 12px; user-select: text; }
-      .assign-feedback.success { color: #78d6a0; }
-      .assign-feedback.error { color: #ff8c96; }
-      .empty-note { color: #777783; font-size: 12px; }
-      .queue-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid #2c2c34; font-size: 12px; }
-      .queue-row:first-child { border-top: 0; }
-      .queue-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9c9d2; }
-      .queue-remove { min-height: 22px; padding: 0 8px; font-size: 11px; }
-      .badge { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 10px; }
-      .badge.control { color: #cfc6ff; background: rgba(109, 100, 216, 0.28); }
-      .badge.bubble { color: #a9d2ff; background: rgba(70, 130, 200, 0.28); }
-      .badge.selftest { color: #b8b8c2; background: rgba(140, 140, 150, 0.25); }
-      #pet-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-      .pet-card { padding: 12px 14px; border: 1px solid #363640; border-radius: 12px; background: #202027; }
-      .pet-head { display: flex; align-items: center; gap: 8px; }
-      .pet-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .pet-workspace { margin: 3px 0 0 18px; color: #92929e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+      input[type="text"], textarea, select { border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; font-size: 13px; }
+      input[type="text"] { min-height: 30px; padding: 0 9px; width: 100%; }
+      input[type="text"]:disabled { opacity: 0.45; }
+      textarea { width: 100%; min-height: 56px; padding: 8px 10px; resize: vertical; }
+      select { min-height: 32px; padding: 0 8px; }
+      .empty-note { color: #777783; font-size: 12px; padding: 8px 0; }
+
+      /* ── 寵物列 ── */
+      .pet-rows { display: flex; flex-direction: column; gap: 6px; }
+      .pet-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) auto minmax(110px, 1fr) minmax(200px, 280px) auto; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid #363640; border-radius: 10px; background: #202027; }
+      .pet-row.resting { opacity: 0.55; }
+      .pet-name-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .pet-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
       .dot.resting { background: #4a4a55; }
       .dot.idle { background: #8b8b98; }
       .dot.working { background: #58c98a; box-shadow: 0 0 6px rgba(88, 201, 138, 0.55); }
       .dot.awaitingApproval { background: #f0c04a; box-shadow: 0 0 6px rgba(240, 192, 74, 0.55); }
-      .phase-text { flex: none; color: #aaaab5; font-size: 12px; }
-      .approval-box { margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(240, 192, 74, 0.4); border-radius: 8px; background: rgba(194, 150, 24, 0.12); }
-      .approval-desc { margin: 0 0 8px; color: #ffd38a; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
-      .approval-buttons { display: flex; gap: 8px; }
-      .approval-buttons .allow { border-color: #3f7d5a; background: #2c5c42; }
-      .approval-buttons .allow:hover { background: #367052; }
-      .approval-buttons .deny { border-color: #8a4a52; }
-      .approval-buttons .deny:hover { background: #55333a; }
-      .pet-queue { margin-top: 8px; }
-      .pet-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-      .pet-actions button { min-height: 26px; padding: 0 10px; font-size: 12px; }
+      .pet-workspace { color: #92929e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pet-toggle { min-height: 26px; padding: 0 10px; font-size: 12px; }
+      .pet-status { min-width: 0; font-size: 12px; color: #aaaab5; }
+      .pet-status .queue-count { color: #777783; margin-left: 6px; }
+      .pet-input-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .pet-input-line { display: flex; gap: 6px; }
+      .pet-input-line button { min-height: 30px; padding: 0 10px; font-size: 12px; flex: none; }
+      .pet-feedback { min-height: 0; font-size: 11px; color: #aaaab5; }
+      .pet-feedback.error { color: #ff8c96; }
+      .pet-feedback.success { color: #78d6a0; }
+      .pet-more { display: flex; gap: 4px; }
+      .pet-more button { min-height: 26px; padding: 0 8px; font-size: 11px; color: #b8b8c2; }
+      /* 審批列(等審批時出現在該寵列下方) */
+      .approval-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid rgba(240, 192, 74, 0.4); border-radius: 8px; background: rgba(194, 150, 24, 0.12); }
+      .approval-desc { flex: 1; margin: 0; color: #ffd38a; font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+      .approval-row .allow { border-color: #3f7d5a; background: #2c5c42; min-height: 26px; font-size: 12px; }
+      .approval-row .allow:hover { background: #367052; }
+      .approval-row .deny { border-color: #8a4a52; min-height: 26px; font-size: 12px; }
+      .approval-row .deny:hover { background: #55333a; }
+
+      /* ── 公用任務發佈 ── */
+      .publish-card { padding: 12px 14px; border: 1px solid #363640; border-radius: 12px; background: #202027; }
+      .publish-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+      .publish-row select { flex: 1; }
+      .publish-row button { border-color: #675bd0; background: #5147b8; }
+      .publish-row button:hover { background: #6156ca; }
+      .publish-feedback { min-height: 16px; margin-top: 6px; font-size: 12px; color: #aaaab5; }
+      .publish-feedback.error { color: #ff8c96; }
+      .publish-feedback.success { color: #78d6a0; }
+      .publish-hint { margin-top: 4px; color: #777783; font-size: 11px; }
+
+      /* ── 任務帳本 ── */
+      .task-table { border: 1px solid #363640; border-radius: 12px; background: #202027; overflow: hidden; }
+      .task-row { display: grid; grid-template-columns: 76px minmax(160px, 1fr) minmax(90px, 130px) minmax(90px, 130px) 64px 30px; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid #2c2c34; font-size: 12px; }
+      .task-row:first-child { border-top: 0; }
+      .task-row.header { color: #777783; font-size: 11px; background: #1c1c22; }
+      .task-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9c9d2; user-select: text; }
+      .task-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aaaab5; }
+      .task-time { color: #777783; font-variant-numeric: tabular-nums; }
+      .status-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; text-align: center; }
+      .status-badge.queued { color: #b8b8c2; background: rgba(140, 140, 150, 0.22); }
+      .status-badge.running { color: #8fe6b4; background: rgba(88, 201, 138, 0.2); }
+      .status-badge.done { color: #8fd8e6; background: rgba(88, 170, 201, 0.2); }
+      .status-badge.failed { color: #ff9aa3; background: rgba(220, 90, 100, 0.2); }
+      .status-badge.removed { color: #6f6f7a; background: rgba(90, 90, 100, 0.18); }
+      .task-remove { min-height: 22px; padding: 0 7px; font-size: 11px; }
     </style>
   </head>
   <body>
@@ -70,21 +94,25 @@
         <button id="system-quit" class="danger">結束</button>
       </div>
 
-      <h2>指派任務</h2>
-      <div class="card">
-        <textarea id="assign-text" maxlength="1000" placeholder="輸入要指派的任務…"></textarea>
-        <div class="assign-row">
-          <select id="assign-target"></select>
-          <button id="assign-send">指派</button>
+      <h2>清醒的寵物 <span class="count" id="awake-count"></span></h2>
+      <div class="pet-rows" id="awake-rows"></div>
+
+      <h2>休息的寵物 <span class="count" id="resting-count"></span></h2>
+      <div class="pet-rows" id="resting-rows"></div>
+
+      <h2>公用任務發佈</h2>
+      <div class="publish-card">
+        <textarea id="publish-text" maxlength="1000" placeholder="輸入公用任務…空閒的寵物會自動領取"></textarea>
+        <div class="publish-row">
+          <select id="publish-workspace"></select>
+          <button id="publish-send">發佈</button>
         </div>
-        <div class="assign-feedback" id="assign-feedback" role="status"></div>
+        <div class="publish-hint">限定工作區 = 指定運行路徑:只有該工作區的寵物會領這張單,並在該目錄執行。</div>
+        <div class="publish-feedback" id="publish-feedback" role="status"></div>
       </div>
 
-      <h2 id="unbound-title">公用池</h2>
-      <div class="card" id="unbound-list"></div>
-
-      <h2>寵物</h2>
-      <div id="pet-cards"></div>
+      <h2>任務佇列與狀態</h2>
+      <div class="task-table" id="task-table"></div>
     </main>
     <script type="module" src="./control.ts"></script>
   </body>

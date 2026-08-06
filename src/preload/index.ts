@@ -148,9 +148,9 @@ const api = {
     ipcRenderer.send('chat-approval', petId, requestId, allow, feedback),
   newSession: (petId: string) => ipcRenderer.send('new-session', petId),
 
-  /* 中控面板專用:指派任務(assignee 缺 = 投公用池)、全量狀態快照、公用池撤單、系統操作。 */
-  controlEnqueue: (text: string, assignee?: string): Promise<ChatSendResult> =>
-    ipcRenderer.invoke('control-enqueue', text, assignee),
+  /* 中控面板專用:指派任務(assignee 缺 = 投公用池,可限定工作區)、全量狀態快照、公用池撤單、系統操作。 */
+  controlEnqueue: (text: string, assignee?: string, restrictWorkspace?: string): Promise<ChatSendResult> =>
+    ipcRenderer.invoke('control-enqueue', text, assignee, restrictWorkspace),
   getControlStatus: (): Promise<ControlStatusSnapshot | null> =>
     ipcRenderer.invoke('control-status-get'),
   onControlStatus: (callback: (snapshot: ControlStatusSnapshot) => void) =>

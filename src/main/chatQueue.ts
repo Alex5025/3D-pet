@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ChatImage, ChatTaskSource } from '../shared/chat';
+import { normalizeWorkspacePath } from '../shared/petGroups';
 
 /**
  * 對話佇列 + 派發器:turn 進行中送出的訊息排隊,turn 結束自動取下一則。
@@ -15,6 +16,8 @@ export interface QueuedTask {
   id: string;
   /** 指定執行者(petId);undefined = 不綁定,領取(claim)時寫入。 */
   assignee?: string;
+  /** 公用池單可限定工作區(normalize 後的路徑):只有該工作區的寵物能領——發佈者藉此指定運行路徑。 */
+  restrictWorkspace?: string;
   text: string;
   images: ChatImage[];
   source: ChatTaskSource;
@@ -33,6 +36,8 @@ export interface EnqueueResult {
   ok: boolean;
   /** 0 = 該佇列原本是空的;>0 = 排在第幾位;-1 = 被拒。 */
   position: number;
+  /** 成功時的任務 id(任務帳本追蹤用)。 */
+  id?: string;
   reason?: string;
 }
 
@@ -56,8 +61,8 @@ export interface ChatQueue {
   /** 有綁定任務的寵物,依「隊首等最久優先」排序(dispatchAll 的公平順序)。 */
   petsWithTasks(): string[];
   summaries(petId: string): QueuedTaskSummary[];
-  /** 領取公用池最舊的一單:寫入 assignee 後回傳;池空回 undefined。 */
-  claimUnbound(petId: string): QueuedTask | undefined;
+  /** 領取公用池「最舊且可領」的一單(跳過限定其他工作區的單):寫入 assignee 後回傳;無可領回 undefined。 */
+  claimUnbound(petId: string, workspacePath?: string): QueuedTask | undefined;
   hasUnbound(): boolean;
   unboundSummaries(): QueuedTaskSummary[];
   removeUnbound(taskId: string): boolean;
@@ -93,10 +98,11 @@ export function createChatQueue(onChanged?: (petId?: string) => void): ChatQueue
         return { ok: false, position: -1, reason: `排隊中的圖片太多(上限 ${MAX_QUEUED_IMAGES} 張),請等前面的訊息送完` };
       }
       const position = queue.length;
-      queue.push({ ...task, id: randomUUID(), enqueuedAt: Date.now() });
+      const id = randomUUID();
+      queue.push({ ...task, id, enqueuedAt: Date.now() });
       if (task.assignee) bound.set(task.assignee, queue);
       onChanged?.(task.assignee);
-      return { ok: true, position };
+      return { ok: true, position, id };
     },
     remove(petId, taskId) {
       const queue = list(petId);
@@ -125,9 +131,12 @@ export function createChatQueue(onChanged?: (petId?: string) => void): ChatQueue
         .map(([petId]) => petId);
     },
     summaries: (petId) => list(petId).map(toSummary),
-    claimUnbound(petId) {
-      const task = unbound.shift();
-      if (!task) return undefined;
+    claimUnbound(petId, workspacePath) {
+      // 限定工作區的單只給該工作區的寵物領(= 發佈者指定的運行路徑);其餘照最舊優先
+      const normalized = normalizeWorkspacePath(workspacePath);
+      const index = unbound.findIndex((task) => !task.restrictWorkspace || task.restrictWorkspace === normalized);
+      if (index < 0) return undefined;
+      const task = unbound.splice(index, 1)[0]!;
       task.assignee = petId;
       onChanged?.(undefined);
       return task;
@@ -156,6 +165,8 @@ export function createChatDispatcher(deps: {
   canAccept(petId: string): boolean;
   /** 有資格領公用池的寵物(index.ts:啟用中且已設 workspacePath)。 */
   unboundCandidates(): string[];
+  /** 寵物的工作目錄(claim 時比對限定工作區的單)。 */
+  workspaceOf(petId: string): string | undefined;
   /** 實際執行(index.ts 綁 turnStart 事件 + bridge.chatSend)。petId = 執行者。 */
   runTask(petId: string, task: QueuedTask): void;
 }): ChatDispatcher {
@@ -168,7 +179,7 @@ export function createChatDispatcher(deps: {
       return;
     }
     if (deps.queue.hasUnbound() && deps.unboundCandidates().includes(petId)) {
-      const task = deps.queue.claimUnbound(petId);
+      const task = deps.queue.claimUnbound(petId, deps.workspaceOf(petId));
       if (task) deps.runTask(petId, task);
     }
   }
@@ -180,7 +191,7 @@ export function createChatDispatcher(deps: {
       for (const petId of deps.unboundCandidates()) {
         if (!deps.queue.hasUnbound()) break;
         if (!deps.canAccept(petId) || deps.queue.peek(petId)) continue;
-        const task = deps.queue.claimUnbound(petId);
+        const task = deps.queue.claimUnbound(petId, deps.workspaceOf(petId));
         if (task) deps.runTask(petId, task);
       }
     }

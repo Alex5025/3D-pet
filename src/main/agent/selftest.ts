@@ -450,6 +450,24 @@ export async function runAgentSelftest(): Promise<boolean> {
     for (let i = 0; i < 20; i++) queue.enqueue({ text: `pool-${i}`, images: [], source: 'control' });
     const poolFull = queue.enqueue({ text: '第21單', images: [], source: 'control' });
     check('中控:公用池滿 20 拒收且給 reason', !poolFull.ok && !!poolFull.reason);
+
+    // enqueue 回傳 id(任務帳本追蹤依據)
+    const withId = queue.enqueue({ assignee: 'q8', text: '有 id 的單', images: [], source: 'control' });
+    check('中控:enqueue 回傳 id 且與摘要一致', !!withId.id && queue.summaries('q8')[0]?.id === withId.id);
+    queue.clear('q8');
+  }
+
+  // 6.5 公用池限定工作區:只有該工作區的寵物能領(= 發佈者指定運行路徑)
+  {
+    const queue = createChatQueue();
+    queue.enqueue({ text: '限定 A 區', images: [], source: 'control', restrictWorkspace: '/tmp/a' });
+    queue.enqueue({ text: '不限區', images: [], source: 'control' });
+    const claimedByB = queue.claimUnbound('petB', '/tmp/b');
+    check('限定工作區:不符者跳過限定單、領到最舊合格單', claimedByB?.text === '不限區');
+    const claimedByA = queue.claimUnbound('petA', '/tmp/a/'); // 尾斜線要 normalize 後相符
+    check('限定工作區:相符者領得到(路徑 normalize)', claimedByA?.text === '限定 A 區');
+    queue.enqueue({ text: '又一張限定 A', images: [], source: 'control', restrictWorkspace: '/tmp/a' });
+    check('限定工作區:全池皆不合格時領不到', queue.claimUnbound('petB', '/tmp/b') === undefined && queue.hasUnbound());
   }
 
   // 7. 佇列 + dispatcher + mock bridge 全鏈:排 3 則依序執行、中途移除、cancel 後續行
@@ -464,6 +482,7 @@ export async function runAgentSelftest(): Promise<boolean> {
       queue,
       canAccept: (petId) => qBridge.canAccept(petId),
       unboundCandidates: () => ['qp'],
+      workspaceOf: () => '/tmp',
       runTask: (petId, task) => {
         ran.push(`${petId}:${task.text}`);
         qEvents.push({ kind: 'turnStart', text: task.text });
