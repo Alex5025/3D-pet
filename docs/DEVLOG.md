@@ -668,3 +668,18 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 5. **IPC 循既有安全慣例**:`choose-workspace-root` 僅接受 settingsWin 的 sender;dialog 前 `app.focus({steal:true})`(背景 app 的 dialog 會被壓住);變更後 `workspace-root-apply` 推播回設定面板即時更新。
 
 **驗證**:typecheck 綠;selftest 補 5 項純函式檢查(消毒去空白/去不合法字元/全符號退 pet/名稱_時間戳格式/同秒碰撞序號)全 PASS;fs 層以 esbuild 轉譯實測:正常建立、同秒連建第二個帶 `-2`、`/System` 下唯讀根位置回 null 留 log。
+
+## 43. 中控面板 v1:多寵總覽、指派任務、審批代答(2026-08-06)
+
+**需求**:實作 §41 與 AGENT-BRIDGE-DESIGN §10 預留的中控面板——多寵狀態總覽(只顯示狀態燈號)、指派任務(綁定/公用池)、佇列顯示與撤單、寵物控制(休息/喚醒/開新對話/工作目錄)、逐寵沙盒設定入口、系統重啟/結束、審批可在中控直接核准。
+
+**設計要點**:
+
+1. **文件約定原樣兌現**:公用池 API(`unboundSummaries`/`removeUnbound`)從零接線到首度接上;`onChanged(undefined)` 的 no-op「先不廣播」改為推快照;中控走自己的 `control-enqueue`(sender 限 controlWin,`chat-send` 保持泡泡專用)。**enqueue 不自動派發**——成功後必補 `dispatch(assignee)` 或 `dispatchAll()`,否則公用單躺到下一次 turn 結束才被領。
+2. **全量快照而非事件差分**:中控吃 `ControlStatusSnapshot`(每寵 phase/佇列 + 公用池),50ms trailing debounce 推播;開窗先 `control-status-get` 拿 snapshot——晚開視窗只靠事件流會漏掉進行中的 turn,這是 bridge 必須新增 `petStates()` 的原因(states Map 模組私有,原本只暴露 canAccept)。`text` 增量一律不進中控:33ms 合併節奏的高頻 IPC 不打第二視窗,中控只要燈號。
+3. **審批雙 UI 的 race 在源頭擋**:bridge 的 `PetAgentState` 新記 `pendingApproval`(requestId+description;pending 審批原本只存在事件流裡,晚開窗拿不到 description);`respondApproval` 加 requestId guard——不符掛著的審批直接忽略,否則過期 id 打到 provider 走 catch → error 事件 + cancel,誤殺進行中 turn。回覆成功發新事件 `approvalResolved`(**非終結事件**,renderer 只收合審批 UI 不得 endTurn),泡泡新增 `hideApproval`(中控代答後泡泡原本會殘留過期按鈕;收合前必須 blur,循透明層輸入模式的既有坑)。
+4. **安全邊界**:`chat-approval`/`chat-queue-remove`/`new-session`/`choose-workspace` 只放寬到 controlWin 這一個具名視窗;`sandbox-settings-get/set` **維持只收 sandboxSettingsWin**——中控每寵只放按鈕開既有隔離視窗,不內嵌、不打穿高風險寫檔通道的視窗隔離。`system-quit` 同 Tray:app.exit 不觸發 before-quit,必先 shutdownSync(§22 已知坑)。
+5. **型別收斂**:`QueuedMessageSummary.source` 原是寬鬆 string,與 chatQueue 的聯集平行定義——收斂為 `ChatTaskSource`('bubble'|'control'|'selftest')一份維護,中控據此標色。
+6. **刻意不做**:頭像(無 invoke getter)、公用池投圖片、審批 feedback 欄、controltest 自驗頁(UI 全依賴 window.pet,瀏覽器開不了,mock 整層 preload 成本超過收益)。
+
+**驗證**:typecheck 綠;selftest 補 7 項(中控帶/缺 assignee 歸屬、池滿 20 拒收、removeUnbound 不存在回 false、petStates 審批快照、錯誤 requestId 被忽略、approvalResolved 事件、回覆後清空)全 PASS(共 52 項);`npm run build` 確認 control.html 進 bundle(vite renderer input 漏加會 dev 正常 build 白畫面的已知坑);dev 短跑無啟動錯誤。
