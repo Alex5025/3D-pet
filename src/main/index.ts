@@ -83,7 +83,6 @@ const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settingsWin: BrowserWindow | null = null;
-let sandboxSettingsWin: BrowserWindow | null = null;
 let controlWin: BrowserWindow | null = null;
 let overlayInteractive = false;
 let overlayInputMode = false;
@@ -333,7 +332,6 @@ function sendPetProfiles(): void {
   const profiles = [...pets.values()];
   win?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   settingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
-  sandboxSettingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   controlWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
   scheduleControlStatusHook?.(); // 名稱/啟用/工作目錄變更都經過這裡,中控快照跟著重推
   refreshTray();
@@ -347,7 +345,6 @@ function selectPet(id: string): PetProfile | null {
   scheduleConfigFlush();
   refreshTray();
   settingsWin?.webContents.send('selected-pet-apply', id);
-  sandboxSettingsWin?.webContents.send('selected-pet-apply', id);
   const icons = avatarIcons.get(id);
   if (icons) settingsWin?.webContents.send('avatar-icons-apply', id, icons);
   const list = wardrobeLists.get(id);
@@ -626,7 +623,7 @@ function petMenu(requestedId?: string): Menu {
       ]
     },
     { label: '中控面板…', click: () => openControlPanel() },
-    { label: '沙盒設定…', click: () => openSandboxSettings(petId) },
+    { label: '沙盒設定…', click: () => openControlPanel('sandbox') },
     { label: '重置位置與大小', click: () => resetState(petId) },
     {
       label: '重啟目前角色',
@@ -682,40 +679,11 @@ function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', pe
   app.focus({ steal: true });
 }
 
-/** 高風險設定使用獨立視窗與獨立 renderer，不可從一般設定分頁切入。 */
-function openSandboxSettings(petId?: string): void {
-  if (petId) selectPet(petId);
-  if (sandboxSettingsWin && !sandboxSettingsWin.isDestroyed()) {
-    sandboxSettingsWin.webContents.send('selected-pet-apply', registry.selectedPetId);
-    sandboxSettingsWin.show();
-    sandboxSettingsWin.focus();
-    return;
-  }
-  sandboxSettingsWin = new BrowserWindow({
-    width: 480,
-    height: 720,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    alwaysOnTop: true,
-    title: '專案沙盒設定',
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  sandboxSettingsWin.on('closed', () => (sandboxSettingsWin = null));
-  const dev = process.env['ELECTRON_RENDERER_URL'];
-  if (dev) sandboxSettingsWin.loadURL(`${dev}/sandboxSettings.html`);
-  else sandboxSettingsWin.loadFile(join(__dirname, '../renderer/sandboxSettings.html'));
-  app.focus({ steal: true });
-}
-
-/** 中控面板:多寵狀態總覽、指派任務(綁定/公用池)、佇列撤單、審批代答、系統操作。 */
-function openControlPanel(): void {
+/** 中控面板:多寵狀態總覽、指派任務(綁定/公用池)、佇列撤單、審批代答、沙盒設定分頁、系統操作。
+ *  (獨立沙盒視窗已廢棄:沙盒設定併入中控的「沙盒設定」分頁,高風險讀寫通道仍限中控 sender。) */
+function openControlPanel(tab: 'overview' | 'sandbox' = 'overview'): void {
   if (controlWin && !controlWin.isDestroyed()) {
+    controlWin.webContents.send('switch-tab', tab);
     controlWin.show();
     controlWin.focus();
     return;
@@ -734,8 +702,8 @@ function openControlPanel(): void {
   });
   controlWin.on('closed', () => (controlWin = null));
   const dev = process.env['ELECTRON_RENDERER_URL'];
-  if (dev) controlWin.loadURL(`${dev}/control.html`);
-  else controlWin.loadFile(join(__dirname, '../renderer/control.html'));
+  if (dev) controlWin.loadURL(`${dev}/control.html?tab=${tab}`);
+  else controlWin.loadFile(join(__dirname, '../renderer/control.html'), { query: { tab } });
   app.focus({ steal: true });
 }
 
@@ -1109,9 +1077,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('choose-workspace', (event, id: string) => {
     const parent = event.sender === settingsWin?.webContents
       ? settingsWin
-      : event.sender === sandboxSettingsWin?.webContents
-        ? sandboxSettingsWin
-        : event.sender === controlWin?.webContents ? controlWin : undefined;
+      : event.sender === controlWin?.webContents ? controlWin : undefined;
     return chooseWorkspace(id, parent ?? undefined);
   });
 
@@ -1141,10 +1107,9 @@ app.whenReady().then(async () => {
   /* ── 專案 Codex 沙盒設定──
    * 設定視窗明確按下後由 main 直接讀寫 <workspace>/.codex/config.toml；不啟動 agent、不跑 shell。 */
   ipcMain.handle('sandbox-settings-get', async (event, id: string): Promise<ProjectSandboxSettingsResult> => {
-    // 高風險通道只開放兩個具名視窗:獨立沙盒視窗與中控面板的「沙盒設定」分頁
-    const fromSandboxUi = event.sender === sandboxSettingsWin?.webContents || event.sender === controlWin?.webContents;
-    if (!fromSandboxUi) {
-      return { ok: false, message: '沙盒設定只能從沙盒視窗或中控面板操作' };
+    // 高風險通道只開放中控面板的「沙盒設定」分頁這一個具名視窗
+    if (!controlWin || event.sender !== controlWin.webContents) {
+      return { ok: false, message: '沙盒設定只能從中控面板操作' };
     }
     const profile = getPet(id);
     if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
@@ -1161,9 +1126,8 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'sandbox-settings-set',
     async (event, id: string, settings: ProjectSandboxSettingsInput): Promise<ProjectSandboxSettingsResult> => {
-      const fromSandboxUi = event.sender === sandboxSettingsWin?.webContents || event.sender === controlWin?.webContents;
-      if (!fromSandboxUi) {
-        return { ok: false, message: '沙盒設定只能從沙盒視窗或中控面板操作' };
+      if (!controlWin || event.sender !== controlWin.webContents) {
+        return { ok: false, message: '沙盒設定只能從中控面板操作' };
       }
       const profile = getPet(id);
       if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };

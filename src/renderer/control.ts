@@ -330,16 +330,18 @@ function applySnapshot(next: ControlStatusSnapshot): void {
 
 /* ---------- 分頁 ---------- */
 function activateTab(name: string): void {
+  if (!document.getElementById(`tab-${name}`)) return;
   document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((button) => {
     button.classList.toggle('active', button.dataset['tab'] === name);
   });
   document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'));
   el(`tab-${name}`).classList.add('active');
-  if (name === 'sandbox') void loadSandboxSettings(); // 切進沙盒分頁時讀取目前寵物的專案設定
+  if (name === 'sandbox') void loadSandboxSettings(); // 切進沙盒分頁時讀取各寵的專案設定
 }
 document.querySelectorAll<HTMLButtonElement>('#tabs button').forEach((button) => {
   button.addEventListener('click', () => activateTab(button.dataset['tab']!));
 });
+window.pet.onSwitchTab(activateTab); // Tray「沙盒設定…」在視窗已開時切分頁
 
 /* ---------- 沙盒設定分頁(逐寵直列,不折疊;高風險讀寫仍由 main 直改 .codex/config.toml) ---------- */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -523,4 +525,7 @@ el('system-quit').addEventListener('click', () => {
 window.pet.onControlStatus(applySnapshot);
 void window.pet.getControlStatus().then((initial) => {
   if (initial) applySnapshot(initial);
+  // 開窗指定分頁(Tray「沙盒設定…」帶 ?tab=sandbox):等首份快照到位才切,沙盒列才有寵物可列
+  const tab = new URLSearchParams(location.search).get('tab');
+  if (tab && tab !== 'overview') activateTab(tab);
 });
