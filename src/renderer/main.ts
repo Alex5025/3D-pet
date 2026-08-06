@@ -7,6 +7,8 @@ import {
   type SpeechBubbleAvoidRect,
 } from './speechBubble';
 import type { PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
+import { setLocale, t, type Locale } from '../shared/i18n';
+import { applyI18nDom } from './i18nDom';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 const MAX_CAMERA_Z = 30;
@@ -286,7 +288,7 @@ async function loadInitialModel(runtime: PetRuntime): Promise<void> {
 /** 泡泡徽章文字:AI 家別 + 模型 + 力度(未設就標預設)。 */
 function agentInfoText(profile: PetProfile): string {
   const kind = profile.agent?.kind === 'claude' ? 'Claude' : 'Codex';
-  const model = profile.agent?.model ?? '預設模型';
+  const model = profile.agent?.model ?? t('overlay.modelDefault');
   const effort = profile.agent?.effort ? ` · ${profile.agent.effort}` : '';
   return `${kind} · ${model}${effort}`;
 }
@@ -315,7 +317,7 @@ function addRuntime(profile: PetProfile): void {
         if (!current) return;
         // workspacePath 就地提示(main 端仍二次把關);showError 不動 busy,不會誤終結進行中 turn
         if (!current.profile.workspacePath) {
-          current.bubble.showError('請先在「工作設定」選擇工作目錄');
+          current.bubble.showError(t('agent.needWorkspace'));
           return;
         }
         // 不再樂觀 beginTurn:訊息可能被排入佇列,beginTurn 改由 turnStart 事件觸發
@@ -325,7 +327,7 @@ function addRuntime(profile: PetProfile): void {
           if (result.queued) {
             bubble.clearComposer(); // 送出被接受才清(排隊接續時不可洗掉正在打的字)
           } else {
-            bubble.showError(result.reason ?? '訊息未送出'); // 拒收:保留輸入內容讓使用者再試
+            bubble.showError(result.reason ?? t('overlay.notSent')); // 拒收:保留輸入內容讓使用者再試
           }
         });
       },
@@ -402,6 +404,22 @@ function restartRuntime(petId: string): void {
   addRuntime(profile);
 }
 
+/* i18n:開機先套語言(泡泡可能已用預設語言建好,補 applyLocale);切換時逐泡泡重套靜態標籤,
+ * 佇列列的 ✕ title 含翻譯,重抓現況重繪。 */
+void window.pet.getLocale().then((locale) => {
+  setLocale(locale as Locale);
+  applyI18nDom();
+  for (const runtime of runtimes.values()) runtime.bubble.applyLocale();
+});
+window.pet.onLocale((next) => {
+  setLocale(next as Locale);
+  applyI18nDom();
+  for (const runtime of runtimes.values()) {
+    runtime.bubble.applyLocale();
+    void window.pet.getChatQueue(runtime.profile.id).then((list) => runtime.bubble.setQueue(list));
+  }
+});
+
 window.pet.onPetProfiles((profiles) => reconcileProfiles(profiles));
 window.pet.onPetRestart(restartRuntime);
 window.pet.getPetCollection().then(({ pets }) => reconcileProfiles(pets));
@@ -462,23 +480,23 @@ window.pet.onChatEvent((petId, event) => {
   switch (event.kind) {
     case 'turnStart': // 佇列任務開始執行(dispatcher 專發):原樂觀 beginTurn 搬到這裡
       bubble.beginTurn();
-      bubble.setStatus('連線中…');
+      bubble.setStatus(t('overlay.statusConnecting'));
       placeActivity();
       break;
     case 'session':
       break; // main 已回存 sessionId,renderer 不需處理
     case 'thinking':
-      bubble.setStatus('思考中…');
+      bubble.setStatus(t('overlay.statusThinking'));
       break;
     case 'tool':
-      bubble.setStatus(`正在執行 ${event.name}`);
+      bubble.setStatus(t('overlay.statusRunningTool', { name: event.name }));
       break;
     case 'text':
       bubble.setStatus(null);
       bubble.appendText(event.text);
       break;
     case 'approval':
-      bubble.setStatus('等待你的核准…');
+      bubble.setStatus(t('overlay.statusAwaitApproval'));
       bubble.showApproval(event.requestId, event.description);
       placeActivity();
       break;
@@ -486,7 +504,7 @@ window.pet.onChatEvent((petId, event) => {
       bubble.hideApproval(event.requestId); // 非終結事件:只收合審批 UI,不得 endTurn
       break;
     case 'done':
-      bubble.endTurn(event.ok, event.ok ? undefined : '已中斷');
+      bubble.endTurn(event.ok, event.ok ? undefined : t('overlay.interrupted'));
       placeActivity(); // 順便把膠囊校正到寵物目前位置(執行期間寵物可能被拖走)
       break;
     case 'error':

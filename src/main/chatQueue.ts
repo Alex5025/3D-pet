@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ChatImage, ChatTaskSource } from '../shared/chat';
 import { normalizeWorkspacePath } from '../shared/petGroups';
+import { t } from '../shared/i18n';
 
 /**
  * 對話佇列 + 派發器:turn 進行中送出的訊息排隊,turn 結束自動取下一則。
@@ -87,15 +88,15 @@ export function createChatQueue(onChanged?: (petId?: string) => void): ChatQueue
     enqueue(task) {
       if (task.source === 'bubble' && !task.assignee) {
         // 泡泡路徑必綁定——在模組層強制,不靠呼叫端自律
-        return { ok: false, position: -1, reason: '泡泡訊息必須綁定寵物' };
+        return { ok: false, position: -1, reason: t('reason.bubbleNeedsAssignee') };
       }
       const queue = task.assignee ? list(task.assignee) : unbound;
       const cap = task.assignee ? MAX_QUEUE_PER_PET : MAX_UNBOUND_QUEUE;
       if (queue.length >= cap) {
-        return { ok: false, position: -1, reason: `佇列已滿(上限 ${cap} 則),請稍候或移除排隊中的訊息` };
+        return { ok: false, position: -1, reason: t('reason.queueFull', { n: cap }) };
       }
       if (task.images.length && countImages(queue) + task.images.length > MAX_QUEUED_IMAGES) {
-        return { ok: false, position: -1, reason: `排隊中的圖片太多(上限 ${MAX_QUEUED_IMAGES} 張),請等前面的訊息送完` };
+        return { ok: false, position: -1, reason: t('reason.tooManyImages', { n: MAX_QUEUED_IMAGES }) };
       }
       const position = queue.length;
       const id = randomUUID();

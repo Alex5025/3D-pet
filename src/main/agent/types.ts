@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentKind, AgentPermission } from '../../shared/agentEvents';
+import { t } from '../../shared/i18n';
 import type { ChatImage } from '../../shared/chat';
 
 export type { AgentEvent, AgentKind, AgentPermission };
@@ -7,8 +8,8 @@ export type { AgentEvent, AgentKind, AgentPermission };
  *  只給路徑不塞內容——讓 AI 自己用工具讀,大檔塞 prompt 是反模式。 */
 export function refFilesPrompt(refFiles: string[] | undefined): string | null {
   if (!refFiles?.length) return null;
-  const lines = refFiles.map((p) => `- ${p}${p.endsWith('/') ? '(資料夾)' : ''}`);
-  return `參考檔案(使用者指定的絕對路徑;需要查閱時直接讀取,被要求更新該文件時直接修改它):\n${lines.join('\n')}`;
+  const lines = refFiles.map((p) => `- ${p}${p.endsWith('/') ? t('prompt.refFolderSuffix') : ''}`);
+  return `${t('prompt.refFiles')}\n${lines.join('\n')}`;
 }
 
 /** provider.sendMessage 的每 turn 選項(全部來自 profile,空 = 預設)。 */

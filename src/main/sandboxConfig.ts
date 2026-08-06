@@ -1,4 +1,5 @@
 import { lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { t } from '../shared/i18n';
 import { isAbsolute, join } from 'node:path';
 import type {
   ApprovalPolicy,
@@ -19,13 +20,13 @@ function errorCode(error: unknown): string | undefined {
 
 async function configPath(workspacePath: string, create: boolean): Promise<string> {
   if (!isAbsolute(workspacePath) || !(await stat(workspacePath)).isDirectory()) {
-    throw new Error('工作目錄不存在或不是資料夾');
+    throw new Error(t('sandbox.errNotDir'));
   }
   const directory = join(workspacePath, '.codex');
   try {
     const info = await lstat(directory);
-    if (info.isSymbolicLink()) throw new Error('基於安全考量，不寫入符號連結的 .codex 目錄');
-    if (!info.isDirectory()) throw new Error('.codex 已存在但不是資料夾');
+    if (info.isSymbolicLink()) throw new Error(t('sandbox.errSymlinkDir'));
+    if (!info.isDirectory()) throw new Error(t('sandbox.errCodexNotDir'));
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') throw error;
     if (!create) return join(directory, 'config.toml');
@@ -35,9 +36,9 @@ async function configPath(workspacePath: string, create: boolean): Promise<strin
   try {
     const info = await lstat(path);
     if (info.isSymbolicLink()) {
-      throw new Error('基於安全考量，不寫入符號連結的 config.toml');
+      throw new Error(t('sandbox.errSymlinkFile'));
     }
-    if (!info.isFile()) throw new Error('config.toml 已存在但不是一般檔案');
+    if (!info.isFile()) throw new Error(t('sandbox.errNotFile'));
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') throw error;
   }
@@ -93,10 +94,10 @@ export function parseProjectSandboxConfig(
   const sandboxSupported = SANDBOX_MODES.has(sandbox as SandboxMode);
   const warnings = [
     hasRootKey(content, 'approval_policy') && !approvalSupported
-      ? '現有 approval_policy 使用進階格式；套用會改成此頁選擇的標準模式'
+      ? t('sandbox.warnApproval')
       : '',
     hasRootKey(content, 'sandbox_mode') && !sandboxSupported
-      ? '現有 sandbox_mode 無法辨識；套用會改成此頁選擇的標準模式'
+      ? t('sandbox.warnMode')
       : '',
   ].filter(Boolean);
   return {
@@ -189,7 +190,7 @@ export async function writeProjectSandboxSettings(
 ): Promise<ProjectSandboxSettings> {
   if (!APPROVAL_POLICIES.has(settings.approvalPolicy) || !SANDBOX_MODES.has(settings.sandboxMode) ||
     typeof settings.networkAccess !== 'boolean') {
-    throw new Error('沙盒設定值不合法');
+    throw new Error(t('sandbox.errInvalidValue'));
   }
   const path = await configPath(workspacePath, true);
   let current = '';

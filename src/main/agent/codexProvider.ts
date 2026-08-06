@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { t } from '../../shared/i18n';
 import { createInterface } from 'node:readline';
 import type { AgentEvent, AgentModelInfo, AgentPermission, AgentProvider } from './types';
 import { refFilesPrompt } from './types';
@@ -70,9 +71,9 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const proc = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] });
     child = proc;
     proc.stderr?.on('data', () => undefined); // stderr 只有啟動雜訊,壓掉避免洗終端機
-    proc.on('error', (error) => teardown(`codex app-server 啟動失敗:${error.message}`));
+    proc.on('error', (error) => teardown(t('agent.errCodexStart', { error: error.message })));
     proc.on('exit', () => {
-      if (child === proc) teardown('codex app-server 已結束(將於下次對話自動重啟)');
+      if (child === proc) teardown(t('agent.codexEnded'));
     });
     const rl = createInterface({ input: proc.stdout! });
     rl.on('line', (line) => {
@@ -104,21 +105,21 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       clientInfo: { name: 'vrm-pet', title: 'VRM 桌寵', version: '0.1.0' },
       capabilities: null
     }).then((res) => {
-      if (res.error) throw new Error(`initialize 失敗:${res.error.message ?? '未知'}`);
+      if (res.error) throw new Error(t('agent.initFailed', { error: res.error.message ?? t('common.unknown') }));
     });
     return initialized;
   }
 
   function request(method: string, params: Record<string, unknown>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<JsonRpcMessage> {
     const proc = child;
-    if (!proc?.stdin?.writable) return Promise.resolve({ error: { message: 'codex app-server 未連線' } });
+    if (!proc?.stdin?.writable) return Promise.resolve({ error: { message: t('agent.codexNotConnected') } });
     const id = nextId++;
     if (AGENT_DEBUG) console.log(`[codex][debug] → ${method}\n${JSON.stringify(params, null, 2)}`);
     proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pending.delete(id);
-        resolve({ error: { message: `${method} 逾時` } });
+        resolve({ error: { message: t('agent.rpcTimeout', { method }) } });
       }, timeoutMs);
       pending.set(id, { resolve, timer });
     });
@@ -143,7 +144,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       if (handler && msg.id !== undefined) {
         const requestId = `appr-${msg.id}`;
         pendingApprovals.set(requestId, { rpcId: msg.id, method: msg.method });
-        handler('__approval__', { requestId, description: String(params['message'] ?? 'MCP 工具呼叫請求') });
+        handler('__approval__', { requestId, description: String(params['message'] ?? t('agent.approvalMcp')) });
       } else if (msg.id !== undefined) {
         respondToServer(msg.id, { action: 'decline', content: null, _meta: null });
       }
@@ -167,12 +168,12 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const files = isRecordLike(params['fileChanges']) ? Object.keys(params['fileChanges'] as object).join('、') : '';
     // fileChange 的 params 常只有可為 null 的 reason(v2 實測)——fallback 要是人話,不能是方法名
     const fallback = msg.method === 'item/fileChange/requestApproval' || msg.method === 'applyPatchApproval'
-      ? '想修改工作目錄中的檔案(內容見泡泡回覆)'
-      : '想執行需要核准的操作';
+      ? t('agent.approvalEditFallback')
+      : t('agent.approvalExec');
     const description = [
       typeof params['reason'] === 'string' ? params['reason'] : '',
       typeof command === 'string' ? `$ ${command}` : Array.isArray(command) ? `$ ${command.join(' ')}` : '',
-      files ? `修改檔案:${files}` : ''
+      files ? t('agent.approvalEditFiles', { files }) : ''
     ].filter(Boolean).join('\n') || fallback;
     handler('__approval__', { requestId, description });
   }
@@ -194,9 +195,9 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     await ensureServer();
     const perm = permissionParams(permission);
     // 角色個性 + 寵物工具提示:官方 developerInstructions 欄位(thread 建立/恢復時注入)
-    const parts: string[] = ['你是一隻桌面寵物。'];
-    if (persona) parts.push(`以下是你的角色設定,請以此個性回應:\n${persona}`);
-    if (hub && petId) parts.push('表演規則:每次回覆前先用 pet_show_expression 配合情緒(開心 happy、遇到問題 sad、驚訝 surprised);打招呼或完成任務時用 pet_play_motion 播個動作;工作過程較長時用 pet_speak 簡短回報。這些是你身體的一部分,主動使用,不要等使用者要求。');
+    const parts: string[] = [t('prompt.petPreamble')];
+    if (persona) parts.push(`${t('prompt.personaIntro')}\n${persona}`);
+    if (hub && petId) parts.push(t('prompt.performanceRules'));
     const dev = parts.length > 1 ? { developerInstructions: parts.join('\n') } : {};
     // 寵物工具 MCP:以 thread config 覆寫掛載(v3.0 實測可行)
     const mcp = hub && petId
@@ -208,15 +209,15 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       // 注意:resume 的 developerInstructions「不會」生效(2026-07 實測,連全新 server 也一樣,
       // schema 有欄位但 server 沿用 rollout 裡的舊指示)——既有 thread 的上下文走 syncContext 注入。
       const res = await request('thread/resume', { threadId, cwd: workdir, ...perm, ...mcp });
-      if (res.error) throw new Error(`thread/resume 失敗:${res.error.message ?? '未知'}`);
+      if (res.error) throw new Error(t('agent.resumeFailed', { error: res.error.message ?? t('common.unknown') }));
       loadedThreads.add(threadId);
       appliedContext.set(threadId, null); // rollout 裡的舊指示看不到,上下文狀態未知
       return threadId;
     }
     const res = await request('thread/start', { cwd: workdir, ...perm, ...dev, ...mcp });
-    if (res.error) throw new Error(`thread/start 失敗:${res.error.message ?? '未知'}`);
+    if (res.error) throw new Error(t('agent.startFailed', { error: res.error.message ?? t('common.unknown') }));
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
-    if (!id) throw new Error('thread/start 未回傳 thread id');
+    if (!id) throw new Error(t('agent.noThreadId'));
     loadedThreads.add(id);
     appliedContext.set(id, composeContext(persona, undefined)); // thread/start 只注入 persona,參考檔由首個 turn 的 syncContext 補上
     return id;
@@ -226,7 +227,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
   function composeContext(persona: string | undefined, refFiles: string[] | undefined): string {
     const parts: string[] = [];
     const trimmed = persona?.trim();
-    if (trimmed) parts.push(`以下是你目前的角色設定,請以此個性回應:\n${trimmed}`);
+    if (trimmed) parts.push(`${t('prompt.personaCurrentIntro')}\n${trimmed}`);
     const refs = refFilesPrompt(refFiles);
     if (refs) parts.push(refs);
     return parts.join('\n\n');
@@ -241,8 +242,8 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     if (wanted === applied) return;
     if (!wanted && applied === null) return; // 未知基準且無上下文:視為無,不注入
     const text = wanted
-      ? `【上下文更新】你是一隻桌面寵物。以下設定以本則為準,先前的已失效:\n${wanted}`
-      : '【上下文更新】角色設定與參考檔案已清空,請回到一般語氣、忽略先前的清單。';
+      ? `${t('prompt.contextUpdate')}\n${wanted}` // 換語言會讓組合值改變 → 下個 turn 自動 inject 新語言指示(刻意依賴)
+      : t('prompt.contextCleared');
     const res = await request('thread/inject_items', { threadId, items: [
       { type: 'message', role: 'developer', content: [{ type: 'input_text', text }] }
     ] });
@@ -277,7 +278,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
       const persona = opts ? opts.persona : saved?.persona;
       if (loadedThreads.has(threadId) && saved?.permission !== permission) {
         const proc = child;
-        teardown('權限變更,重啟 app-server');
+        teardown(t('agent.permRestart'));
         proc?.kill('SIGTERM');
         await new Promise((resolve) => setTimeout(resolve, 400));
       }
@@ -315,7 +316,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
 
       turnHandlers.set(threadId, (method, params) => {
         if (method === '__crash__') {
-          push({ kind: 'error', message: String(params['message'] ?? 'codex app-server 中斷') });
+          push({ kind: 'error', message: String(params['message'] ?? t('agent.codexDisconnected')) });
           end();
           return;
         }
@@ -335,8 +336,8 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
         }
         if (method === 'item/started') {
           const type = (params['item'] as { type?: string } | undefined)?.type;
-          if (type === 'commandExecution') push({ kind: 'tool', name: '指令' });
-          else if (type === 'webSearch') push({ kind: 'tool', name: '搜尋' });
+          if (type === 'commandExecution') push({ kind: 'tool', name: t('agent.toolCommand') });
+          else if (type === 'webSearch') push({ kind: 'tool', name: t('agent.toolSearch') });
           return;
         }
         if (method === 'turn/completed') {
@@ -344,7 +345,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
           activeTurns.delete(threadId);
           if (turn?.status === 'completed') push({ kind: 'done', ok: true });
           else if (turn?.status === 'interrupted') push({ kind: 'done', ok: false });
-          else push({ kind: 'error', message: turn?.error?.message ?? `turn 結束(${turn?.status ?? '未知'})` });
+          else push({ kind: 'error', message: turn?.error?.message ?? t('agent.turnEnded', { status: turn?.status ?? t('common.unknown') }) });
           end();
         }
       });
@@ -363,7 +364,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
         if (opts?.effort) turnParams['effort'] = opts.effort;
         const res = await request('turn/start', turnParams, 120_000);
         if (res.error) {
-          push({ kind: 'error', message: `turn/start 失敗:${res.error.message ?? '未知'}` });
+          push({ kind: 'error', message: t('agent.turnStartFailed', { error: res.error.message ?? t('common.unknown') }) });
           end();
         }
         for (;;) {
@@ -392,7 +393,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
           await request('turn/steer', {
             threadId,
             expectedTurnId: turnId,
-            input: [{ type: 'text', text: `我拒絕了剛才的操作，請依照這個調整：${feedback}`, text_elements: [] }],
+            input: [{ type: 'text', text: t('prompt.denyFeedback', { feedback }), text_elements: [] }],
           });
         }
         return;
@@ -407,7 +408,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
         await request('turn/steer', {
           threadId,
           expectedTurnId: turnId,
-          input: [{ type: 'text', text: `我拒絕了剛才的操作，請依照這個調整：${feedback}`, text_elements: [] }],
+          input: [{ type: 'text', text: t('prompt.denyFeedback', { feedback }), text_elements: [] }],
         });
       }
     },

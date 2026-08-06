@@ -1,5 +1,6 @@
 // 泡泡自驗入口:建一顆泡泡、塞長內容、固定錨點顯示;自動化經 window.__bubble 操作。
 import { createSpeechBubble } from './speechBubble';
+import { setLocale, type Locale } from '../shared/i18n';
 
 const bubble = createSpeechBubble({
   petName: '測試',
@@ -18,6 +19,12 @@ bubble.showAt(innerWidth / 2, innerHeight - 120);
 declare global {
   interface Window {
     __bubble: typeof bubble;
+    /** 自驗換語言:setLocale + 泡泡逐元素重套。 */
+    __setLocale: (locale: string) => void;
   }
 }
 window.__bubble = bubble;
+window.__setLocale = (locale) => {
+  setLocale(locale as Locale);
+  bubble.applyLocale();
+};

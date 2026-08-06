@@ -199,47 +199,47 @@
   <body>
     <div id="panel">
       <div id="pet-toolbar">
-        <select id="pet-select" aria-label="目前寵物"></select>
-        <button id="add-pet" title="新增寵物" aria-label="新增寵物">＋</button>
-        <button id="remove-pet" title="移除寵物" aria-label="移除寵物">−</button>
+        <select id="pet-select" aria-label="目前寵物" data-i18n-aria-label="settings.currentPet"></select>
+        <button id="add-pet" title="新增寵物" aria-label="新增寵物" data-i18n-title="settings.addPet" data-i18n-aria-label="settings.addPet">＋</button>
+        <button id="remove-pet" title="移除寵物" aria-label="移除寵物" data-i18n-title="settings.removePet" data-i18n-aria-label="settings.removePet">−</button>
       </div>
       <div id="tabs">
-        <button data-tab="light" class="active">光影</button>
-        <button data-tab="char">角色</button>
-        <button data-tab="motion">動作</button>
-        <button data-tab="project">工作</button>
+        <button data-tab="light" class="active" data-i18n="settings.tabLight">光影</button>
+        <button data-tab="char" data-i18n="settings.tabChar">角色</button>
+        <button data-tab="motion" data-i18n="settings.tabMotion">動作</button>
+        <button data-tab="project" data-i18n="settings.tabProject">工作</button>
       </div>
 
       <!-- ── 光影 ── -->
       <div class="tab active" id="tab-light">
-        <h3>光源類型</h3>
+        <h3 data-i18n="settings.lightType">光源類型</h3>
         <div id="ltype">
-          <button data-t="directional" class="active">平行光(太陽)</button>
-          <button data-t="point">點光源(燈泡)</button>
+          <button data-t="directional" class="active" data-i18n="settings.lightDirectional">平行光(太陽)</button>
+          <button data-t="point" data-i18n="settings.lightPoint">點光源(燈泡)</button>
         </div>
 
-        <h3>光源強度</h3>
+        <h3 data-i18n="settings.lightIntensity">光源強度</h3>
         <div class="row">
-          <label>環境光 <span class="val" id="ambient-val"></span></label>
+          <label><span data-i18n="settings.ambient">環境光</span> <span class="val" id="ambient-val"></span></label>
           <input type="range" id="ambient" min="0" max="6.2832" step="0.02" />
         </div>
         <div class="row">
-          <label>方向光 <span class="val" id="directional-val"></span></label>
+          <label><span data-i18n="settings.directional">方向光</span> <span class="val" id="directional-val"></span></label>
           <input type="range" id="directional" min="0" max="6.2832" step="0.02" />
         </div>
         <div class="row">
-          <label>陰影濃度(立體感) <span class="val" id="shade-val"></span></label>
+          <label><span data-i18n="settings.shade">陰影濃度(立體感)</span> <span class="val" id="shade-val"></span></label>
           <input type="range" id="shade" min="0" max="1" step="0.01" />
         </div>
 
-        <h3>光源位置(相對角色)</h3>
+        <h3 data-i18n="settings.lightPosition">光源位置(相對角色)</h3>
         <div class="pads">
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b>(正面)</span><span class="val" id="lxy-val"></span></div>
+            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span><span class="val" id="lxy-val"></span></div>
             <div class="pad hx vy" id="light-xy"><span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div></div>
           </div>
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b>(側視,右=朝你)</span><span class="val" id="lyz-val"></span></div>
+            <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b><span data-i18n="settings.capSideLight">(側視,右=朝你)</span></span><span class="val" id="lyz-val"></span></div>
             <div class="pad hz vy" id="light-yz"><span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div></div>
           </div>
         </div>
@@ -247,45 +247,45 @@
 
       <!-- ── 角色 ── -->
       <div class="tab" id="tab-char">
-        <h3>寵物名稱</h3>
-        <input class="text-input" id="pet-name" type="text" maxlength="40" placeholder="例如：小粉" style="width: 100%;" />
+        <h3 data-i18n="settings.petName">寵物名稱</h3>
+        <input class="text-input" id="pet-name" type="text" maxlength="40" data-i18n-placeholder="settings.petNamePlaceholder" placeholder="例如：小粉" style="width: 100%;" />
 
         <button class="wide" id="pet-enabled-toggle" style="margin: 12px 0 0;"></button>
 
-        <h3>角色設定（個性）</h3>
-        <textarea class="text-input" id="pet-persona" rows="4" maxlength="4000"
+        <h3 data-i18n="settings.persona">角色設定（個性）</h3>
+        <textarea class="text-input" id="pet-persona" data-i18n-placeholder="settings.personaPlaceholder" rows="4" maxlength="4000"
           style="width: 100%; resize: vertical; min-height: 72px; line-height: 1.5;"
           placeholder="用自由文字定義這隻角色的個性與說話風格,例如:&#10;你是活潑的貓娘工程師,說話簡短俏皮,句尾偶爾加「喵」,回報問題時一針見血。&#10;會注入對話的 system prompt,存檔後下一句對話生效。"></textarea>
 
-        <h3>晃動強度(1 = 模型原廠)</h3>
+        <h3 data-i18n="settings.sway">晃動強度(1 = 模型原廠)</h3>
         <div class="row">
-          <label>頭髮 <span class="val" id="hair-val"></span></label>
+          <label><span data-i18n="settings.hair">頭髮</span> <span class="val" id="hair-val"></span></label>
           <input type="range" id="hair" min="0" max="2" step="0.02" />
         </div>
         <div class="row">
-          <label>衣服 <span class="val" id="cloth-val"></span></label>
+          <label><span data-i18n="settings.cloth">衣服</span> <span class="val" id="cloth-val"></span></label>
           <input type="range" id="cloth" min="0" max="2" step="0.02" />
         </div>
         <div class="row">
-          <label>胸部 <span class="val" id="chest-val"></span></label>
+          <label><span data-i18n="settings.chest">胸部</span> <span class="val" id="chest-val"></span></label>
           <input type="range" id="chest" min="0" max="2" step="0.02" />
         </div>
         <div class="row">
-          <label>尾巴 <span class="val" id="tail-val"></span></label>
+          <label><span data-i18n="settings.tail">尾巴</span> <span class="val" id="tail-val"></span></label>
           <input type="range" id="tail" min="0" max="2" step="0.02" />
         </div>
 
-        <h3>服裝顯示</h3>
+        <h3 data-i18n="settings.wardrobe">服裝顯示</h3>
         <div id="wardrobe"><span class="empty">載入中…</span></div>
 
-        <h3>角色位置</h3>
+        <h3 data-i18n="settings.charPosition">角色位置</h3>
         <div class="pads">
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b>(正面)</span><span class="val" id="pxy-val"></span></div>
+            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span><span class="val" id="pxy-val"></span></div>
             <div class="pad hx vy" id="pet-xy"><div class="dot"></div></div>
           </div>
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b>(側面)</span><span class="val" id="pzy-val"></span></div>
+            <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b><span data-i18n="settings.capSideChar">(側面)</span></span><span class="val" id="pzy-val"></span></div>
             <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
           </div>
         </div>
@@ -293,60 +293,71 @@
 
       <!-- ── 動作設定 ── -->
       <div class="tab" id="tab-motion">
-        <h3>預設姿勢</h3>
+        <h3 data-i18n="settings.defaultPose">預設姿勢</h3>
         <select class="text-input" id="default-pose" style="width: 100%;"></select>
 
-        <h3>待機動作（勾選後隨機播放）</h3>
+        <h3 data-i18n="settings.idleMotions">待機動作（勾選後隨機播放）</h3>
         <div id="idle-motions"><span class="empty">載入中…</span></div>
       </div>
 
       <!-- ── 工作設定 ── -->
       <div class="tab" id="tab-project">
-        <h3>工作設定</h3>
-        <p class="project-note">每隻寵物可分別連結工作目錄與 AI 助手（Codex / Claude Code）。切換寵物不會自動開啟瀏覽視窗。</p>
+        <h3 data-i18n="settings.work">工作設定</h3>
+        <p class="project-note" data-i18n="settings.workNote">每隻寵物可分別連結工作目錄與 AI 助手（Codex / Claude Code）。切換寵物不會自動開啟瀏覽視窗。</p>
         <div class="workspace-card">
           <label class="field">
-            <span>AI 助手</span>
+            <span data-i18n="settings.agentKind">AI 助手</span>
             <select class="text-input" id="agent-kind">
               <option value="codex">Codex</option>
               <option value="claude">Claude Code</option>
             </select>
           </label>
           <label class="field">
-            <span>模型</span>
+            <span data-i18n="settings.model">模型</span>
             <select class="text-input" id="agent-model"></select>
           </label>
           <label class="field">
-            <span>推理力度</span>
+            <span data-i18n="settings.effort">推理力度</span>
             <select class="text-input" id="agent-effort"></select>
           </label>
           <label class="field">
-            <span>權限</span>
+            <span data-i18n="settings.permission">權限</span>
             <select class="text-input" id="agent-permission">
-              <option value="readonly">唯讀（只回答，不動檔案）</option>
-              <option value="ask">可寫工作目錄（每次操作需我核准）</option>
-              <option value="auto">全自動（不詢問，請小心）</option>
+              <option value="readonly" data-i18n="settings.permReadonly">唯讀（只回答，不動檔案）</option>
+              <option value="ask" data-i18n="settings.permAsk">可寫工作目錄（每次操作需我核准）</option>
+              <option value="auto" data-i18n="settings.permAuto">全自動（不詢問，請小心）</option>
             </select>
           </label>
           <label class="field">
-            <span>Session ID（對話後自動回存；手動填寫為進階用途）</span>
+            <span data-i18n="settings.sessionId">Session ID（對話後自動回存；手動填寫為進階用途）</span>
             <input class="text-input" id="agent-session-id" type="text" maxlength="160" placeholder="例如：019f…" spellcheck="false" />
           </label>
-          <button class="wide" id="new-session" style="margin: 0 0 12px;">開新對話（清空上下文）</button>
-          <div class="workspace-label">工作目錄</div>
-          <code id="workspace-path" class="empty">尚未選擇工作目錄</code>
+          <button class="wide" id="new-session" style="margin: 0 0 12px;" data-i18n="settings.newSession">開新對話（清空上下文）</button>
+          <div class="workspace-label" data-i18n="settings.workspace">工作目錄</div>
+          <code id="workspace-path" class="empty" data-i18n="settings.noWorkspace">尚未選擇工作目錄</code>
           <button class="wide" id="change-workspace">選擇工作目錄…</button>
         </div>
 
-        <h3 style="margin-top: 18px;">全域：新寵物預設位置</h3>
+        <h3 style="margin-top: 18px;" data-i18n="settings.globalWorkspaceRoot">全域：新寵物預設位置</h3>
         <div class="workspace-card">
-          <div class="workspace-label">新增寵物時會自動在此根目錄下建立「寵物名_時間」資料夾（只影響之後新增的寵物）</div>
-          <code id="workspace-root">載入中…</code>
-          <button class="wide" id="change-workspace-root">變更…</button>
+          <div class="workspace-label" data-i18n="settings.workspaceRootNote">新增寵物時會自動在此根目錄下建立「寵物名_時間」資料夾（只影響之後新增的寵物）</div>
+          <code id="workspace-root" data-i18n="common.loading">載入中…</code>
+          <button class="wide" id="change-workspace-root" data-i18n="settings.change">變更…</button>
+        </div>
+
+        <h3 style="margin-top: 18px;" data-i18n="settings.globalLocale">全域：介面語言</h3>
+        <div class="workspace-card">
+          <select class="text-input" id="ui-locale">
+            <option value="" data-i18n="settings.localeSystem">跟隨系統</option>
+            <option value="zh-Hant">繁體中文</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+          </select>
         </div>
       </div>
 
-      <button class="wide" id="reset">全部重置為預設</button>
+      <button class="wide" id="reset" data-i18n="settings.resetAll">全部重置為預設</button>
     </div>
     <script type="module" src="./settings.ts"></script>
   </body>

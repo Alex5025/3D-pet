@@ -1,5 +1,8 @@
 import type { ControlPetStatus, ControlStatusSnapshot, ControlTaskRecord } from '../shared/chat';
 import { normalizeWorkspacePath, workspaceFolderName } from '../shared/petGroups';
+import { setLocale, t, type Locale } from '../shared/i18n';
+import { applyI18nDom } from './i18nDom';
+import { bcp47 } from '../shared/i18n';
 import type { ApprovalPolicy, ProjectSandboxSettingsResult, SandboxMode } from '../shared/sandboxSettings';
 
 /* 中控面板 v2:逐寵列表(清醒/休息分區,最後回報新→舊)+ 公用任務發佈(可限定工作區)+ 任務帳本。
@@ -8,20 +11,21 @@ import type { ApprovalPolicy, ProjectSandboxSettingsResult, SandboxMode } from '
 
 const el = (id: string): HTMLElement => document.getElementById(id)!;
 
-const PHASE_LABEL: Record<ControlPetStatus['phase'], string> = {
-  resting: '休息中',
-  idle: '閒置',
-  working: '工作中',
-  awaitingApproval: '等待審批'
-};
+/* 狀態標籤用函式取值:模組常數會在載入時凍住舊語言(i18n 陷阱) */
+const phaseLabel = (phase: ControlPetStatus['phase']): string => ({
+  resting: t('control.phaseResting'),
+  idle: t('control.phaseIdle'),
+  working: t('control.phaseWorking'),
+  awaitingApproval: t('control.phaseAwaitingApproval')
+}[phase]);
 
-const STATUS_LABEL: Record<ControlTaskRecord['status'], string> = {
-  queued: '排隊中',
-  running: '執行中',
-  done: '完成',
-  failed: '失敗',
-  removed: '已移除'
-};
+const statusLabel = (status: ControlTaskRecord['status']): string => ({
+  queued: t('control.statusQueued'),
+  running: t('control.statusRunning'),
+  done: t('control.statusDone'),
+  failed: t('control.statusFailed'),
+  removed: t('control.statusRemoved')
+}[status]);
 
 let snapshot: ControlStatusSnapshot = { pets: [], tasks: [] };
 
@@ -50,23 +54,23 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   const workspace = document.createElement('div');
   workspace.className = 'pet-workspace';
   const folder = workspaceFolderName(pet.workspacePath);
-  workspace.textContent = folder ? `📁 ${folder}` : '未設定';
+  workspace.textContent = folder ? `📁 ${folder}` : t('common.notSet');
   if (pet.workspacePath) workspace.title = pet.workspacePath;
 
   // 喚醒/休息
   const toggle = document.createElement('button');
   toggle.className = 'pet-toggle';
-  toggle.textContent = pet.enabled ? '休息' : '喚醒';
+  toggle.textContent = pet.enabled ? t('control.rest') : t('control.wake');
   toggle.addEventListener('click', () => void window.pet.updatePetMeta(pet.petId, { enabled: !pet.enabled }));
 
   // 狀態區:phase + 排隊則數
   const status = document.createElement('div');
   status.className = 'pet-status';
-  status.textContent = PHASE_LABEL[pet.phase];
+  status.textContent = phaseLabel(pet.phase);
   if (pet.queue.length) {
     const count = document.createElement('span');
     count.className = 'queue-count';
-    count.textContent = `排隊 ${pet.queue.length}`;
+    count.textContent = t('control.queueN', { n: pet.queue.length });
     count.title = pet.queue.map((item, index) => `${index + 1}. ${item.text}`).join('\n');
     status.append(count);
   }
@@ -81,14 +85,14 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   input.maxLength = 1000;
   input.value = draftByPet.get(pet.petId) ?? '';
   input.disabled = !pet.enabled;
-  input.placeholder = pet.enabled ? '下指令給這隻寵物…' : '休息中,先喚醒';
+  input.placeholder = pet.enabled ? t('control.inputPlaceholder') : t('control.inputResting');
   input.addEventListener('input', () => draftByPet.set(pet.petId, input.value));
   input.addEventListener('focus', () => (focusedPetInput = pet.petId));
   input.addEventListener('blur', () => {
     if (focusedPetInput === pet.petId) focusedPetInput = null;
   });
   const send = document.createElement('button');
-  send.textContent = '送出';
+  send.textContent = t('control.send');
   send.disabled = !pet.enabled;
   const feedback = document.createElement('div');
   feedback.className = 'pet-feedback';
@@ -107,11 +111,11 @@ function petRow(pet: ControlPetStatus): HTMLElement {
         draftByPet.delete(pet.petId);
         input.value = '';
         feedbackByPet.set(pet.petId, {
-          text: result.position === 0 ? '已送出,即將執行' : `已排入第 ${result.position + 1} 位`,
+          text: result.position === 0 ? t('control.sendOkNow') : t('control.sendOkQueued', { n: result.position + 1 }),
           kind: 'success'
         });
       } else {
-        feedbackByPet.set(pet.petId, { text: result.reason ?? '送出失敗', kind: 'error' });
+        feedbackByPet.set(pet.petId, { text: result.reason ?? t('control.sendFail'), kind: 'error' });
       }
     } finally {
       send.disabled = !pet.enabled;
@@ -131,14 +135,14 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   const more = document.createElement('div');
   more.className = 'pet-more';
   const fresh = document.createElement('button');
-  fresh.textContent = '新對話';
-  fresh.title = '開新對話(清空上下文)';
+  fresh.textContent = t('control.newSession');
+  fresh.title = t('control.newSessionTitle');
   fresh.addEventListener('click', () => {
-    if (window.confirm(`確定要為「${pet.name}」開新對話(清空上下文)?`)) window.pet.newSession(pet.petId);
+    if (window.confirm(t('control.confirmNewSession', { name: pet.name }))) window.pet.newSession(pet.petId);
   });
   const chooseDir = document.createElement('button');
-  chooseDir.textContent = '目錄';
-  chooseDir.title = '選擇工作目錄';
+  chooseDir.textContent = t('control.chooseDir');
+  chooseDir.title = t('control.chooseDirTitle');
   chooseDir.addEventListener('click', () => void window.pet.chooseWorkspace(pet.petId));
   more.append(fresh, chooseDir);
 
@@ -155,11 +159,11 @@ function petRow(pet: ControlPetStatus): HTMLElement {
     const requestId = pet.pendingApproval.requestId;
     const allow = document.createElement('button');
     allow.className = 'allow';
-    allow.textContent = '允許';
+    allow.textContent = t('common.allow');
     allow.addEventListener('click', () => window.pet.chatApproval(pet.petId, requestId, true));
     const deny = document.createElement('button');
     deny.className = 'deny';
-    deny.textContent = '拒絕';
+    deny.textContent = t('common.deny');
     deny.addEventListener('click', () => window.pet.chatApproval(pet.petId, requestId, false));
     approval.append(desc, allow, deny);
     row.append(approval);
@@ -190,8 +194,8 @@ function renderPetRows(): void {
     }
     for (const pet of pets) container.append(petRow(pet));
   };
-  renderInto('awake-rows', awake, '沒有清醒的寵物');
-  renderInto('resting-rows', resting, '沒有休息中的寵物');
+  renderInto('awake-rows', awake, t('control.noAwake'));
+  renderInto('resting-rows', resting, t('control.noResting'));
   // 重繪清掉了焦點:把游標還給重繪前正在打字的輸入框
   if (focusedPetInput) {
     const target = focusedPetInput;
@@ -211,7 +215,7 @@ function renderPublishWorkspaces(): void {
   const picker = el('publish-workspace') as HTMLSelectElement;
   const previous = picker.value;
   picker.innerHTML = '';
-  picker.append(new Option('不限工作區(任何空閒寵物可領)', ''));
+  picker.append(new Option(t('control.anyWorkspace'), ''));
   const seen = new Set<string>();
   for (const pet of snapshot.pets) {
     const normalized = normalizeWorkspacePath(pet.workspacePath);
@@ -234,7 +238,7 @@ el('publish-send').addEventListener('click', async () => {
   const textInput = el('publish-text') as HTMLTextAreaElement;
   const text = textInput.value.trim();
   if (!text) {
-    setPublishFeedback('請先輸入任務內容', 'error');
+    setPublishFeedback(t('control.enterTask'), 'error');
     return;
   }
   const button = el('publish-send') as HTMLButtonElement;
@@ -243,11 +247,11 @@ el('publish-send').addEventListener('click', async () => {
     const workspace = (el('publish-workspace') as HTMLSelectElement).value;
     const result = await window.pet.controlEnqueue(text, undefined, workspace || undefined);
     if (!result.queued) {
-      setPublishFeedback(result.reason ?? '發佈失敗', 'error'); // 失敗不清輸入框,方便修改重送
+      setPublishFeedback(result.reason ?? t('control.publishFail'), 'error'); // 失敗不清輸入框,方便修改重送
       return;
     }
     textInput.value = '';
-    setPublishFeedback(result.position === 0 ? '已發佈,空閒寵物即將領取' : `已發佈,池中第 ${result.position + 1} 位`, 'success');
+    setPublishFeedback(result.position === 0 ? t('control.publishOkNow') : t('control.publishOkQueued', { n: result.position + 1 }), 'success');
   } finally {
     button.disabled = false;
   }
@@ -259,14 +263,14 @@ function taskRow(task: ControlTaskRecord): HTMLElement {
   row.className = 'task-row';
   const badge = document.createElement('span');
   badge.className = `status-badge ${task.status}`;
-  badge.textContent = STATUS_LABEL[task.status];
+  badge.textContent = statusLabel(task.status);
   const text = document.createElement('span');
   text.className = 'task-text';
   text.textContent = task.text;
   text.title = task.text;
   const assignee = document.createElement('span');
   assignee.className = 'task-cell';
-  assignee.textContent = task.assigneeName ?? (task.status === 'queued' ? '待領取' : '—');
+  assignee.textContent = task.assigneeName ?? (task.status === 'queued' ? t('control.unclaimed') : '—');
   const where = document.createElement('span');
   where.className = 'task-cell';
   const folder = workspaceFolderName(task.workspacePath);
@@ -274,13 +278,13 @@ function taskRow(task: ControlTaskRecord): HTMLElement {
   if (task.workspacePath) where.title = task.workspacePath;
   const time = document.createElement('span');
   time.className = 'task-cell task-time';
-  time.textContent = new Date(task.enqueuedAt).toLocaleTimeString('zh-TW', { hour12: false });
+  time.textContent = new Date(task.enqueuedAt).toLocaleTimeString(bcp47(), { hour12: false });
   const removeCell = document.createElement('span');
   if (task.status === 'queued') {
     const remove = document.createElement('button');
     remove.className = 'task-remove';
     remove.textContent = '✕';
-    remove.title = '撤掉這張排隊中的單';
+    remove.title = t('control.removeTaskTitle');
     remove.addEventListener('click', () => {
       // 綁定單走逐寵佇列撤單;公用池單(無 assignee)走公用池撤單
       if (task.assignee) window.pet.removeQueuedMessage(task.assignee, task.id);
@@ -299,13 +303,13 @@ function renderTasks(): void {
     const note = document.createElement('div');
     note.className = 'empty-note';
     note.style.padding = '10px 12px';
-    note.textContent = '還沒有中控指派的任務。上方逐寵下指令或發佈公用任務後,會在這裡追蹤全程狀態。';
+    note.textContent = t('control.tasksEmpty');
     table.append(note);
     return;
   }
   const header = document.createElement('div');
   header.className = 'task-row header';
-  for (const label of ['狀態', '任務', '接收者', '執行位置', '時間', '']) {
+  for (const label of [t('control.colStatus'), t('control.colTask'), t('control.colAssignee'), t('control.colWhere'), t('control.colTime'), '']) {
     const cell = document.createElement('span');
     cell.textContent = label;
     header.append(cell);
@@ -392,31 +396,31 @@ function sandboxRow(pet: ControlPetStatus): HTMLElement {
   const workspace = document.createElement('div');
   workspace.className = 'pet-workspace';
   const folder = workspaceFolderName(pet.workspacePath);
-  workspace.textContent = folder ? `📁 ${folder}` : '未設定';
+  workspace.textContent = folder ? `📁 ${folder}` : t('common.notSet');
   if (pet.workspacePath) workspace.title = pet.workspacePath;
 
   const policy = document.createElement('select');
   policy.append(
-    new Option('需要時詢問（建議）', 'on-request'),
-    new Option('只自動允許受信任操作', 'untrusted'),
-    new Option('永不詢問（受限操作直接失敗）', 'never')
+    new Option(t('control.policyOnRequest'), 'on-request'),
+    new Option(t('control.policyUntrusted'), 'untrusted'),
+    new Option(t('control.policyNever'), 'never')
   );
   const mode = document.createElement('select');
   mode.append(
-    new Option('可寫工作目錄（建議）', 'workspace-write'),
-    new Option('唯讀', 'read-only'),
-    new Option('完整存取（高風險）', 'danger-full-access')
+    new Option(t('control.modeWorkspaceWrite'), 'workspace-write'),
+    new Option(t('control.modeReadOnly'), 'read-only'),
+    new Option(t('control.modeFullAccess'), 'danger-full-access')
   );
   const networkLabel = document.createElement('label');
   networkLabel.className = 'toggle';
   const network = document.createElement('input');
   network.type = 'checkbox';
-  networkLabel.append(network, '網路');
-  networkLabel.title = '允許工作區沙盒連線網路(例如 git push)';
+  networkLabel.append(network, t('control.network'));
+  networkLabel.title = t('control.networkTitle');
 
   const apply = document.createElement('button');
   apply.className = 'sandbox-apply';
-  apply.textContent = '套用';
+  apply.textContent = t('control.apply');
   const status = document.createElement('div');
   status.className = 'sandbox-status';
 
@@ -425,25 +429,25 @@ function sandboxRow(pet: ControlPetStatus): HTMLElement {
 
   const noWorkspace = !pet.workspacePath;
   policy.disabled = mode.disabled = network.disabled = apply.disabled = noWorkspace;
-  if (noWorkspace) setRowStatus(refs, '尚未設定工作目錄,先到總覽分頁選「目錄」', 'warning');
+  if (noWorkspace) setRowStatus(refs, t('control.rowNoWorkspace'), 'warning');
 
   mode.addEventListener('change', () => {
     if (mode.value === 'danger-full-access') {
-      setRowStatus(refs, '完整存取會移除一般檔案與網路沙盒限制,只應用於完全信任的專案', 'warning');
+      setRowStatus(refs, t('control.dangerWarn'), 'warning');
     }
   });
   apply.addEventListener('click', async () => {
     const sandboxMode = mode.value as SandboxMode;
     if (sandboxMode === 'danger-full-access' &&
-      !window.confirm(`完整存取會移除一般沙盒限制。確定要套用到「${pet.name}」的專案嗎?`)) return;
+      !window.confirm(t('control.confirmDanger', { name: pet.name }))) return;
     apply.disabled = true;
-    setRowStatus(refs, '正在直接寫入專案設定…');
+    setRowStatus(refs, t('control.applying'));
     try {
       const result = await withTimeout(window.pet.setProjectSandboxSettings(pet.petId, {
         approvalPolicy: policy.value as ApprovalPolicy,
         sandboxMode,
         networkAccess: network.checked,
-      }), 8_000, '寫入逾時；請確認工作目錄所在磁碟是否可用');
+      }), 8_000, t('control.writeTimeout'));
       if (!result.ok || !result.settings) setRowStatus(refs, result.message, 'error');
       else setRowStatus(refs, result.message, 'success');
     } catch (error) {
@@ -462,13 +466,13 @@ async function loadSandboxRow(pet: ControlPetStatus): Promise<void> {
   if (!refs || !pet.workspacePath) return;
   const token = (sandboxLoadTokens.get(pet.petId) ?? 0) + 1;
   sandboxLoadTokens.set(pet.petId, token);
-  setRowStatus(refs, '正在讀取專案設定…');
+  setRowStatus(refs, t('control.loadingSandbox'));
   let result: ProjectSandboxSettingsResult;
   try {
     result = await withTimeout(
       window.pet.getProjectSandboxSettings(pet.petId),
       4_000,
-      '讀取逾時；選項仍可操作,可直接套用重試',
+      t('control.loadTimeout'),
     );
   } catch (error) {
     if (sandboxLoadTokens.get(pet.petId) !== token || !sandboxRowRefs.has(pet.petId)) return;
@@ -487,7 +491,7 @@ async function loadSandboxRow(pet: ControlPetStatus): Promise<void> {
   refs.status.title = settings.configPath;
   setRowStatus(refs,
     settings.warnings?.join('；') ??
-      (settings.exists ? `已載入 ${settings.configPath}` : '設定檔尚未建立；套用時會安全建立'),
+      (settings.exists ? t('control.loadedConfig', { path: settings.configPath }) : t('control.configNotCreated')),
     settings.warnings?.length ? 'warning' : 'neutral');
 }
 
@@ -502,7 +506,7 @@ function renderSandboxRows(): void {
   if (!ordered.length) {
     const note = document.createElement('div');
     note.className = 'empty-note';
-    note.textContent = '沒有寵物';
+    note.textContent = t('control.noPets');
     container.append(note);
     return;
   }
@@ -518,12 +522,22 @@ function loadSandboxSettings(): void {
 /* ---------- 系統操作 ---------- */
 el('system-restart').addEventListener('click', () => window.pet.systemRestart());
 el('system-quit').addEventListener('click', () => {
-  if (window.confirm('確定要結束桌寵系統?')) window.pet.systemQuit();
+  if (window.confirm(t('control.confirmQuit'))) window.pet.systemQuit();
 });
 
-/* ---------- 初始化 ---------- */
+/* ---------- 初始化(先拿語言再首次渲染) ---------- */
+window.pet.onLocale((next) => {
+  setLocale(next as Locale);
+  applyI18nDom();
+  sandboxSignature = ''; // 沙盒列文字含翻譯:強制繞過簽名快取,applySnapshot 內會重建
+  applySnapshot(snapshot); // 全量快照重繪天然支援換語言
+});
 window.pet.onControlStatus(applySnapshot);
-void window.pet.getControlStatus().then((initial) => {
+void window.pet.getLocale().then((locale) => {
+  setLocale(locale as Locale);
+  applyI18nDom();
+  return window.pet.getControlStatus();
+}).then((initial) => {
   if (initial) applySnapshot(initial);
   // 開窗指定分頁(Tray「沙盒設定…」帶 ?tab=sandbox):等首份快照到位才切,沙盒列才有寵物可列
   const tab = new URLSearchParams(location.search).get('tab');

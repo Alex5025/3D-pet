@@ -1,3 +1,4 @@
+import { t } from '../../shared/i18n';
 import type { AgentBinding, AgentEvent, AgentKind } from '../../shared/agentEvents';
 import type { ChatImage } from '../../shared/chat';
 import type { AgentModelInfo, AgentProvider } from './types';
@@ -89,18 +90,18 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
     const send = (event: AgentEvent): void => deps.send(petId, event);
 
     if (!profile.workspacePath) {
-      send({ kind: 'error', message: '請先在「工作設定」選擇工作目錄' });
+      send({ kind: 'error', message: t('agent.needWorkspace') });
       return;
     }
     const kind = profile.agent?.kind ?? DEFAULT_KIND;
     const provider = deps.providers[kind];
     const state = stateFor(petId, kind);
     if (state.running) {
-      send({ kind: 'error', message: '上一輪對話還在進行中' });
+      send({ kind: 'error', message: t('agent.turnInProgress') });
       return;
     }
     if (runningCount() >= MAX_CONCURRENT_TURNS) {
-      send({ kind: 'error', message: `同時進行的對話已達上限(${MAX_CONCURRENT_TURNS})` });
+      send({ kind: 'error', message: t('agent.concurrencyLimit', { n: MAX_CONCURRENT_TURNS }) });
       return;
     }
 
@@ -122,11 +123,11 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       const idle = Date.now() - state.lastActivity;
       if (!noticed && idle >= STALL_NOTICE_MS) {
         noticed = true;
-        send({ kind: 'tool', name: '仍在執行…' });
+        send({ kind: 'tool', name: t('agent.stillRunning') });
       }
       if (idle >= HARD_TIMEOUT_MS) {
         if (state.sessionId) void provider.cancel(state.sessionId);
-        emit({ kind: 'error', message: '執行逾時(5 分鐘),已中斷' });
+        emit({ kind: 'error', message: t('agent.timeout') });
       }
     }, 5_000);
 
@@ -224,7 +225,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       deps.send(petId, { kind: 'approvalResolved', requestId }); // 讓兩邊 UI 同步收合
       void deps.providers[state.kind].respondApproval(state.sessionId, requestId, allow, feedback).catch(async (error) => {
         console.log('[agent] respondApproval 失敗:', error);
-        deps.send(petId, { kind: 'error', message: `回覆操作選擇失敗：${String(error)}` });
+        deps.send(petId, { kind: 'error', message: t('agent.approvalReplyFailed', { error: String(error) }) });
         await deps.providers[state.kind].cancel(state.sessionId!).catch(() => undefined);
       });
     },

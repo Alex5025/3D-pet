@@ -12,6 +12,7 @@ import { createMockProvider } from './mockProvider';
 import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
 import { parseProjectSandboxConfig, updateProjectSandboxConfig } from '../sandboxConfig';
 import { resolveWorkspaceDirName, sanitizeWorkspaceName } from '../workspaceDefaults';
+import { getLocale, resolveLocale, setLocale, t, type MessageKey } from '../../shared/i18n';
 
 /**
  * Headless 回歸自驗(VRM_PET_AGENT_SELFTEST=1 觸發,不開視窗):
@@ -296,6 +297,25 @@ export async function runAgentSelftest(): Promise<boolean> {
     resolveWorkspaceDirName('寵物 3', wsDate, () => false) === '寵物3_2026-08-06_14-30-52');
   check('工作目錄:同秒碰撞加序號',
     resolveWorkspaceDirName('寵物 3', wsDate, (d) => !d.endsWith('-3')) === '寵物3_2026-08-06_14-30-52-3');
+
+  // i18n 純函式:語系解析、插值、fallback(測完還原,不影響後續測試的字串)
+  {
+    const before = getLocale();
+    check('i18n:resolveLocale 對應',
+      resolveLocale('zh-TW') === 'zh-Hant' && resolveLocale('zh-Hant-TW') === 'zh-Hant' && resolveLocale('zh') === 'zh-Hant' &&
+      resolveLocale('en-US') === 'en' && resolveLocale('ja') === 'ja' && resolveLocale('ko-KR') === 'ko' &&
+      resolveLocale('fr') === 'en' && resolveLocale('') === 'en');
+    setLocale('zh-Hant');
+    check('i18n:插值', t('control.sendOkQueued', { n: 3 }).includes('3'));
+    check('i18n:缺參數保留原樣', t('control.sendOkQueued').includes('{n}'));
+    check('i18n:假 key 回 key 不炸', t('no.such.key' as MessageKey) === 'no.such.key');
+    setLocale('en');
+    const enText = t('control.phaseWorking');
+    setLocale('ja');
+    const jaText = t('control.phaseWorking');
+    check('i18n:切語言取值不同且 en 無中文', enText !== jaText && !/[一-鿿]/.test(enText));
+    setLocale(before);
+  }
 
   const profile: AgentPetProfile = { id: 'p1', workspacePath: '/tmp', agent: { kind: 'claude' } };
   const events: AgentEvent[] = [];

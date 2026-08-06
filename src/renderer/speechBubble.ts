@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import { perf } from './perf';
 import type { ChatImage } from '../shared/chat';
 import { workspaceFolderName } from '../shared/petGroups';
+import { t } from '../shared/i18n';
 
 // agent 回覆是 GFM markdown;breaks 讓單一換行也換行(聊天語感)
 marked.setOptions({ gfm: true, breaks: true });
@@ -44,6 +45,8 @@ export interface SpeechBubble {
   showApproval: (requestId: string, description: string) => void;
   /** 審批已由別的 UI(中控面板)回覆:只收合審批區,不動 busy;requestId 不符或已收合則無事。 */
   hideApproval: (requestId: string) => void;
+  /** 換語言:逐元素重套靜態標籤(不重建,不丟串流內容);暫態狀態文字留待下一事件自然更新。 */
+  applyLocale: () => void;
   /** 顯示目前的模型/力度徽章(如「Codex · gpt-5.6-sol · low」);null 隱藏。 */
   setAgentInfo: (text: string | null) => void;
   /** 參考檔案清單(拖放到寵物身上的絕對路徑;泡泡最下方);空陣列隱藏區塊。 */
@@ -96,11 +99,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const element = document.createElement('aside');
   element.className = 'pet-speech-bubble';
   element.setAttribute('role', 'group');
-  element.setAttribute('aria-label', '角色對話');
+  element.setAttribute('aria-label', t('bubble.aria'));
   element.setAttribute('aria-hidden', 'true');
 
+  let currentPetName = options.petName ?? '';
+  const labelText = (): string => t('bubble.promptLabel', { name: currentPetName || t('common.petFallback') });
   const label = document.createElement('label');
-  label.textContent = `${options.petName ?? '寵物'}：想對我說什麼？`;
+  label.textContent = labelText();
 
   const workspace = document.createElement('div');
   workspace.className = 'bubble-workspace';
@@ -118,9 +123,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const pin = document.createElement('button');
   pin.type = 'button';
   pin.className = 'bubble-corner-dot bubble-pin';
-  pin.setAttribute('aria-label', '讓對話泡泡保持展開');
-  pin.setAttribute('aria-pressed', 'false');
-  pin.title = '保持展開：關';
+  pin.setAttribute('aria-pressed', 'false'); // aria/title 由 applyStaticTexts 統一套(i18n)
   pin.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 2.2h5.6l-1 3.4 2.1 2.1v1.1H8.7V14L8 15l-.7-1V8.8H4.1V7.7l2.1-2.1-1-3.4Z"/></svg>';
   pinHotspot.append(pin);
   const activity = document.createElement('div');
@@ -131,9 +134,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const activityText = document.createElement('span');
   activityText.className = 'bubble-activity-text';
   activity.append(activityDot, activityText);
-  activity.setAttribute('aria-label', '執行狀態：閒置');
-  activity.title = '閒置';
+  activity.setAttribute('aria-label', t('bubble.activityAria', { text: t('bubble.actIdle') }));
+  activity.title = t('bubble.actIdle');
   let pinned = false;
+  const setPinLabels = (): void => {
+    pin.setAttribute('aria-label', pinned ? t('bubble.pinAriaOn') : t('bubble.pinAriaOff'));
+    pin.title = pinned ? t('bubble.pinTitleOn') : t('bubble.pinTitleOff');
+  };
   let activityReadTimer: ReturnType<typeof setTimeout> | null = null;
   let lastActivityKey = 'idle:閒置';
   const markActivityRead = (): void => {
@@ -146,7 +153,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     activity.classList.remove('idle', 'working', 'approval', 'done', 'error');
     activity.classList.add(state);
     activityText.textContent = text;
-    activity.setAttribute('aria-label', `執行狀態：${text}`);
+    activity.setAttribute('aria-label', t('bubble.activityAria', { text }));
     activity.title = text;
     if (key !== lastActivityKey) {
       lastActivityKey = key;
@@ -168,14 +175,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     pinned = !pinned;
     pin.classList.toggle('active', pinned);
     pin.setAttribute('aria-pressed', String(pinned));
-    pin.setAttribute('aria-label', pinned ? '取消保持對話泡泡展開' : '讓對話泡泡保持展開');
-    pin.title = `保持展開：${pinned ? '開' : '關'}`;
+    setPinLabels();
   });
 
   // textarea 才能承載多行(Shift+Enter 換行);高度隨內容自動增長,上限由 CSS max-height 管
   const input = document.createElement('textarea');
   input.rows = 1;
-  input.placeholder = '輸入訊息…(Shift+Enter 換行)';
+  input.placeholder = t('bubble.inputPlaceholder');
   input.maxLength = 1000;
   input.autocomplete = 'off';
   const inputId = `pet-speech-input-${options.petId ?? 'default'}`;
@@ -242,8 +248,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const newSessionBtn = document.createElement('button');
   newSessionBtn.type = 'button';
   newSessionBtn.className = 'bubble-new-session';
-  newSessionBtn.textContent = '＋ 新對話';
-  newSessionBtn.title = '清掉目前對話上下文,下一句從零開始';
+  newSessionBtn.textContent = t('bubble.newSession');
+  newSessionBtn.title = t('bubble.newSessionTitle');
   agentInfo.append(agentInfoText, newSessionBtn);
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
@@ -254,17 +260,17 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   approvalFeedback.className = 'approval-feedback';
   approvalFeedback.rows = 2;
   approvalFeedback.maxLength = 1000;
-  approvalFeedback.placeholder = '拒絕原因或希望如何調整（選填）';
+  approvalFeedback.placeholder = t('bubble.approvalFeedbackPlaceholder');
   const approvalButtons = document.createElement('div');
   approvalButtons.className = 'approval-buttons';
   const allowButton = document.createElement('button');
   allowButton.type = 'button';
   allowButton.className = 'approval-allow';
-  allowButton.textContent = '允許';
+  allowButton.textContent = t('common.allow');
   const denyButton = document.createElement('button');
   denyButton.type = 'button';
   denyButton.className = 'approval-deny';
-  denyButton.textContent = '拒絕';
+  denyButton.textContent = t('common.deny');
   approvalButtons.append(allowButton, denyButton);
   approvalBox.append(approvalText, approvalFeedback, approvalButtons);
   let approvalRequestId: string | null = null;
@@ -278,7 +284,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     approvalFeedback.blur();
     approvalBox.classList.remove('open');
     approvalFeedback.value = '';
-    setActivity('working', allow ? '已允許，執行中' : '已拒絕，調整中');
+    setActivity('working', allow ? t('bubble.actAllowed') : t('bubble.actDenied'));
     options.onApproval?.(requestId, allow, allow ? undefined : feedback);
   };
   allowButton.addEventListener('click', () => answerApproval(true));
@@ -297,8 +303,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     reply.replaceChildren(mdBox);
     mdBox.innerHTML = '';
     reply.classList.remove('open');
-    newSessionBtn.textContent = '已清空';
-    setTimeout(() => (newSessionBtn.textContent = '＋ 新對話'), 1400);
+    newSessionBtn.textContent = t('bubble.newSessionDone');
+    setTimeout(() => (newSessionBtn.textContent = t('bubble.newSession')), 1400);
     options.onNewSession?.();
   });
 
@@ -312,12 +318,12 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const imagesText = document.createElement('span');
   const clearImages = document.createElement('button');
   clearImages.type = 'button';
-  clearImages.textContent = '移除';
-  clearImages.title = '移除所有已貼上的圖片';
+  clearImages.textContent = t('bubble.removeImages');
+  clearImages.title = t('bubble.removeImagesTitle');
   imagesBox.append(imagesText, clearImages);
   let pendingImages: ChatImage[] = [];
   const updateImagesBox = (): void => {
-    imagesText.textContent = `📎 已貼上 ${pendingImages.length} 張圖片`;
+    imagesText.textContent = t('bubble.imagesPasted', { n: pendingImages.length });
     imagesBox.classList.toggle('open', pendingImages.length > 0);
   };
   clearImages.addEventListener('click', () => {
@@ -332,7 +338,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const stop = document.createElement('button');
   stop.className = 'bubble-stop';
   stop.type = 'button';
-  stop.textContent = '停止';
+  stop.textContent = t('bubble.stop');
   statusRow.append(status, stop);
 
   // 佇列清單(輸入框上方):turn 進行中再送出的訊息排在這裡,每則可 ✕ 移除
@@ -347,7 +353,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const makeResizeHandle = (side: 'left' | 'right'): HTMLDivElement => {
     const handle = document.createElement('div');
     handle.className = `bubble-resize ${side}`;
-    handle.title = '拖曳調整泡泡寬度（雙擊還原自動）';
+    handle.title = t('bubble.resizeTitle');
     handle.addEventListener('pointerdown', (event) => {
       if (event.button !== 0 || resizing) return;
       event.preventDefault();
@@ -544,9 +550,32 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     cachedRect = null;
   }
 
+  /** 靜態標籤集中重套(i18n):create 收尾呼叫一次,applyLocale 換語言時再呼叫。
+   *  暫態文字(思考中…/膠囊當下狀態)不在此列,留待下一個事件自然更新。 */
+  const applyStaticTexts = (): void => {
+    element.setAttribute('aria-label', t('bubble.aria'));
+    label.textContent = labelText();
+    setPinLabels();
+    input.placeholder = t('bubble.inputPlaceholder');
+    approvalFeedback.placeholder = t('bubble.approvalFeedbackPlaceholder');
+    newSessionBtn.textContent = t('bubble.newSession');
+    newSessionBtn.title = t('bubble.newSessionTitle');
+    allowButton.textContent = t('common.allow');
+    denyButton.textContent = t('common.deny');
+    clearImages.textContent = t('bubble.removeImages');
+    clearImages.title = t('bubble.removeImagesTitle');
+    stop.textContent = t('bubble.stop');
+    element.querySelectorAll<HTMLElement>('.bubble-resize').forEach((handle) => {
+      handle.title = t('bubble.resizeTitle');
+    });
+    if (pendingImages.length) updateImagesBox();
+  };
+  applyStaticTexts();
+
   return {
     element,
     input,
+    applyLocale: applyStaticTexts,
     isVisible: () => element.classList.contains('visible'),
     containsPoint: (x, y) => {
       if (!element.classList.contains('visible')) {
@@ -572,7 +601,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
         y >= cachedRect.top - 20 && y <= cachedRect.bottom + 28;
     },
     setPetName: (name) => {
-      label.textContent = `${name || '寵物'}：想對我說什麼？`;
+      currentPetName = name;
+      label.textContent = labelText();
     },
     setWorkspacePath,
     showAt,
@@ -589,7 +619,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     isResizing: () => resizing,
     beginTurn: () => {
       busy = true;
-      setActivity('working', '執行中');
+      setActivity('working', t('bubble.actRunning'));
       // 不清 input/附件、不 disable——佇列接續時使用者可能正在打下一句;
       // composer 的清空由「送出被接受」時的 clearComposer() 負責
       replyRaw = '';
@@ -619,7 +649,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
         remove.type = 'button';
         remove.className = 'queue-remove';
         remove.textContent = '✕';
-        remove.title = '從佇列移除這則訊息';
+        remove.title = t('bubble.removeQueuedTitle');
         remove.addEventListener('click', () => options.onRemoveQueued?.(item.id));
         row.append(name, remove);
         queueBox.append(row);
@@ -653,7 +683,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
         remove.type = 'button';
         remove.className = 'ref-remove';
         remove.textContent = '✕';
-        remove.title = '移除這個參考檔案';
+        remove.title = t('bubble.removeRefTitle');
         remove.addEventListener('click', () => options.onRemoveRef?.(item.path));
         row.append(name, remove);
         refsBox.append(row);
@@ -664,7 +694,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       approvalText.textContent = description;
       approvalFeedback.value = '';
       approvalBox.classList.add('open');
-      setActivity('approval', '等待核准');
+      setActivity('approval', t('bubble.actAwaiting'));
     },
     hideApproval: (requestId) => {
       // 自己按鈕回覆時 approvalRequestId 已清空(answerApproval),這裡只處理「中控代答」的收合
@@ -673,7 +703,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       approvalFeedback.blur(); // 同 answerApproval:收合前必須 blur,否則透明層卡在輸入模式
       approvalBox.classList.remove('open');
       approvalFeedback.value = '';
-      setActivity('working', '已在中控面板處理,執行中');
+      setActivity('working', t('bubble.actControlHandled'));
     },
     appendText: (chunk) => {
       reply.classList.add('open');
@@ -683,11 +713,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     },
     setStatus: (text) => {
       status.textContent = text ?? '';
-      if (busy) setActivity('working', text || '執行中');
+      if (busy) setActivity('working', text || t('bubble.actRunning'));
     },
     endTurn: (ok, errorMessage) => {
       busy = false;
-      setActivity(ok ? 'done' : 'error', ok ? '已完成' : (errorMessage || '執行失敗'));
+      setActivity(ok ? 'done' : 'error', ok ? t('bubble.actDone') : (errorMessage || t('bubble.actFailed')));
       statusRow.classList.remove('open');
       status.textContent = '';
       approvalRequestId = null;

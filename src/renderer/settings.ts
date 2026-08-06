@@ -1,6 +1,8 @@
 import { DEFAULT_LIGHTING, DEFAULT_SWAY, type Lighting, type Sway } from './viewer';
 import type { AgentKind, AgentModelInfo, PetProfile, PetState, WardrobeItem } from '../preload/index';
 import { groupPetsByWorkspace } from '../shared/petGroups';
+import { setLocale, t, type Locale } from '../shared/i18n';
+import { applyI18nDom } from './i18nDom';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 const el = (id: string): HTMLElement => document.getElementById(id)!;
@@ -44,7 +46,7 @@ function renderPetSelector(): void {
     for (const profile of group.pets) {
       const option = document.createElement('option');
       option.value = profile.id;
-      option.textContent = `${profile.enabled ? '' : '（休息中）'}${profile.name}`;
+      option.textContent = `${profile.enabled ? '' : t('common.restingPrefix')}${profile.name}`;
       options.appendChild(option);
     }
     select.appendChild(options);
@@ -82,9 +84,9 @@ async function renderDefaultPose(): Promise<void> {
   motionList ??= await window.pet.getMotionList();
   const current = selectedProfile()?.defaultPose ?? '';
   select.innerHTML = '';
-  select.append(new Option('（無）', ''));
+  select.append(new Option(t('common.none'), ''));
   for (const file of motionList) select.append(new Option(file.replace(/\.vrma$/i, ''), file));
-  if (current && !motionList.includes(current)) select.append(new Option(`${current}（檔案不存在）`, current));
+  if (current && !motionList.includes(current)) select.append(new Option(t('settings.fileMissing', { name: current }), current));
   select.value = current;
 }
 
@@ -95,7 +97,7 @@ async function renderIdleMotions(): Promise<void> {
   const selected = new Set(selectedProfile()?.idleMotions ?? []);
   box.innerHTML = '';
   if (!motionList.length) {
-    box.innerHTML = '<span class="empty">motions/ 資料夾沒有動作檔</span>';
+    box.innerHTML = `<span class="empty">${t('settings.motionsEmpty')}</span>`;
     return;
   }
   for (const file of motionList) {
@@ -131,12 +133,12 @@ function renderWorkSettings(): void {
   void renderAgentModelOptions(profile?.agent?.model ?? '', profile?.agent?.effort ?? '');
   input('agent-session-id').value = profile?.agent?.sessionId ?? '';
   el('pet-enabled-toggle').textContent = profile?.enabled !== false
-    ? '😴 讓這隻寵物休息（釋放資源）'
-    : '⏰ 喚醒這隻寵物';
+    ? t('settings.rest')
+    : t('settings.wake');
   const path = el('workspace-path');
-  path.textContent = profile?.workspacePath ?? '尚未選擇工作目錄';
+  path.textContent = profile?.workspacePath ?? t('settings.noWorkspace');
   path.classList.toggle('empty', !profile?.workspacePath);
-  el('change-workspace').textContent = profile?.workspacePath ? '更改工作目錄…' : '選擇工作目錄…';
+  el('change-workspace').textContent = profile?.workspacePath ? t('settings.changeWorkspace') : t('settings.chooseWorkspace');
 }
 
 async function loadSelectedPet(notifyMain = true): Promise<void> {
@@ -196,7 +198,7 @@ el('add-pet').addEventListener('click', async () => {
 el('remove-pet').addEventListener('click', async () => {
   const profile = selectedProfile();
   if (!profile || profiles.length <= 1) return;
-  if (!confirm(`要移除「${profile.name}」嗎？設定檔會保留在 .trash。`)) return;
+  if (!confirm(t('settings.removeConfirm', { name: profile.name }))) return;
   if (!await window.pet.removePet(profile.id)) return;
   const collection = await window.pet.getPetCollection();
   selectedPetId = collection.selectedPetId;
@@ -226,7 +228,7 @@ function rebuildEffortOptions(keep: string): void {
     : [...new Set(list.flatMap((m) => m.efforts))];
   const options = efforts.length ? efforts : ['low', 'medium', 'high', 'xhigh', 'max'];
   effortSelect.innerHTML = '';
-  effortSelect.append(new Option('預設', ''));
+  effortSelect.append(new Option(t('settings.effortDefault'), ''));
   for (const effort of options) effortSelect.append(new Option(effort, effort));
   effortSelect.value = options.includes(keep) ? keep : '';
 }
@@ -237,10 +239,10 @@ async function renderAgentModelOptions(keepModel: string, keepEffort: string): P
   const modelSelect = el('agent-model') as HTMLSelectElement;
   const fill = (list: AgentModelInfo[]): void => {
     modelSelect.innerHTML = '';
-    modelSelect.append(new Option('預設（CLI 全域設定）', ''));
+    modelSelect.append(new Option(t('settings.modelDefault'), ''));
     for (const m of list) modelSelect.append(new Option(m.isDefault ? `${m.label}（CLI 預設）` : m.label, m.id));
     if (keepModel && !list.some((m) => m.id === keepModel)) {
-      modelSelect.append(new Option(`${keepModel}（自訂）`, keepModel));
+      modelSelect.append(new Option(t('settings.modelCustom', { model: keepModel }), keepModel));
     }
     modelSelect.value = keepModel;
     rebuildEffortOptions(keepEffort);
@@ -295,10 +297,10 @@ el('new-session').addEventListener('click', () => {
   window.pet.newSession(profile.id);
   input('agent-session-id').value = '';
   button.disabled = true;
-  button.textContent = '已開新對話,下一句從零開始';
+  button.textContent = t('settings.newSessionDone');
   setTimeout(() => {
     button.disabled = false;
-    button.textContent = '開新對話（清空上下文）';
+    button.textContent = t('settings.newSession');
   }, 1600);
 });
 
@@ -486,7 +488,7 @@ function renderWardrobe(list: WardrobeItem[]): void {
   const box = el('wardrobe');
   box.innerHTML = '';
   if (!list.length) {
-    box.innerHTML = '<span class="empty">此模型沒有可開關的部件</span>';
+    box.innerHTML = `<span class="empty">${t('settings.wardrobeEmpty')}</span>`;
     return;
   }
   for (const item of list) {
@@ -580,7 +582,28 @@ el('reset').addEventListener('click', () => {
   render();
 });
 
-window.pet.getPetCollection().then((collection) => {
+/* ---------- i18n:語言下拉與切換重繪 ---------- */
+const localeSelect = el('ui-locale') as HTMLSelectElement;
+localeSelect.addEventListener('change', () => {
+  void window.pet.setLocale(localeSelect.value); // main 會廣播 locale-apply 回來,重繪走訂閱
+});
+window.pet.onLocale((next) => {
+  setLocale(next as Locale);
+  applyI18nDom();
+  // 動態文字含翻譯的區塊全部重繪;模型清單快取的 label 是舊語言,清掉重抓
+  for (const key of Object.keys(modelLists) as AgentKind[]) delete modelLists[key];
+  renderPetSelector();
+  renderWorkSettings();
+  void renderDefaultPose();
+  void renderIdleMotions();
+});
+
+void window.pet.getLocale().then((locale) => {
+  setLocale(locale as Locale);
+  applyI18nDom();
+  return Promise.all([window.pet.getPetCollection(), window.pet.getLocalePref()]);
+}).then(([collection, pref]) => {
+  localeSelect.value = pref; // ''=跟隨系統
   selectedPetId = collection.selectedPetId;
   syncProfiles(collection.pets, collection.selectedPetId);
 });

@@ -695,3 +695,20 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 **處理**:父層隱藏拿掉 `opacity: 0` 只留 `visibility: hidden`(CSS visibility 可被子元素覆寫,opacity 不行——這就是差別所在);加規則讓「已定位過(.placed)且未讀(:not(.read))」的膠囊在泡泡收合後 `visibility: visible` 突圍留在原位。已讀機制照舊(hover 500ms 標 read 淡出)。配套:(1) `showAt` 加 `reveal` 參數與 `.placed` 標記,`positionSpeechBubble` 新增 placeOnly 模式——泡泡從未打開過(如從中控派工)時,turnStart/approval/done/error 事件會把膠囊定位到寵物旁,否則會停在未定位的 0,0;done 時順便校正位置(執行期間寵物可能被拖走)。(2) `containsPoint` 在泡泡收合時改判膠囊 rect(有自己的 100ms 快取)——游標壓上殘留膠囊時視窗才會轉互動,`updateHover` 的 bubbleHit 分支順勢重新展開泡泡看內容。
 
 **教訓(自驗環境)**:bubbletest 在背景分頁跑時 `document.visibilityState === 'hidden'`,**CSS transition 不推進**,computed style 永遠停在起始值——量測 visibility 前要先把 `getAnimations()` 的 CSSTransition `finish()` 掉(infinite keyframes 如脈動點不能 finish,要過濾),否則會把轉場延遲誤判成規則沒生效。瀏覽器自驗 5 項(收合留存/已讀淡出/失敗紅膠囊/containsPoint 命中語意/執行中膠囊)全過。
+
+## 45. i18n 四語支援:繁中/英/日/韓(2026-08-06)
+
+**需求**:全 UI(Tray/設定面板/中控面板/泡泡/dialog/錯誤訊息)加 i18n,AI prompt 也跟隨 UI 語言(影響 AI 回覆語言);設定入口在設定面板「工作」分頁全域區塊;預設跟隨系統語系(zh*→繁中,en/ja/ko 對應,其他退英文);切換即時生效。
+
+**架構決策**:
+
+1. **字典一語一檔**(`shared/i18n/` 五檔,約 210 key):zh-Hant 是基準(`MessageKey = keyof typeof zhHant`),其餘三語 `satisfies Record<MessageKey, string>`——**漏翻/多翻都是編譯期錯誤**,不需 runtime 檢查工具。`t(key, params)` 自帶 `{name}` 插值,fallback 當前語→zh-Hant→key 原文。純 TS 零相依,main/renderer/selftest 共用,不破壞 chatQueue「純邏輯」慣例。
+2. **語言存 `registry.locale`**(照 defaultWorkspaceRoot 先例,loadConfigSync 重建點讀回保留)。**時序陷阱**:normalizeProfile 的預設寵物名(寵物 N)在 loadConfigSync 內產生——開頭先 peek registry 檔的 locale 再 setLocale,否則首載缺名寵物拿到錯語言的名字。預設名是**建立當下語言寫成資料**,不回溯。
+3. **切換鏈**:`locale-set`(sender 限 settingsWin)→ main setLocale → 廣播 `locale-apply` 三視窗 → refreshTray/setToolTip/setTitle → **清 modelListCache**(claude 模型 label 含翻譯,10 分鐘快取會殘留舊語言;renderer 端 modelLists 快取同清)。
+4. **靜態 HTML 走 `data-i18n` 屬性 + applyI18nDom() 掃描**(textContent/title/placeholder/aria-label 四種),原繁中文字保留在標籤內當 fallback 兼可讀。含 markup 的 label(X/Y 軸標)把文字尾段包進獨立 span 才能標注。
+5. **模組常數陷阱**:control.ts 的 PHASE_LABEL/STATUS_LABEL 這種模組層 `Record<..,string>` 會在載入時凍住舊語言——一律改函式取值。
+6. **泡泡換語言 = 逐元素更新不重建**(重建丟串流回覆):create 時寫死的 ~15 處靜態標籤集中成 `applyStaticTexts()`,`applyLocale()` 重呼叫;暫態文字(思考中…/膠囊當下狀態)留舊語言到下一事件,明文接受。中控/設定面板則靠全量重繪天然支援。
+7. **AI prompt 跟語言**:persona 前綴/表演規則/審批描述/拒絕回饋/圖片提示全 t()。codex 的 syncContext 以組合字串比對——**換語言使比對值改變,下個 turn 自動 inject 新語言指示,免額外邏輯**(程式內註解明寫此依賴)。
+8. **刻意不翻**:sandboxConfig 的 MANAGED_COMMENT(寫入使用者 config.toml 的資料,移除邏輯靠精確比對)、codex clientInfo.title、console.log/selftest/註解/docs、語言下拉的語言自稱(業界慣例)。
+
+**驗證**:typecheck 綠(四語字典 key 齊全由型別保證);selftest 補 5 項(resolveLocale 對應/插值/缺參數保留/假 key 不炸/切語言取值不同)全 PASS;build 綠;bubbletest 瀏覽器自驗四語切換(label 插值/placeholder/按鈕)全對;dev 短跑無開機錯誤。

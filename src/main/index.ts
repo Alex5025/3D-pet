@@ -18,6 +18,7 @@ import { createProviders } from './agent/providers';
 import { runAgentSelftest, runClaudeE2E, runCodexE2E } from './agent/selftest';
 import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
 import { createDefaultWorkspace } from './workspaceDefaults';
+import { LOCALES, getLocale, resolveLocale, setLocale, t, type Locale } from '../shared/i18n';
 
 interface PetState {
   x: number;
@@ -70,6 +71,8 @@ interface AppRegistry {
   petIds: string[];
   /** 新寵物預設工作目錄的根位置(全域);未設定時用 ~/Documents/PetWorkspaces。 */
   defaultWorkspaceRoot?: string;
+  /** UI 語言(四語代碼);未設定 = 跟隨系統(app.getLocale())。 */
+  locale?: string;
 }
 
 type LegacyConfig = Omit<PetProfile, 'id' | 'name' | 'enabled'> & {
@@ -145,7 +148,7 @@ function normalizeProfile(value: Partial<PetProfile>, index: number): PetProfile
   const profile: PetProfile = {
     ...value,
     id,
-    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : `寵物 ${index + 1}`,
+    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : t('common.defaultPetName', { n: index + 1 }),
     enabled: value.enabled !== false
   };
   // 遷移:舊 codexSessionId → agent(舊欄位保留不刪,循遷移慣例)
@@ -161,7 +164,7 @@ function createProfile(index = pets.size): PetProfile {
   return normalizeProfile(
     {
       id: randomUUID(),
-      name: `寵物 ${index + 1}`,
+      name: t('common.defaultPetName', { n: index + 1 }),
       enabled: true,
       state: { ...DEFAULT_STATE, x: offset }
     },
@@ -232,6 +235,12 @@ function scheduleConfigFlush(): void {
 function loadConfigSync(): void {
   mkdirSync(petsDir(), { recursive: true });
   const rawRegistry = readJson(registryPath());
+  // 語言要在 normalize 之前就緒:缺名寵物的預設名(寵物 N)在下面產生,晚 setLocale 會拿到錯語言
+  const peekedLocale = isRecord(rawRegistry) && typeof rawRegistry['locale'] === 'string'
+    && LOCALES.includes(rawRegistry['locale'] as Locale)
+    ? (rawRegistry['locale'] as Locale)
+    : undefined;
+  setLocale(peekedLocale ?? resolveLocale(app.getLocale()));
   if (isRecord(rawRegistry) && rawRegistry['schemaVersion'] === 2 && Array.isArray(rawRegistry['petIds'])) {
     const ids = rawRegistry['petIds'].filter((id): id is string => typeof id === 'string');
     ids.forEach((id, index) => {
@@ -251,7 +260,8 @@ function loadConfigSync(): void {
         schemaVersion: 2,
         selectedPetId: pets.has(requested) ? requested : pets.keys().next().value!,
         petIds: [...pets.keys()],
-        ...(savedRoot ? { defaultWorkspaceRoot: savedRoot } : {})
+        ...(savedRoot ? { defaultWorkspaceRoot: savedRoot } : {}),
+        ...(peekedLocale ? { locale: peekedLocale } : {})
       };
       persistConfigSync();
       return;
@@ -277,7 +287,7 @@ function loadConfigSync(): void {
     const profile = normalizeProfile({
       ...legacyProfile,
       id: randomUUID(),
-      name: '我的寵物',
+      name: t('common.myPet'),
       enabled: true
     }, 0);
     pets.set(profile.id, profile);
@@ -378,8 +388,8 @@ async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<s
   app.focus({ steal: true });
   parent?.focus();
   const options: Electron.OpenDialogOptions = {
-    title: '選擇工作目錄',
-    buttonLabel: '選擇',
+    title: t('dialog.chooseWorkspace'),
+    buttonLabel: t('common.select'),
     defaultPath: profile.workspacePath ?? app.getPath('documents'),
     properties: ['openDirectory', 'createDirectory']
   };
@@ -489,8 +499,8 @@ function scheduleIdleMotion(petId: string): void {
 }
 
 function motionMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
-  if (motionsDirMissing) return [{ label: '(找不到 motions 資料夾)', enabled: false }];
-  if (!motionFiles.length) return [{ label: '(motions 資料夾裡沒有 .vrma 檔)', enabled: false }];
+  if (motionsDirMissing) return [{ label: t('tray.noMotionsDir'), enabled: false }];
+  if (!motionFiles.length) return [{ label: t('tray.noMotionFiles'), enabled: false }];
   const dir = join(dataDir(), 'motions');
   return motionFiles.map((file) => ({
     label: file.replace(/\.vrma$/i, ''),
@@ -521,7 +531,7 @@ async function setDefaultPose(petId: string, file: string | null): Promise<void>
 function defaultPoseMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
   const current = getPet(petId)?.defaultPose;
   const none: Electron.MenuItemConstructorOptions = {
-    label: '(無)',
+    label: t('common.none'),
     type: 'radio',
     checked: !current,
     click: () => void setDefaultPose(petId, null)
@@ -586,14 +596,14 @@ function petMenu(requestedId?: string): Menu {
   const profile = getPet(requestedId) ?? [...pets.values()][0];
   const petId = profile.id;
   return Menu.buildFromTemplate([
-    { label: `寵物：${profile.name}`, enabled: false },
+    { label: t('tray.currentPet', { name: profile.name }), enabled: false },
     {
-      label: '切換寵物',
+      label: t('tray.switchPet'),
       submenu: groupPetsByWorkspace([...pets.values()]).map((group) => ({
         label: `📁 ${group.name}`,
         submenu: group.pets.map((item) => ({
           // 休息中的寵物仍列出(讓使用者知道存在),但灰掉不可選。
-          label: `${item.enabled ? '' : '（休息中）'}${item.name}`,
+          label: `${item.enabled ? '' : t('common.restingPrefix')}${item.name}`,
           type: 'radio' as const,
           checked: item.id === petId,
           enabled: item.enabled,
@@ -602,49 +612,49 @@ function petMenu(requestedId?: string): Menu {
       }))
     },
     { type: 'separator' },
-    { label: '選擇 VRM 檔…', click: () => void chooseVrm(petId) },
+    { label: t('tray.chooseVrm'), click: () => void chooseVrm(petId) },
     {
-      label: '角色動作',
+      label: t('tray.motions'),
       submenu: [
-        { label: '播放動作', submenu: motionMenuItems(petId) },
-        { label: '預設姿勢', submenu: defaultPoseMenuItems(petId) },
+        { label: t('tray.playMotion'), submenu: motionMenuItems(petId) },
+        { label: t('tray.defaultPose'), submenu: defaultPoseMenuItems(petId) },
         { type: 'separator' },
-        { label: '停止動作', click: () => win?.webContents.send('vrma-stop', petId) }
+        { label: t('tray.stopMotion'), click: () => win?.webContents.send('vrma-stop', petId) }
       ]
     },
     {
       // 一般外觀與工作設定共用分頁；高風險沙盒設定刻意排除。
-      label: '設定',
+      label: t('tray.settings'),
       submenu: [
-        { label: '工作（AI 助手）…', click: () => openSettings('project', petId) },
-        { label: '燈光…', click: () => openSettings('light', petId) },
-        { label: '角色…', click: () => openSettings('char', petId) },
-        { label: '動作…', click: () => openSettings('motion', petId) }
+        { label: t('tray.settingsProject'), click: () => openSettings('project', petId) },
+        { label: t('tray.settingsLight'), click: () => openSettings('light', petId) },
+        { label: t('tray.settingsChar'), click: () => openSettings('char', petId) },
+        { label: t('tray.settingsMotion'), click: () => openSettings('motion', petId) }
       ]
     },
-    { label: '中控面板…', click: () => openControlPanel() },
-    { label: '沙盒設定…', click: () => openControlPanel('sandbox') },
-    { label: '重置位置與大小', click: () => resetState(petId) },
+    { label: t('tray.controlPanel'), click: () => openControlPanel() },
+    { label: t('tray.sandboxSettings'), click: () => openControlPanel('sandbox') },
+    { label: t('tray.resetState'), click: () => resetState(petId) },
     {
-      label: '重啟目前角色',
+      label: t('tray.restartPet'),
       enabled: profile.enabled,
       click: () => void restartPet(petId)
     },
     {
-      label: profile.enabled ? '讓目前角色休息' : '喚醒目前角色',
+      label: profile.enabled ? t('tray.restCurrent') : t('tray.wakeCurrent'),
       click: () => setPetEnabled(petId, !profile.enabled)
     },
     { type: 'separator' },
     {
-      label: '新增寵物',
+      label: t('tray.addPet'),
       click: () => {
         const created = createNewPet();
         openSettings('project', created.id);
       }
     },
-    { label: '重啟寵物系統', click: restartApp },
+    { label: t('tray.restartSystem'), click: restartApp },
     // app.exit 不觸發 before-quit,清理要在這裡自己做(已知坑,見 DEVLOG §22)
-    { label: '結束', click: () => { shutdownSync(); app.exit(0); } }
+    { label: t('tray.quit'), click: () => { shutdownSync(); app.exit(0); } }
   ]);
 }
 
@@ -665,7 +675,7 @@ function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', pe
     maximizable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    title: '桌寵設定',
+    title: t('window.settings'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -693,7 +703,7 @@ function openControlPanel(tab: 'overview' | 'sandbox' = 'overview'): void {
     height: 620,
     minWidth: 560,
     minHeight: 420,
-    title: '中控面板', // 常駐工作視窗:可縮放、不置頂(疊層在 screen-saver 層且點擊穿透,不衝突)
+    title: t('window.control'), // 常駐工作視窗:可縮放、不置頂(疊層在 screen-saver 層且點擊穿透,不衝突)
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -1090,8 +1100,8 @@ app.whenReady().then(async () => {
     app.focus({ steal: true }); // 背景 app 的 dialog 會被壓在其他視窗底下
     settingsWin.focus();
     const result = await dialog.showOpenDialog(settingsWin, {
-      title: '選擇新寵物的預設工作根目錄',
-      buttonLabel: '選擇',
+      title: t('dialog.chooseWorkspaceRoot'),
+      buttonLabel: t('common.select'),
       defaultPath: workspaceRoot(),
       properties: ['openDirectory', 'createDirectory']
     });
@@ -1104,19 +1114,48 @@ app.whenReady().then(async () => {
     return path;
   });
 
+  /* ── 全域:介面語言(i18n)── */
+  ipcMain.handle('locale-get', () => getLocale()); // 各視窗開機都要,不限 sender
+  ipcMain.handle('locale-pref-get', (event) => {
+    if (!settingsWin || event.sender !== settingsWin.webContents) return '';
+    return registry.locale ?? ''; // '' = 跟隨系統(下拉初始選中用)
+  });
+  ipcMain.handle('locale-set', (event, value: string): Locale => {
+    if (!settingsWin || event.sender !== settingsWin.webContents) return getLocale();
+    if (value === '') delete registry.locale; // 跟隨系統
+    else if (LOCALES.includes(value as Locale)) registry.locale = value;
+    else return getLocale();
+    registryDirty = true;
+    scheduleConfigFlush();
+    applyLocaleEverywhere(registry.locale ? (registry.locale as Locale) : resolveLocale(app.getLocale()));
+    return getLocale();
+  });
+  /** 集中套用:main 自己換語言 → 廣播三視窗 → Tray/標題/tooltip 重建 → 清模型清單快取(label 含翻譯)。 */
+  function applyLocaleEverywhere(locale: Locale): void {
+    setLocale(locale);
+    win?.webContents.send('locale-apply', locale);
+    settingsWin?.webContents.send('locale-apply', locale);
+    controlWin?.webContents.send('locale-apply', locale);
+    refreshTray();
+    tray?.setToolTip(t('tray.tooltip'));
+    settingsWin?.setTitle(t('window.settings'));
+    controlWin?.setTitle(t('window.control'));
+    modelListCache.clear(); // claude 模型 label 含翻譯,舊語言快取要作廢
+  }
+
   /* ── 專案 Codex 沙盒設定──
    * 設定視窗明確按下後由 main 直接讀寫 <workspace>/.codex/config.toml；不啟動 agent、不跑 shell。 */
   ipcMain.handle('sandbox-settings-get', async (event, id: string): Promise<ProjectSandboxSettingsResult> => {
     // 高風險通道只開放中控面板的「沙盒設定」分頁這一個具名視窗
     if (!controlWin || event.sender !== controlWin.webContents) {
-      return { ok: false, message: '沙盒設定只能從中控面板操作' };
+      return { ok: false, message: t('sandbox.onlyControl') };
     }
     const profile = getPet(id);
-    if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
+    if (!profile?.workspacePath) return { ok: false, message: t('sandbox.needWorkspace') };
     try {
       return {
         ok: true,
-        message: '已讀取專案沙盒設定',
+        message: t('sandbox.readOk'),
         settings: await readProjectSandboxSettings(profile.workspacePath),
       };
     } catch (error) {
@@ -1127,14 +1166,14 @@ app.whenReady().then(async () => {
     'sandbox-settings-set',
     async (event, id: string, settings: ProjectSandboxSettingsInput): Promise<ProjectSandboxSettingsResult> => {
       if (!controlWin || event.sender !== controlWin.webContents) {
-        return { ok: false, message: '沙盒設定只能從中控面板操作' };
+        return { ok: false, message: t('sandbox.onlyControl') };
       }
       const profile = getPet(id);
-      if (!profile?.workspacePath) return { ok: false, message: '請先在「工作」分頁選擇工作目錄' };
+      if (!profile?.workspacePath) return { ok: false, message: t('sandbox.needWorkspace') };
       try {
         return {
           ok: true,
-          message: '已直接寫入專案 .codex/config.toml；重新開啟 Codex 工作階段後生效',
+          message: t('sandbox.writeOk'),
           settings: await writeProjectSandboxSettings(profile.workspacePath, settings),
         };
       } catch (error) {
@@ -1169,7 +1208,7 @@ app.whenReady().then(async () => {
   // 「佇列已滿」不可走 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn。
   ipcMain.handle('chat-send', (event, petId: string, text: string, rawImages: unknown): ChatSendResult => {
     if (!win || event.sender !== win.webContents || !pets.has(petId)) {
-      return { queued: false, position: -1, reason: '無效的請求' };
+      return { queued: false, position: -1, reason: t('reason.invalidRequest') };
     }
     const images: ChatImage[] = [];
     if (Array.isArray(rawImages)) {
@@ -1188,7 +1227,7 @@ app.whenReady().then(async () => {
       }
     }
     const trimmed = String(text).slice(0, 1000).trim();
-    if (!trimmed && !images.length) return { queued: false, position: -1, reason: '訊息是空的' };
+    if (!trimmed && !images.length) return { queued: false, position: -1, reason: t('reason.emptyMessage') };
     const result = chatQueue.enqueue({ assignee: petId, text: trimmed, images, source: 'bubble' });
     if (!result.ok) return { queued: false, position: -1, reason: result.reason };
     chatDispatcher.dispatch(petId);
@@ -1228,17 +1267,17 @@ app.whenReady().then(async () => {
    * 絕不發 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn(§10 鐵律)。 */
   ipcMain.handle('control-enqueue', (event, text: string, assignee?: string, restrictWorkspace?: string): ChatSendResult => {
     if (!controlWin || event.sender !== controlWin.webContents) {
-      return { queued: false, position: -1, reason: '無效的請求' };
+      return { queued: false, position: -1, reason: t('reason.invalidRequest') };
     }
     const trimmed = String(text).slice(0, 1000).trim();
-    if (!trimmed) return { queued: false, position: -1, reason: '訊息是空的' };
+    if (!trimmed) return { queued: false, position: -1, reason: t('reason.emptyMessage') };
     let target: string | undefined;
     if (assignee !== undefined && assignee !== '') {
       const profile = pets.get(String(assignee));
-      if (!profile) return { queued: false, position: -1, reason: '找不到該寵物' };
+      if (!profile) return { queued: false, position: -1, reason: t('reason.petNotFound') };
       if (profile.enabled === false) {
         // 投給休息中寵物的綁定單會躺死或在喚醒前被 clear,直接拒收
-        return { queued: false, position: -1, reason: '該寵物休息中,請先喚醒或投入公用池' };
+        return { queued: false, position: -1, reason: t('reason.petResting') };
       }
       target = profile.id;
     }
@@ -1250,7 +1289,7 @@ app.whenReady().then(async () => {
         [...pets.values()].map((p) => normalizeWorkspacePath(p.workspacePath)).filter((p): p is string => !!p)
       );
       if (!normalized || !known.has(normalized)) {
-        return { queued: false, position: -1, reason: '限定的工作區不存在' };
+        return { queued: false, position: -1, reason: t('reason.workspaceUnknown') };
       }
       restrict = normalized;
     }
@@ -1529,7 +1568,7 @@ app.whenReady().then(async () => {
     <body style="margin:0;height:100vh;box-sizing:border-box;display:flex;align-items:center;justify-content:center;
       font:12px system-ui;color:#f4f1fa;background:#38324e;border:1.5px dashed rgba(200,190,235,0.55);
       border-radius:10px;text-align:center;cursor:copy;letter-spacing:0.02em;">
-      <div style="opacity:0.95;">📎 放開加入參考檔案<br/><b style="font-size:13px;">${name.replace(/[<>&]/g, '')}</b></div>
+      <div style="opacity:0.95;">${t('overlay.dropHint')}<br/><b style="font-size:13px;">${name.replace(/[<>&]/g, '')}</b></div>
       <script>
         addEventListener('dragover', (e) => { e.preventDefault(); document.body.style.background = '#4a4170'; });
         addEventListener('dragleave', () => { document.body.style.background = '#38324e'; });
@@ -1613,7 +1652,7 @@ app.whenReady().then(async () => {
   const icon = nativeImage.createFromDataURL(TRAY_ICON);
   icon.setTemplateImage(true);
   tray = new Tray(icon);
-  tray.setToolTip('VRM 桌寵');
+  tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(petMenu(registry.selectedPetId));
 });
 

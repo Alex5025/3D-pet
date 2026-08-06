@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { t } from '../../shared/i18n';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
@@ -110,7 +111,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         }
         const queue = approvalQueues.get(String(payload['turnKey']));
         if (!queue) {
-          socket.write(JSON.stringify({ behavior: 'deny', message: '對話已結束' }) + '\n');
+          socket.write(JSON.stringify({ behavior: 'deny', message: t('agent.sessionEnded') }) + '\n');
           return;
         }
         const requestId = `perm-${++permSeq}`;
@@ -118,9 +119,9 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         socket.once('close', () => pendingPerm.delete(requestId));
         const input = (payload['input'] ?? {}) as Record<string, unknown>;
         const description = [
-          typeof input['description'] === 'string' ? input['description'] : `想使用工具 ${String(payload['toolName'])}`,
+          typeof input['description'] === 'string' ? input['description'] : t('agent.approvalUseTool', { name: String(payload['toolName']) }),
           typeof input['command'] === 'string' ? `$ ${input['command']}` : '',
-          typeof input['file_path'] === 'string' ? `檔案:${input['file_path']}` : ''
+          typeof input['file_path'] === 'string' ? t('agent.approvalFile', { path: String(input['file_path']) }) : ''
         ].filter(Boolean).join('\n');
         queue.push({ kind: 'approval', requestId, description });
       }
@@ -208,8 +209,8 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       // 角色個性 + 寵物工具提示 + 參考檔案:附加到 system prompt(逐 turn 注入,變動下一句就生效)
       {
         const parts: string[] = [];
-        if (opts?.persona) parts.push(`你是一隻桌面寵物。以下是你的角色設定,請以此個性回應:\n${opts.persona}`);
-        if (hub && opts?.petId) parts.push('表演規則:每次回覆前先用 pet_show_expression 配合情緒(開心 happy、遇到問題 sad、驚訝 surprised);打招呼或完成任務時用 pet_play_motion 播個動作;工作過程較長時用 pet_speak 簡短回報。這些是你身體的一部分,主動使用,不要等使用者要求。');
+        if (opts?.persona) parts.push(`${t('prompt.petPreamble')}${t('prompt.personaIntro')}\n${opts.persona}`);
+        if (hub && opts?.petId) parts.push(t('prompt.performanceRules'));
         const refs = refFilesPrompt(opts?.refFiles);
         if (refs) parts.push(refs);
         if (parts.length) args.push('--append-system-prompt', parts.join('\n'));
@@ -230,15 +231,15 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       let stderrTail = '';
 
       const imagePrompt = pastedImagePaths.length
-        ? `\n\n使用者隨本則訊息貼上了圖片，請用 Read 工具讀取並理解後再回答：\n${pastedImagePaths.map((path) => `- ${path}`).join('\n')}`
+        ? `\n\n${t('prompt.imagesPasted')}\n${pastedImagePaths.map((path) => `- ${path}`).join('\n')}`
         : '';
-      child.stdin.write((text || '請閱讀我貼上的圖片。') + imagePrompt + '\n');
+      child.stdin.write((text || t('prompt.readImages')) + imagePrompt + '\n');
       child.stdin.end();
       child.stderr.on('data', (chunk) => {
         stderrTail = (stderrTail + String(chunk)).slice(-500);
       });
       child.on('error', (error) => {
-        queue.push({ kind: 'error', message: `claude 啟動失敗:${error.message}` });
+        queue.push({ kind: 'error', message: t('agent.errClaudeStart', { error: error.message }) });
         queue.end();
       });
 
@@ -283,7 +284,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
             if (cancelRequested.has(child)) {
               queue.push({ kind: 'done', ok: false }); // 使用者主動取消,不是錯誤
             } else {
-              const detail = typeof msg['result'] === 'string' ? msg['result'] : 'claude 回報錯誤';
+              const detail = typeof msg['result'] === 'string' ? msg['result'] : t('agent.errClaudeReported');
               queue.push({ kind: 'error', message: detail });
             }
           } else {
@@ -295,7 +296,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       child.on('close', (code) => {
         if (AGENT_DEBUG) console.log(`[claude][debug] close code=${code} sawResult=${sawResult}`);
         if (!sawResult && code !== 0 && code !== null && stderrTail) {
-          queue.push({ kind: 'error', message: `claude 結束(code ${code}):${stderrTail.trim()}` });
+          queue.push({ kind: 'error', message: t('agent.errClaudeExit', { code: String(code), detail: stderrTail.trim() }) });
         }
         // 被 cancel 殺掉(SIGTERM)→ 不吐終結事件,由 bridge 補 done ok:false。
         // 清理只刪「仍指向本 child」的條目——同 session 的下一 turn 已經 spawn 時,
@@ -340,7 +341,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       socket.write(JSON.stringify(
         allow
           ? { behavior: 'allow', updatedInput: undefined }
-          : { behavior: 'deny', message: feedback || '使用者拒絕了這個操作' }
+          : { behavior: 'deny', message: feedback || t('agent.denied') }
       ) + '\n');
     },
     async closeSession(sessionId) {
@@ -364,10 +365,10 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       // claude CLI 沒有機器可讀的模型清單指令;別名穩定(--help 明載),haiku 實測可用(2026-07)
       const efforts = ['low', 'medium', 'high', 'xhigh', 'max'];
       return [
-        { id: 'fable', label: 'Fable(最強)', efforts },
+        { id: 'fable', label: t('agent.modelFable'), efforts },
         { id: 'opus', label: 'Opus', efforts, isDefault: true },
-        { id: 'sonnet', label: 'Sonnet(均衡)', efforts },
-        { id: 'haiku', label: 'Haiku(最快)', efforts }
+        { id: 'sonnet', label: t('agent.modelSonnet'), efforts },
+        { id: 'haiku', label: t('agent.modelHaiku'), efforts }
       ];
     }
   };

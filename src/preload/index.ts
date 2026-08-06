@@ -122,6 +122,13 @@ const api = {
 
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
+  /* i18n:各視窗開機取語言、設定面板改語言、切換廣播。 */
+  getLocale: (): Promise<string> => ipcRenderer.invoke('locale-get'),
+  getLocalePref: (): Promise<string> => ipcRenderer.invoke('locale-pref-get'),
+  setLocale: (locale: string): Promise<string> => ipcRenderer.invoke('locale-set', locale),
+  onLocale: (callback: (locale: string) => void) =>
+    ipcRenderer.on('locale-apply', (_event, locale) => callback(locale)),
+
   getWorkspaceRoot: (): Promise<string> => ipcRenderer.invoke('workspace-root-get'),
   chooseWorkspaceRoot: (): Promise<string> => ipcRenderer.invoke('choose-workspace-root'),
   onWorkspaceRoot: (callback: (root: string) => void) =>
