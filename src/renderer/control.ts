@@ -525,6 +525,12 @@ el('system-quit').addEventListener('click', () => {
   if (window.confirm(t('control.confirmQuit'))) window.pet.systemQuit();
 });
 
+/* ---------- 語言下拉(全域設定,存 registry.locale) ---------- */
+const localeSelect = el('ui-locale') as HTMLSelectElement;
+localeSelect.addEventListener('change', () => {
+  void window.pet.setLocale(localeSelect.value); // main 廣播 locale-apply 回來,重繪走訂閱
+});
+
 /* ---------- 初始化(先拿語言再首次渲染) ---------- */
 window.pet.onLocale((next) => {
   setLocale(next as Locale);
@@ -536,8 +542,9 @@ window.pet.onControlStatus(applySnapshot);
 void window.pet.getLocale().then((locale) => {
   setLocale(locale as Locale);
   applyI18nDom();
-  return window.pet.getControlStatus();
-}).then((initial) => {
+  return Promise.all([window.pet.getControlStatus(), window.pet.getLocalePref()]);
+}).then(([initial, pref]) => {
+  localeSelect.value = pref; // ''=跟隨系統
   if (initial) applySnapshot(initial);
   // 開窗指定分頁(Tray「沙盒設定…」帶 ?tab=sandbox):等首份快照到位才切,沙盒列才有寵物可列
   const tab = new URLSearchParams(location.search).get('tab');

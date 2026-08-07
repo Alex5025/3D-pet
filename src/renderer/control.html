@@ -14,6 +14,7 @@
       h2 .count { color: #777783; font-weight: normal; }
       .topbar { display: flex; align-items: center; gap: 10px; }
       .topbar .spacer { flex: 1; }
+      .topbar #ui-locale { min-height: 30px; width: auto; }
       button { min-height: 30px; padding: 0 12px; border: 1px solid #484853; border-radius: 8px; color: #efeff4; background: #2b2b33; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
       button:hover { background: #383843; }
       button:disabled { cursor: not-allowed; opacity: 0.5; }
@@ -115,6 +116,13 @@
       <div class="topbar">
         <h1 data-i18n="window.control">中控面板</h1>
         <div class="spacer"></div>
+        <select id="ui-locale" title="介面語言" data-i18n-title="settings.globalLocale">
+          <option value="" data-i18n="settings.localeSystem">跟隨系統</option>
+          <option value="zh-Hant">繁體中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+        </select>
         <button id="system-restart" data-i18n="tray.restartSystem">重啟寵物系統</button>
         <button id="system-quit" class="danger" data-i18n="tray.quit">結束</button>
       </div>

@@ -1117,11 +1117,12 @@ app.whenReady().then(async () => {
   /* ── 全域:介面語言(i18n)── */
   ipcMain.handle('locale-get', () => getLocale()); // 各視窗開機都要,不限 sender
   ipcMain.handle('locale-pref-get', (event) => {
-    if (!settingsWin || event.sender !== settingsWin.webContents) return '';
+    if (!controlWin || event.sender !== controlWin.webContents) return '';
     return registry.locale ?? ''; // '' = 跟隨系統(下拉初始選中用)
   });
   ipcMain.handle('locale-set', (event, value: string): Locale => {
-    if (!settingsWin || event.sender !== settingsWin.webContents) return getLocale();
+    // 語言下拉在中控面板(循 workspace-root 的單一具名視窗慣例)
+    if (!controlWin || event.sender !== controlWin.webContents) return getLocale();
     if (value === '') delete registry.locale; // 跟隨系統
     else if (LOCALES.includes(value as Locale)) registry.locale = value;
     else return getLocale();

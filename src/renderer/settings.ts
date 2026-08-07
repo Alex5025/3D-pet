@@ -582,11 +582,7 @@ el('reset').addEventListener('click', () => {
   render();
 });
 
-/* ---------- i18n:語言下拉與切換重繪 ---------- */
-const localeSelect = el('ui-locale') as HTMLSelectElement;
-localeSelect.addEventListener('change', () => {
-  void window.pet.setLocale(localeSelect.value); // main 會廣播 locale-apply 回來,重繪走訂閱
-});
+/* ---------- i18n:切換重繪(語言下拉在中控面板) ---------- */
 window.pet.onLocale((next) => {
   setLocale(next as Locale);
   applyI18nDom();
@@ -601,9 +597,8 @@ window.pet.onLocale((next) => {
 void window.pet.getLocale().then((locale) => {
   setLocale(locale as Locale);
   applyI18nDom();
-  return Promise.all([window.pet.getPetCollection(), window.pet.getLocalePref()]);
-}).then(([collection, pref]) => {
-  localeSelect.value = pref; // ''=跟隨系統
+  return window.pet.getPetCollection();
+}).then((collection) => {
   selectedPetId = collection.selectedPetId;
   syncProfiles(collection.pets, collection.selectedPetId);
 });
