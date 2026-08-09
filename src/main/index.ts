@@ -1084,6 +1084,12 @@ app.whenReady().then(async () => {
     sendPetProfiles();
   });
 
+  // 角色分頁的「選擇 VRM 檔」:與 Tray 選單同一條 chooseVrm 路徑(僅設定視窗可呼叫)
+  ipcMain.handle('choose-vrm', async (event, id: string) => {
+    if (!settingsWin || event.sender !== settingsWin.webContents || !pets.has(id)) return;
+    await chooseVrm(id);
+  });
+
   ipcMain.handle('choose-workspace', (event, id: string) => {
     const parent = event.sender === settingsWin?.webContents
       ? settingsWin
@@ -1095,11 +1101,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('workspace-root-get', () => workspaceRoot());
 
   ipcMain.handle('choose-workspace-root', async (event): Promise<string> => {
-    // 僅設定視窗可變更(循 choose-workspace 的 sender 驗證慣例)
-    if (!settingsWin || event.sender !== settingsWin.webContents) return workspaceRoot();
+    // 僅中控面板可變更(全域設定歸中控,循語言下拉的 sender 驗證慣例)
+    if (!controlWin || event.sender !== controlWin.webContents) return workspaceRoot();
     app.focus({ steal: true }); // 背景 app 的 dialog 會被壓在其他視窗底下
-    settingsWin.focus();
-    const result = await dialog.showOpenDialog(settingsWin, {
+    controlWin.focus();
+    const result = await dialog.showOpenDialog(controlWin, {
       title: t('dialog.chooseWorkspaceRoot'),
       buttonLabel: t('common.select'),
       defaultPath: workspaceRoot(),
@@ -1110,7 +1116,7 @@ app.whenReady().then(async () => {
     registry.defaultWorkspaceRoot = path;
     registryDirty = true;
     scheduleConfigFlush();
-    settingsWin?.webContents.send('workspace-root-apply', path);
+    controlWin?.webContents.send('workspace-root-apply', path);
     return path;
   });
 

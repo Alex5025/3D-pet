@@ -68,6 +68,7 @@
       .publish-feedback.error { color: #ff8c96; }
       .publish-feedback.success { color: #78d6a0; }
       .publish-hint { margin-top: 4px; color: #777783; font-size: 11px; }
+      #workspace-root { display: block; margin-top: 8px; padding: 6px 8px; border-radius: 8px; background: #17171c; color: #b8b8c4; font-size: 12px; overflow-wrap: anywhere; }
 
       /* ── 任務帳本 ── */
       .task-table { border: 1px solid #363640; border-radius: 12px; background: #202027; overflow: hidden; }
@@ -152,6 +153,16 @@
 
       <h2 data-i18n="control.tasks">任務佇列與狀態</h2>
       <div class="task-table" id="task-table"></div>
+
+      <!-- 全域設定循語言下拉的慣例放中控,不混進每寵的設定視窗 -->
+      <h2 data-i18n="settings.globalWorkspaceRoot">全域：新寵物預設位置</h2>
+      <div class="publish-card">
+        <div class="publish-hint" data-i18n="settings.workspaceRootNote">新增寵物時會自動在此根目錄下建立「寵物名_時間」資料夾（只影響之後新增的寵物）</div>
+        <code id="workspace-root" data-i18n="common.loading">載入中…</code>
+        <div class="publish-row">
+          <button id="change-workspace-root" data-i18n="settings.change">變更…</button>
+        </div>
+      </div>
       </div>
 
       <div class="tab" id="tab-sandbox">

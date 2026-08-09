@@ -323,17 +323,14 @@ el('change-workspace').addEventListener('click', async () => {
   }
 });
 
-/* 全域:新寵物預設工作根目錄(只影響之後新增的寵物;既有寵物的工作目錄不動) */
-function renderWorkspaceRoot(root: string): void {
-  el('workspace-root').textContent = root;
-}
-void window.pet.getWorkspaceRoot().then(renderWorkspaceRoot);
-window.pet.onWorkspaceRoot(renderWorkspaceRoot);
-el('change-workspace-root').addEventListener('click', async () => {
-  const button = el('change-workspace-root') as HTMLButtonElement;
-  button.disabled = true; // 防連點(循 change-workspace 慣例)
+/* 角色分頁:選擇 VRM 檔(對話框與載入由 main 處理,同 Tray 選單路徑) */
+el('choose-vrm').addEventListener('click', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  const button = el('choose-vrm') as HTMLButtonElement;
+  button.disabled = true;
   try {
-    renderWorkspaceRoot(await window.pet.chooseWorkspaceRoot());
+    await window.pet.chooseVrmFile(profile.id);
   } finally {
     button.disabled = false;
   }

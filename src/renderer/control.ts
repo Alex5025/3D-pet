@@ -550,3 +550,19 @@ void window.pet.getLocale().then((locale) => {
   const tab = new URLSearchParams(location.search).get('tab');
   if (tab && tab !== 'overview') activateTab(tab);
 });
+
+/* 全域:新寵物預設工作根目錄(自設定面板搬入,循語言下拉的中控慣例) */
+const renderWorkspaceRoot = (root: string): void => {
+  el('workspace-root').textContent = root;
+};
+void window.pet.getWorkspaceRoot().then(renderWorkspaceRoot);
+window.pet.onWorkspaceRoot(renderWorkspaceRoot);
+el('change-workspace-root').addEventListener('click', async () => {
+  const button = el('change-workspace-root') as HTMLButtonElement;
+  button.disabled = true; // 防連點
+  try {
+    renderWorkspaceRoot(await window.pet.chooseWorkspaceRoot());
+  } finally {
+    button.disabled = false;
+  }
+});
