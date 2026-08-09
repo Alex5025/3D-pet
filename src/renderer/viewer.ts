@@ -198,9 +198,10 @@ export function createViewer(opts: { transparent: boolean; background?: number }
   const sway: Sway = { ...DEFAULT_SWAY };
 
   function swayCategory(boneName: string): keyof Sway {
-    if (/hair/i.test(boneName)) return 'hair';
-    if (/bust|breast|chest|oppai/i.test(boneName)) return 'chest';
-    if (/(?<!pony)tail|shippo/i.test(boneName)) return 'tail'; // ponytail 馬尾是頭髮,排除
+    // MMD 轉制模型(UniVRM 匯出)骨名常是日文,一併涵蓋
+    if (/hair|髪/i.test(boneName)) return 'hair';
+    if (/bust|breast|chest|oppai|胸/i.test(boneName)) return 'chest';
+    if (/(?<!pony)tail|shippo|尻尾|しっぽ/i.test(boneName)) return 'tail'; // ponytail 馬尾是頭髮,排除
     return 'cloth';
   }
 
