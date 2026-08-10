@@ -107,6 +107,7 @@ export const zhHant = {
   'bubble.actAllowed': '已允許，執行中',
   'bubble.actDenied': '已拒絕，調整中',
   'bubble.actControlHandled': '已在中控面板處理,執行中',
+  'bubble.lastChatYou': '上次你說:',
 
   // ── 設定面板 ──
   'settings.currentPet': '目前寵物',

@@ -2,7 +2,7 @@ import './speechBubble.css';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { perf } from './perf';
-import type { ChatImage } from '../shared/chat';
+import type { ChatImage, ChatTranscript } from '../shared/chat';
 import { workspaceFolderName } from '../shared/petGroups';
 import { t } from '../shared/i18n';
 
@@ -37,6 +37,8 @@ export interface SpeechBubble {
   beginTurn: () => void;
   /** 回覆文字增量(自動展開回覆區並捲到底)。 */
   appendText: (chunk: string) => void;
+  /** 回填上次對話(重啟後);已有進行中或已顯示的內容時不覆蓋。 */
+  restoreTranscript: (transcript: ChatTranscript) => void;
   /** 狀態列文字(思考中…/正在執行 ○○);null 清空。 */
   setStatus: (status: string | null) => void;
   /** turn 結束:解鎖輸入框;失敗時紅字顯示訊息。 */
@@ -710,6 +712,17 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       replyRaw += chunk;
       if (replyRaw.length > MAX_REPLY_CHARS) truncateReplyRaw();
       queueRenderReply();
+    },
+    restoreTranscript: (transcript) => {
+      // 進行中的一輪永遠優先:重啟後的回填是非同步的,不能覆蓋已經開始串流的內容
+      if (busy || replyRaw) return;
+      const quoted = transcript.user
+        ? `> ${t('bubble.lastChatYou')}${transcript.user.replace(/\n/g, '\n> ')}\n\n`
+        : '';
+      replyRaw = quoted + transcript.reply;
+      reply.classList.add('open');
+      queueRenderReply();
+      reply.scrollTop = 0; // 回填的是舊內容,從頭看起(串流才需要跟到底)
     },
     setStatus: (text) => {
       status.textContent = text ?? '';

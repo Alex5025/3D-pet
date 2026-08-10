@@ -102,6 +102,7 @@ export const ko = {
   'bubble.actAllowed': '허용됨, 실행 중',
   'bubble.actDenied': '거부됨, 조정 중',
   'bubble.actControlHandled': '컨트롤 패널에서 처리됨, 실행 중',
+  'bubble.lastChatYou': '지난번 대화:',
 
   'settings.currentPet': '현재 펫',
   'settings.addPet': '펫 추가',

@@ -19,6 +19,8 @@ bubble.showAt(innerWidth / 2, innerHeight - 120);
 declare global {
   interface Window {
     __bubble: typeof bubble;
+    /** 自驗回填上次對話。 */
+    __restore: (user: string, reply: string) => void;
     /** 自驗換語言:setLocale + 泡泡逐元素重套。 */
     __setLocale: (locale: string) => void;
   }
@@ -28,3 +30,6 @@ window.__setLocale = (locale) => {
   setLocale(locale as Locale);
   bubble.applyLocale();
 };
+
+// 上次對話回填自驗:重啟情境(泡泡空白時回填)、進行中不覆蓋
+window.__restore = (user, reply) => bubble.restoreTranscript({ user, reply, at: Date.now() });

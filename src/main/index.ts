@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
+import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
 import { createChatDispatcher, createChatQueue } from './chatQueue';
 import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
 import { groupPetsByWorkspace, normalizeWorkspacePath } from '../shared/petGroups';
@@ -104,6 +104,8 @@ let dragMonitor: DragMonitor | null = null;
 let refreshCursorPollHook: (() => void) | null = null;
 /** 清空某寵的對話佇列(whenReady 注入):寵物休息/刪除/開新對話時呼叫。 */
 let clearChatQueueHook: ((petId: string) => void) | null = null;
+/** 清掉某寵的上次對話紀錄(開新對話/刪除寵物);whenReady 內注入。 */
+let clearTranscriptHook: ((petId: string) => void) | null = null;
 /** 全域派發(whenReady 注入):寵物喚醒時呼叫——醒來的寵物可領公用池的單。 */
 let dispatchAllHook: (() => void) | null = null;
 /** 中控面板快照重推(whenReady 注入,50ms debounce):寵物/佇列/agent 狀態變更時呼叫。 */
@@ -120,6 +122,8 @@ const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
 const petsDir = (): string => join(runtimeDataDir(), 'pets');
 const registryPath = (): string => join(runtimeDataDir(), 'app.json');
 const petPath = (id: string): string => join(petsDir(), `${id}.json`);
+const transcriptsDir = (): string => join(runtimeDataDir(), 'transcripts');
+const transcriptPath = (id: string): string => join(transcriptsDir(), `${id}.json`);
 const legacyRuntimeConfigPath = (): string => join(runtimeDataDir(), 'config.json');
 const legacyRootConfigPath = (): string => join(dataDir(), 'config.json');
 const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
@@ -434,6 +438,7 @@ function removePet(id: string): boolean {
   pets.delete(id);
   releasePetCaches(id);
   clearChatQueueHook?.(id);
+  clearTranscriptHook?.(id); // 寵物刪了,對話紀錄不留在磁碟上
   const idleTimer = idleMotionTimers.get(id);
   if (idleTimer) clearTimeout(idleTimer);
   idleMotionTimers.delete(id);
@@ -833,7 +838,41 @@ app.whenReady().then(async () => {
     }
   }
 
+  /* ── 上次對話紀錄:重啟後泡泡回填,使用者看得到聊到哪(agent session 本來就續著,
+   *    但泡泡是空的)。只留最後一輪,寫在獨立檔案——寵物設定檔會被拖曳位置高頻改寫,
+   *    幾十 KB 的逐字稿混進去每次都要重寫一遍。落盤只發生在 turn 結束。 */
+  const TRANSCRIPT_MAX_CHARS = 40_000;
+  const liveTranscripts = new Map<string, { user: string; reply: string }>();
+
+  function beginTranscript(petId: string, userText: string): void {
+    liveTranscripts.set(petId, { user: userText.slice(0, 2_000), reply: '' });
+  }
+  function persistTranscript(petId: string): void {
+    const live = liveTranscripts.get(petId);
+    liveTranscripts.delete(petId);
+    if (!live || (!live.user && !live.reply)) return;
+    const record: ChatTranscript = {
+      user: live.user,
+      reply: live.reply.slice(-TRANSCRIPT_MAX_CHARS),
+      at: Date.now(),
+    };
+    void mkdir(transcriptsDir(), { recursive: true })
+      .then(() => writeFile(transcriptPath(petId), JSON.stringify(record), 'utf8'))
+      .catch(() => {}); // 紀錄是附加價值,寫失敗不該影響對話
+  }
+  clearTranscriptHook = (petId) => {
+    liveTranscripts.delete(petId);
+    void rm(transcriptPath(petId), { force: true }).catch(() => {});
+  };
+
   function sendChatEvent(petId: string, event: AgentEvent): void {
+    if (event.kind === 'turnStart') beginTranscript(petId, event.text);
+    else if (event.kind === 'text') {
+      const live = liveTranscripts.get(petId);
+      if (live) live.reply += event.text;
+    } else if (event.kind === 'done' || event.kind === 'error') {
+      persistTranscript(petId);
+    }
     if (event.kind === 'text') {
       // text 增量一律不推中控:中控只顯示狀態燈號,33ms 合併節奏的高頻 IPC 不打第二個視窗
       chatTextBuffers.set(petId, (chatTextBuffers.get(petId) ?? '') + event.text);
@@ -1076,6 +1115,19 @@ app.whenReady().then(async () => {
 
   /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
    *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
+  /** 上次對話紀錄:泡泡建立時 pull(循 chat-queue-get 的慣例,推播漏接也能自癒)。 */
+  ipcMain.handle('chat-transcript-get', async (event, id: string): Promise<ChatTranscript | null> => {
+    if (!win || event.sender !== win.webContents || !pets.has(id)) return null;
+    try {
+      const raw = await readFile(transcriptPath(id), 'utf8');
+      const parsed = JSON.parse(raw) as Partial<ChatTranscript>;
+      if (typeof parsed.reply !== 'string' && typeof parsed.user !== 'string') return null;
+      return { user: parsed.user ?? '', reply: parsed.reply ?? '', at: parsed.at ?? 0 };
+    } catch {
+      return null; // 沒有紀錄(第一次對話前)或檔案壞掉,都當作沒有
+    }
+  });
+
   ipcMain.on('new-session', (event, id: string) => {
     const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents
       || event.sender === controlWin?.webContents;
@@ -1083,6 +1135,7 @@ app.whenReady().then(async () => {
     petRefFiles.delete(id); // 參考檔是「當次對話」的:開新對話一併清空
     sendRefFiles(id);
     clearChatQueueHook?.(id); // 排隊中的舊對話訊息也一併清掉
+    clearTranscriptHook?.(id); // 上次對話紀錄同理:開新對話 = 從零開始,泡泡不該再回填舊內容
     const profile = getPet(id);
     if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
     const { sessionId: _dropped, ...keep } = profile.agent;

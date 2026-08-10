@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult, ControlStatusSnapshot, QueuedMessageSummary } from '../shared/chat';
+import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, QueuedMessageSummary } from '../shared/chat';
 import type {
   ProjectSandboxSettings,
   ProjectSandboxSettingsInput,
@@ -154,6 +154,9 @@ const api = {
     ipcRenderer.invoke('chat-queue-get', petId),
   onChatQueue: (callback: (petId: string, list: QueuedMessageSummary[]) => void) =>
     ipcRenderer.on('chat-queue-apply', (_event, petId, list) => callback(petId, list)),
+  /** 上次對話紀錄(重啟後回填泡泡);沒有紀錄時回 null。 */
+  getChatTranscript: (petId: string): Promise<ChatTranscript | null> =>
+    ipcRenderer.invoke('chat-transcript-get', petId),
   chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
   chatApproval: (petId: string, requestId: string, allow: boolean, feedback?: string) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow, feedback),

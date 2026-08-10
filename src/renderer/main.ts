@@ -345,6 +345,10 @@ function addRuntime(profile: PetProfile): void {
   runtime.bubble.setAgentInfo(agentInfoText(profile));
   // 泡泡重建(renderer crash reload / 單寵熱重啟)後主動拉一次佇列現況——廣播式推播蓋不到重建
   void window.pet.getChatQueue(profile.id).then((list) => runtimes.get(profile.id)?.bubble.setQueue(list));
+  // 上次對話回填:agent session 本來就續著,泡泡也該接得上(bubble 端會讓進行中的一輪優先)
+  void window.pet.getChatTranscript(profile.id).then((transcript) => {
+    if (transcript) runtimes.get(profile.id)?.bubble.restoreTranscript(transcript);
+  });
   viewer.setLighting(profile.lighting ?? {});
   viewer.setSway(profile.sway ?? {});
   applyState(runtime);

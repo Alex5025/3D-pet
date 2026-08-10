@@ -102,6 +102,7 @@ export const ja = {
   'bubble.actAllowed': '許可しました。実行中',
   'bubble.actDenied': '拒否しました。調整中',
   'bubble.actControlHandled': 'コントロールパネルで処理済み。実行中',
+  'bubble.lastChatYou': '前回のあなた:',
 
   'settings.currentPet': '現在のペット',
   'settings.addPet': 'ペットを追加',

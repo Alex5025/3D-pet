@@ -102,6 +102,7 @@ export const en = {
   'bubble.actAllowed': 'Allowed, running',
   'bubble.actDenied': 'Denied, adjusting',
   'bubble.actControlHandled': 'Handled in Control Panel, running',
+  'bubble.lastChatYou': 'Last time you said: ',
 
   'settings.currentPet': 'Current pet',
   'settings.addPet': 'Add pet',
