@@ -32,7 +32,19 @@
       .pet-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) auto auto minmax(100px, 1fr) minmax(200px, 280px); gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid #363640; border-radius: 10px; background: #202027; }
       .pet-row.resting { opacity: 0.55; }
       .pet-name-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
-      .pet-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* 名稱本身是按鈕(點一下就地改名),外觀維持純文字 */
+      .pet-name {
+        padding: 2px 4px; margin: -2px -4px; font-weight: 600; font-size: 13px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: inherit; font-family: inherit; text-align: left;
+        background: none; border: 0; border-radius: 6px; cursor: text;
+      }
+      .pet-name:hover { background: #2f2f38; }
+      .pet-name-edit {
+        padding: 2px 4px; margin: -2px -4px; min-width: 0; width: 100%;
+        font: inherit; font-weight: 600; font-size: 13px; color: #f0f0f5;
+        background: #17171c; border: 1px solid #675bd0; border-radius: 6px; outline: none;
+      }
       .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
       .dot.resting { background: #4a4a55; }
       .dot.idle { background: #8b8b98; }

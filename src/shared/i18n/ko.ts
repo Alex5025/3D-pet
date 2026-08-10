@@ -190,6 +190,7 @@ export const ko = {
   'control.sendFail': '전송 실패',
   'control.enterTask': '먼저 작업 내용을 입력하세요',
   'control.rest': '휴식',
+  'control.renameHint': '{name}(클릭하여 이름 변경)',
   'control.wake': '깨우기',
   'control.newSession': '새 대화',
   'control.newSessionTitle': '새 대화(컨텍스트 지우기)',

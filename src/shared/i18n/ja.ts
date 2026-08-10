@@ -190,6 +190,7 @@ export const ja = {
   'control.sendFail': '送信に失敗しました',
   'control.enterTask': '先にタスク内容を入力してください',
   'control.rest': '休ませる',
+  'control.renameHint': '{name}(クリックで名前を変更)',
   'control.wake': '起こす',
   'control.newSession': '新しい会話',
   'control.newSessionTitle': '新しい会話(コンテキストをクリア)',

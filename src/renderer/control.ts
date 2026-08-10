@@ -33,8 +33,53 @@ let snapshot: ControlStatusSnapshot = { pets: [], tasks: [] };
 const draftByPet = new Map<string, string>();
 const feedbackByPet = new Map<string, { text: string; kind: 'success' | 'error' }>();
 let focusedPetInput: string | null = null;
+/* 就地改名中的寵物與草稿:快照每 50ms 就可能重繪整個列表,狀態存在模組層才不會打到一半被洗掉 */
+let renamingPetId: string | null = null;
+let renameDraft = '';
 
 /* ---------- 寵物列 ---------- */
+
+/** 名稱標籤:點一下切成輸入框(就地改名);hover 提示完整名稱與可改名。 */
+function nameLabel(pet: ControlPetStatus): HTMLElement {
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'pet-name';
+  name.textContent = pet.name;
+  name.title = t('control.renameHint', { name: pet.name });
+  name.addEventListener('click', () => {
+    renamingPetId = pet.petId;
+    renameDraft = pet.name;
+    renderPetRows();
+  });
+  return name;
+}
+
+/** 改名輸入框:Enter/失焦送出、Esc 取消;空白或未變更視同取消。 */
+function renameField(pet: ControlPetStatus): HTMLElement {
+  const field = document.createElement('input');
+  field.type = 'text';
+  field.className = 'pet-name-edit';
+  field.maxLength = 40; // 同設定面板的寵物名稱上限
+  field.value = renameDraft;
+  field.setAttribute('aria-label', t('control.renameHint', { name: pet.name }));
+  let settled = false;
+  const finish = (commit: boolean): void => {
+    if (settled) return; // Enter 會連帶觸發 blur,只認第一次
+    settled = true;
+    const next = field.value.trim();
+    renamingPetId = null;
+    renameDraft = '';
+    if (commit && next && next !== pet.name) void window.pet.updatePetMeta(pet.petId, { name: next });
+    renderPetRows(); // 送出後等快照回來會慢半拍,先還原成標籤
+  };
+  field.addEventListener('input', () => (renameDraft = field.value));
+  field.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+    else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+  });
+  field.addEventListener('blur', () => finish(true));
+  return field;
+}
 function petRow(pet: ControlPetStatus): HTMLElement {
   const row = document.createElement('div');
   row.className = `pet-row${pet.enabled ? '' : ' resting'}`;
@@ -44,11 +89,7 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   nameCell.className = 'pet-name-cell';
   const dot = document.createElement('span');
   dot.className = `dot ${pet.phase}`;
-  const name = document.createElement('span');
-  name.className = 'pet-name';
-  name.textContent = pet.name;
-  name.title = pet.name;
-  nameCell.append(dot, name);
+  nameCell.append(dot, renamingPetId === pet.petId ? renameField(pet) : nameLabel(pet));
 
   // 工作區
   const workspace = document.createElement('div');
@@ -196,6 +237,14 @@ function renderPetRows(): void {
   };
   renderInto('awake-rows', awake, t('control.noAwake'));
   renderInto('resting-rows', resting, t('control.noResting'));
+  // 改名中的輸入框是重繪後才生出來的新元素,焦點與游標位置要補回去
+  if (renamingPetId) {
+    const field = document.querySelector<HTMLInputElement>('.pet-name-edit');
+    if (field && document.activeElement !== field) {
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    }
+  }
   // 重繪清掉了焦點:把游標還給重繪前正在打字的輸入框
   if (focusedPetInput) {
     const target = focusedPetInput;
@@ -566,3 +615,12 @@ el('change-workspace-root').addEventListener('click', async () => {
     button.disabled = false;
   }
 });
+
+/* 瀏覽器自驗鉤子:中控沒有獨立驗證頁,直接開 control.html 灌快照即可測列表行為
+ * (改名的重繪保留特別需要——快照每 50ms 就可能重繪整個列表)。 */
+declare global {
+  interface Window {
+    __applySnapshot: (next: ControlStatusSnapshot) => void;
+  }
+}
+window.__applySnapshot = applySnapshot;

@@ -190,6 +190,7 @@ export const en = {
   'control.sendFail': 'Failed to send',
   'control.enterTask': 'Please enter the task first',
   'control.rest': 'Rest',
+  'control.renameHint': '{name} (click to rename)',
   'control.wake': 'Wake',
   'control.newSession': 'New Chat',
   'control.newSessionTitle': 'New chat (clear context)',

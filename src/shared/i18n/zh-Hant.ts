@@ -197,6 +197,7 @@ export const zhHant = {
   'control.sendFail': '送出失敗',
   'control.enterTask': '請先輸入任務內容',
   'control.rest': '休息',
+  'control.renameHint': '{name}(點一下改名)',
   'control.wake': '喚醒',
   'control.newSession': '新對話',
   'control.newSessionTitle': '開新對話（清空上下文）',
