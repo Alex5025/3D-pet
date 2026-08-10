@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-08-06。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-08-10。對應的 commit 見 `git log`。
 
 ---
 
@@ -712,3 +712,120 @@ normal 檔 idle 參數未變,大頭在:eco/critical/suspended 檔位(電池/過�
 8. **刻意不翻**:sandboxConfig 的 MANAGED_COMMENT(寫入使用者 config.toml 的資料,移除邏輯靠精確比對)、codex clientInfo.title、console.log/selftest/註解/docs、語言下拉的語言自稱(業界慣例)。
 
 **驗證**:typecheck 綠(四語字典 key 齊全由型別保證);selftest 補 5 項(resolveLocale 對應/插值/缺參數保留/假 key 不炸/切語言取值不同)全 PASS;build 綠;bubbletest 瀏覽器自驗四語切換(label 插值/placeholder/按鈕)全對;dev 短跑無開機錯誤。
+
+## 46. MMD/PMX 與 ARP rig 進 VRM:自建轉檔管線(2026-08-09)
+
+**背景**:想擴充模型來源。網路上的角色多半不是現成 VRM——MMD 圈是 `.pmx`、VRChat 圈是 `.unitypackage` 或 `.blend`,BOOTH 上標「VRM 對應」的也常常只附前兩者。
+
+**做法**:Blender headless(`blender -b --python`)+ Node 後處理,沉澱成四支腳本:
+
+- `blender-pmx-import.py` / `blender-pmx-to-vrm.py`:mmd_tools 匯入 PMX → MMD 日文骨名對映 VRM humanoid → 匯出 VRM0
+- `blender-arp-to-vrm.py`:Auto-Rig Pro rig → VRM1
+- `vrm0-fix-mmd-materials.mjs`:MMD 材質 → MToon
+- `vrm1-add-springs.mjs`:VRM1 依骨名找鏈補 `VRMC_springBone`
+
+**踩到的坑(全部有實測)**:
+
+1. **Blender addon 的啟用順序**:`addon_utils.enable()` 必須在 `wm.read_factory_settings()` **之後**——反過來會被 factory reset 清掉,運算子註冊不到(`bpy.ops.mmd_tools.import_model` not found)。
+2. **GBK 檔名炸掉貼圖**:PMX 的 zip 用 GBK 編碼,macOS 用 `ditto` 解出來檔名變亂碼 → PMX 內以原名引用貼圖找不到 → mmd_tools 塞 1×1 空白圖進去,模型渲染成全白。**依檔案大小把檔名對回去**才解決。(`unzip` 更慘,直接 `Illegal byte sequence` 解不出來。)
+3. **貼圖接錯欄位**:mmd_tools 把貼圖接在 `emissiveTexture` 且 `baseColorFactor` 為黑,VRM 讀的是 `baseColorTexture` → 白模。轉接後才有顏色。
+4. **描邊寬度單位**:`_OutlineWidthMode: 1`(世界座標)配 `_OutlineWidth: 0.08` = 8cm 厚的描邊殼,整層蓋住模型,看起來像白模加黑塊。改用相對模式(`Mode 0` + `0.5`)才對。
+5. **ARP rig 的變形骨四散**:控制骨架把變形骨掛在根控制器下,自動對映會錯亂(head→脊椎、右小腿→右手)。得先**重建人形父子鏈**(26 處改 parent,rest pose 與權重不動)再指派。
+6. **檔案裡不只一個角色**:Ren♡Ai 的 .blend 內含一個沒綁骨架的參考模型,要先剔除。
+
+**教訓**:轉檔不是專案核心能力,腳本當「工具箱」留著即可,別做成產品功能——實測下來,現成 VRM 10 分鐘搞定,Blender 路線一小時起跳且每個模型的坑都不一樣。
+
+## 47. MMD 轉制模型的三個顯示問題(2026-08-09)
+
+**症狀 A:粉髮渲染成白髮**,還帶黑色塊。同一個檔在別的 app(Steam 的 VRM 播放器)顯示正常——**問題在我們的渲染**。
+
+**根因 A**:MMD 的球面貼圖(sphere/spa)是「加法疊加」的反光層,轉檔工具常輸出成**不透明材質**;那張貼圖近乎純白,於是白色高光殼把底下的本體色整片蓋掉。逐一比對材質後發現罪魁是 `kami+` / `maegami+` 這種「+」結尾的外殼層。
+
+**處理 A**:`viewer.ts` 載入後新增 `fixSphereOverlayMaterials`——材質名以 `+` 結尾者改回 `AdditiveBlending` + 不寫深度。對所有 MMD 轉制模型通用。
+
+**症狀 B:腰帶垂飾硬邦邦、會穿過腿**。
+
+**根因 B**:那些骨的名字是**簡體中文**(`结带`/`后带`/`頭绳`),而 `vrm-enrich.mjs` 的 pattern 只認日文(髪/スカート/袖/胸),整組漏掉 → 完全沒有 spring bone。
+
+**處理 B**:新增「帯」與「紐」兩個骨群(腰帶吃腿部 collider、髮繩吃頭部 collider),既有 pattern 補簡繁中文;`swayCategory` 同步支援,設定面板的滑桿才調得到。神子的 spring 關節 227 → 290。
+
+**症狀 C:設定面板整個點不動**,以為壞了。
+
+**根因 C**:角色分頁的「選擇 VRM 檔」對話框沒掛父視窗 = app 層級 modal,開著時凍結同 app 所有視窗。使用者沒注意到對話框開在別處。
+
+**處理 C**:改掛設定視窗成 sheet(循 `chooseWorkspace` 慣例)。
+
+**教訓**:「同一個檔在別的 app 正常」是最有價值的一句回報——它把問題從模型端一刀切到渲染端。收到這種對照時應優先重現,而不是先懷疑素材。
+
+## 48. 光源色溫(2026-08-09)
+
+**需求**:桌寵的光偏死白,想要暖色/冷色氛圍。
+
+**處理**:`Lighting` 新增選填的 `temperature`(Kelvin),`kelvinToColor()` 以 Tanner Helland 近似式換算 RGB,**同時套在環境光/平行光/點光源三盞上**——只染主光會出現「主光暖、環境光白」的違和。6500K 落在純白附近,所以中性時等同沒著色;舊設定檔缺欄位視為 6500,既有寵物外觀不變。
+
+**容易漏的點**:角色頭像快照是 `setLighting` 之外的**獨立打光路徑**(強制標準亮光拍),色溫也要在那裡還原成白光,否則面板小人會被染色。
+
+**後續修正(§48b,同日)**:滑桿方向。物理上 Kelvin 越小越暖,照數值排就是「左暖右冷」,與 Lightroom 那類工具的習慣相反,手會拉錯邊。改成**位置與 Kelvin 鏡射**(`TEMP_MIRROR = 1800 + 12000`,自身即反函數):存檔與渲染仍是實際 Kelvin(viewer 一行沒改),只有 UI 位置翻面,軌道漸層同步改成冷→白→暖。
+
+**教訓**:物理正確 ≠ 介面正確。既有工具的肌肉記憶優先於數值方向,兩者衝突時在 UI 層鏡射,不要動資料語意。
+
+## 49. 上次對話回填(2026-08-09)
+
+**症狀**:agent session 本來就續著(AI 記得上下文),但重啟後泡泡是空的,使用者看不到聊到哪。
+
+**處理**:`sendChatEvent` 是所有 agent 事件的**唯一匯流點**,在那裡累積逐字稿(turnStart 記使用者訊息、text 累積回覆、done/error 落盤),不必在多處各記一份。存 `runtime-data/transcripts/<petId>.json`——**刻意不放進寵物設定檔**:設定檔會被拖曳位置高頻改寫,幾十 KB 的逐字稿混進去等於每次拖動都重寫一遍。落盤只發生在 turn 結束。
+
+**生命週期**:開新對話與刪除寵物清掉紀錄(`clearTranscriptHook`,循 `clearChatQueueHook` 慣例);休息不清(只是釋放資源,對話還在)。
+
+**競態**:回填是非同步 pull,泡泡端必須讓「進行中的一輪」優先——`restoreTranscript` 在 busy 或已有內容時直接跳過,否則會蓋掉已經開始串流的當前輪。
+
+## 50. 中控面板:就地改名與全域分頁(2026-08-10)
+
+**需求 A**:中控看得到全部寵物卻改不了名(改名只有設定面板的角色分頁能做)。
+
+**處理 A**:名稱改成外觀不變的按鈕,點一下切輸入框;Enter/失焦送出、Esc 取消。**關鍵約束**:中控快照每 50ms 就可能重繪整個列表,編輯狀態放在 DOM 上會打到一半被洗掉——`renamingPetId` 與草稿存模組層、重繪後補回焦點與游標位置(循既有 `draftByPet` / `focusedPetInput` 慣例)。Enter 會連帶觸發 blur,以 `settled` 旗標保證只送一次。
+
+**需求 B**:「全域:新寵物預設位置」掛在總覽最下方,要捲到底,且語意上像跟某隻寵物有關。
+
+**處理 B**:獨立成第三個分頁(總覽/全域設定/沙盒設定)。接線不動——路徑在模組載入時就 pull 過,不受分頁隱藏影響。
+
+**附帶**:中控一直沒有驗證頁,這次補了 `__applySnapshot` 鉤子,可直接開 `control.html` 灌快照測列表行為(`window.pet` 用測試專用 preload 補一份 stub——頁面模組載入當下就會呼叫 `onSwitchTab`,事後補 stub 來不及)。
+
+## 51. ⌘Q 誤觸:兩種殺法,兩層防護(2026-08-10)
+
+**症狀**:太容易不小心按到 ⌘Q,一按整窩寵物全收掉。
+
+**第一層(不夠)**:`before-quit` 加二次確認對話框。用非同步 dialog(同步版會卡住 main 的 event loop,登出/關機時整台機器等在這裡);預設鈕與 cancelId 都指向取消;先 `app.focus({ steal: true })`(背景 app 的 dialog 會被壓在其他視窗底下)。確認後走 `app.exit`,不再回到 before-quit。
+
+**回報:加了確認後按 ⌘Q 仍直接關閉,沒有任何提示。**
+
+**真正的根因**:查行程祖先鏈發現
+
+```
+PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electron
+```
+
+寵物系統掛在 IDE 的終端機下,**⌘Q 是 IDE 收到的**;IDE 一結束,整個 process group 吃到 SIGHUP 全滅——外部訊號,Electron 的 `before-quit` 根本不會執行。第一層只擋得住「焦點在寵物自己視窗」那條路。
+
+**第二層(真正的解)**:`scripts/start-pet-system.sh` + `npm run start`——nohup 忽略 SIGHUP、有 setsid 就另開 session、再 disown 脫離 job control,讓寵物活得比啟動它的終端機久。腳本另有 PID 守門(已在運行就不重複啟動),避免 `predev` 的 pkill 把既有實例殺掉。
+
+**教訓**:「加了防護還是沒生效」時,先確認**防護所在的那條路徑有沒有被執行**,而不是檢查防護本身的邏輯。行程祖先鏈(`ps -o ppid=,command=` 往上追)是最快的判別工具。日常啟動走 `npm run start`,`npm run dev` 只在要看即時 log 時用。
+
+## 52. 泡泡寬度可調與點擊已讀(2026-08-09~10)
+
+**寬度**:泡泡原本寫死寬度,長回覆很難讀。改成 `width: max-content` 隨內容伸縮 + 密度上限(醒著 ≤4 隻用半屏、>4 隻用三分之一屏),另加左右邊緣拖曳把手可手動設上限、雙擊還原。
+
+- **調窄後拉不回來**:放開時把手動寬度寫成 inline `max-width`,而 CSS 的 `max-width` 永遠壓過 `width` → 下次拖曳只改 width 完全無效。修法是拖曳開始時先把當前寬度固定成 inline `width`、再清掉舊的 `max-width`。
+- **把手拖不動**:疊層視窗的 `setPointerCapture` **靜默失敗**(呼叫不丟錯但 `hasPointerCapture` 為 false),游標一離開把手事件就斷。改把 move/up 掛在 `window` 上(與寵物拖曳同一套解法,已補進 CLAUDE.md 平台實證)。
+- **把手凸出泡泡外 6px**,`bubbleAt` 涵蓋不到 → 按在把手上會被判成「按在寵物身上」而開始拖寵物。補 `isResizing()` 讓 hover 邏輯在拖曳期間保持互動。
+
+**點擊已讀**:狀態膠囊原本只有「hover 膠囊本體滿 500ms」一條已讀路徑,但使用者常常是直接點進泡泡讀回覆——明明看到了卻還亮著未讀。泡泡根元素掛 `pointerdown` → `markActivityRead`(事件冒泡,點內部任何元素都算)。用 pointerdown 而非 click,拖曳把手那類「按下不放」的操作也算。
+
+## 53. 疊層視窗不跟隨主顯示器變更(2026-08-09)
+
+**症狀**:某隻寵物被切掉一半,只剩螢幕邊緣一條。
+
+**根因**:疊層視窗只在建立時依 `screen.getPrimaryDisplay().bounds` 設一次大小。app 在筆電內建螢幕(1710×1107)啟動,之後換到外接螢幕(1920×1080),視窗沒跟著調整——右側 210px 成了「界外」,站在那裡的寵物幾乎全在視窗外,游標座標換算也整個偏掉。原本的 `display-metrics-changed` 只更新座標快取、不動視窗。
+
+**處理**:改為 `syncOverlayBounds()`——主顯示器變更/新增/移除時把視窗重新 `setBounds` 鋪滿目前的主顯示,並同步游標換算用的快取;啟動時也跑一次保底。
+
