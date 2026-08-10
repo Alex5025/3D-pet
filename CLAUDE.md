@@ -13,7 +13,8 @@ macOS 桌面 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)。2026-07-20 全
 ## 常用指令
 
 ```bash
-npm run dev        # electron-vite dev(predev 會先 pkill 殘留的 Electron 行程)
+npm run start      # 脫離終端機啟動(日常用這個;IDE/終端機關掉不會帶走寵物)
+npm run dev        # electron-vite dev(predev 會先 pkill 殘留的 Electron 行程;掛在終端機下)
 npm run build      # electron-vite build → out/
 npm run typecheck  # tsc --noEmit
 ```
@@ -36,6 +37,7 @@ electron-vite 三段式(`electron.vite.config.ts`):main / preload / renderer,輸
 - 背景 app(dock 隱藏)開 dialog 會被壓在其他視窗底下——`chooseVrm()` 先 `app.focus({ steal: true })`。
 - 疊層視窗開不了 DevTools——renderer 的 console 經 `console-message` 事件轉發到終端機。
 - VRM 檔經 IPC 傳遞用 buffer(主行程 `readFileSync` 後 send),renderer 走官方 `loader.parse` 路徑,不依賴檔案路徑。
+- 在 IDE/終端機直接跑 `npm run dev`,整個 process group 掛在該終端機下:關分頁、結束 shell、對 IDE 按 ⌘Q 都會送 SIGHUP 把寵物一起帶走,而且是外部訊號,Electron 的 `before-quit`(結束前確認)不會執行——日常啟動走 `npm run start`(nohup + disown)。
 - 疊層視窗的 `setPointerCapture` 會靜默失敗(呼叫不丟錯但 `hasPointerCapture` 為 false)——拖曳互動一律把 move/up 掛在 window 上(寵物拖曳與泡泡寬度把手皆如此)。泡泡的瀏覽器自驗頁是 `bubbletest.html`(掛 `window.__bubble`)。
 
 ## 慣例

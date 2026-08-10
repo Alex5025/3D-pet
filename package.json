@@ -9,6 +9,7 @@
     "check:secrets:all": "node scripts/check-secrets.mjs --tracked",
     "predev": "pkill -9 -f \"$(pwd)/node_modules/electron/dist\" || true",
     "dev": "electron-vite dev",
+    "start": "zsh scripts/start-pet-system.sh",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit"
   },

@@ -58,8 +58,10 @@ macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three
 
 ```bash
 npm install
-npm run dev
+npm run start   # 脫離終端機啟動;關掉這個終端機(或對 IDE 按 ⌘Q)不會帶走寵物
 ```
+
+> 開發時要看即時 log 可改用 `npm run dev`,但那會把寵物系統掛在該終端機下——終端機一關,寵物跟著被 SIGHUP 帶走(不經結束確認)。
 
 - 角色出現在桌面;滑鼠壓到角色變可互動,移開自動穿透。
 - **對話**:滑到角色上 → 泡泡輸入 → Enter 送出(Shift+Enter 換行);執行中繼續打字會自動排隊。
