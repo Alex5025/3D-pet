@@ -173,6 +173,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     clearTimeout(activityReadTimer);
     activityReadTimer = null;
   });
+  // 點泡泡 = 已讀:動手碰泡泡(讀回覆、打字、按鈕)代表狀態已經看到了,
+  // 膠囊不該還停在未讀。用 pointerdown 而非 click,拖曳寬度把手那類不放開的操作也算。
+  element.addEventListener('pointerdown', markActivityRead);
   pin.addEventListener('click', () => {
     pinned = !pinned;
     pin.classList.toggle('active', pinned);
