@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <title>多寵效能量測</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #202027; }
+      #hud { position: fixed; top: 8px; left: 8px; z-index: 99; font: 12px monospace; color: #ddd;
+             background: rgba(0,0,0,.5); padding: 6px 8px; border-radius: 6px; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <script type="module">
+      /* 多寵效能量測頁:用 ?pets=N 建 N 份 viewer(與 overlay 完全同一條路徑,
+         每份各自一個 WebGLRenderer + 全螢幕 canvas + rAF 迴圈),
+         量「N 隻同時在場」的實際成本,判斷要不要改成共用 renderer。
+         自動化經 window.__perftest 取數;真實記憶體由 main 端的 app.getAppMetrics 讀。 */
+      import * as THREE from 'three';
+      import { createViewer } from './viewer.ts';
+
+      const query = new URLSearchParams(location.search);
+      const count = Math.max(1, Math.min(12, Number(query.get('pets') ?? 1)));
+      const modelUrl = query.get('model') ?? '/AvatarSample_A.vrm';
+      const antialias = query.get('aa') !== '0';
+      const hud = document.getElementById('hud');
+
+      const viewers = [];
+      // rAF 幀數統計:每個 viewer 有自己的迴圈,這裡另開一條純計數的迴圈量整體節奏
+      let frames = 0;
+      let lastMark = performance.now();
+      let fps = 0;
+      (function tick() {
+        requestAnimationFrame(tick);
+        frames++;
+        const now = performance.now();
+        if (now - lastMark >= 1000) {
+          fps = frames * 1000 / (now - lastMark);
+          frames = 0;
+          lastMark = now;
+          hud.textContent = summary();
+        }
+      })();
+
+      function gpuTotals() {
+        let geometries = 0, textures = 0, programs = 0, calls = 0, triangles = 0;
+        for (const v of viewers) {
+          const info = v.renderer.info;
+          geometries += info.memory.geometries;
+          textures += info.memory.textures;
+          programs += info.programs?.length ?? 0;
+          calls += info.render.calls;
+          triangles += info.render.triangles;
+        }
+        return { geometries, textures, programs, calls, triangles };
+      }
+
+      function summary() {
+        const g = gpuTotals();
+        const heap = performance.memory ? (performance.memory.usedJSHeapSize / 1048576).toFixed(0) + 'MB' : 'n/a';
+        return [
+          `pets=${viewers.length} aa=${antialias ? 'on' : 'off'} fps=${fps.toFixed(1)}`,
+          `heap=${heap}`,
+          `geometries=${g.geometries} textures=${g.textures} programs=${g.programs}`,
+          `drawCalls/frame=${g.calls} triangles=${g.triangles}`,
+        ].join('\n');
+      }
+
+      async function boot() {
+        for (let i = 0; i < count; i++) {
+          const viewer = createViewer({ transparent: true, antialias });
+          viewers.push(viewer);
+          await viewer.loadFromUrl(modelUrl);
+          // 錯開位置,避免完全重疊(與實際使用情境接近)
+          viewer.root.position.set((i % 4) * 1.2 - 1.8, 0, -Math.floor(i / 4) * 1.2);
+          viewer.camera.position.z = 6;
+        }
+        hud.textContent = summary();
+        document.body.dataset.ready = 'true';
+      }
+
+      window.__perftest = {
+        viewers,
+        /** 診斷:列出實際貼圖尺寸,確認降階有沒有生效 */
+        textureSizes() {
+          const seen = new Set(); const out = [];
+          for (const v of viewers) {
+            const vrm = v.currentVrm(); if (!vrm) continue;
+            vrm.scene.traverse((o) => {
+              if (!o.isMesh) return;
+              const ms = Array.isArray(o.material) ? o.material : [o.material];
+              for (const m of ms) {
+                const uni = m.uniforms ? Object.values(m.uniforms).map(u => u?.value) : [];
+                for (const val of [...Object.values(m), ...uni]) {
+                if (val && val.isTexture && !seen.has(val)) {
+                  seen.add(val);
+                  const im = val.image; if (im?.width) out.push(im.width + 'x' + im.height);
+                }
+              }}
+            });
+          }
+          const b = {}; for (const s of out) b[s] = (b[s] || 0) + 1;
+          return b;
+        },
+        get count() { return viewers.length; },
+        get fps() { return fps; },
+        totals: gpuTotals,
+        heapMB: () => performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null,
+        /** 模擬閒置:停止喚醒,讓 idle 節流生效 */
+        idle: () => { for (const v of viewers) v.setPowerProfile({ paused: false, idleSkip: 6, idleDelayMs: 0, activeSkip: 1 }); },
+        /** 模擬活躍:每幀都喚醒 */
+        busy: () => { for (const v of viewers) v.wake(); },
+        dispose: () => { for (const v of viewers) v.dispose(); viewers.length = 0; },
+      };
+      window.THREE = THREE;
+      void boot();
+    </script>
+  </body>
+</html>

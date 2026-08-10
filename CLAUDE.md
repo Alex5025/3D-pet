@@ -39,6 +39,7 @@ electron-vite 三段式(`electron.vite.config.ts`):main / preload / renderer,輸
 - VRM 檔經 IPC 傳遞用 buffer(主行程 `readFileSync` 後 send),renderer 走官方 `loader.parse` 路徑,不依賴檔案路徑。
 - 在 IDE/終端機直接跑 `npm run dev`,整個 process group 掛在該終端機下:關分頁、結束 shell、對 IDE 按 ⌘Q 都會送 SIGHUP 把寵物一起帶走,而且是外部訊號,Electron 的 `before-quit`(結束前確認)不會執行——日常啟動走 `npm run start`(nohup + disown)。
 - 疊層視窗的 `setPointerCapture` 會靜默失敗(呼叫不丟錯但 `hasPointerCapture` 為 false)——拖曳互動一律把 move/up 掛在 window 上(寵物拖曳與泡泡寬度把手皆如此)。泡泡的瀏覽器自驗頁是 `bubbletest.html`(掛 `window.__bubble`)。
+- 多寵成本用 `perftest.html?pets=N` 量(掛 `window.__perftest`),真實記憶體由 main 的 `app.getAppMetrics()` 讀 GPU/Renderer 行程——`renderer.info` 只有數量沒有位元組,量不出貼圖佔用。
 
 ## 慣例
 

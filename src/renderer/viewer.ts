@@ -113,9 +113,52 @@ export const DEFAULT_LIGHTING: Lighting = {
   temperature: NEUTRAL_TEMPERATURE
 };
 
-export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
+/** 貼圖邊長上限:VRoid/MMD 模型常內含 2048px 貼圖(單張解碼後 16MB),
+ *  但桌寵在螢幕上只有幾百像素高,完全用不到。實測 AvatarSample_A 的貼圖解碼後共 102MB,
+ *  而每隻寵物各自持有一份 —— 這是多寵記憶體的主要來源(每隻約 +88MB GPU)。 */
+const MAX_TEXTURE_SIZE = 1024;
+
+/** 載入後、進場景前把過大的貼圖降階。必須在第一次渲染之前做,
+ *  否則大圖已經上傳 GPU,再換只是多花一次頻寬。同一張貼圖被多個材質共用時只處理一次。 */
+function capTextureSize(target: VRM, maxSize = MAX_TEXTURE_SIZE): void {
+  const seen = new Set<THREE.Texture>();
+  target.scene.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of materials) {
+      // MToon 是 ShaderMaterial,貼圖掛在 uniforms.<name>.value(不是自有屬性,
+      // Object.values 掃不到);標準材質才是自有屬性。兩邊都收。
+      const uniforms = (material as unknown as { uniforms?: Record<string, { value?: unknown }> }).uniforms;
+      const candidates = [
+        ...Object.values(material as unknown as Record<string, unknown>),
+        ...Object.values(uniforms ?? {}).map((entry) => entry?.value),
+      ];
+      for (const value of candidates) {
+        const texture = value as THREE.Texture | null;
+        if (!texture?.isTexture || seen.has(texture)) continue;
+        seen.add(texture);
+        const image = texture.image as { width?: number; height?: number } | null;
+        const width = image?.width ?? 0;
+        const height = image?.height ?? 0;
+        if (!width || !height || Math.max(width, height) <= maxSize) continue;
+        const scale = maxSize / Math.max(width, height);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) continue;
+        context.drawImage(image as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+        texture.image = canvas;
+        texture.needsUpdate = true;
+      }
+    }
+  });
+}
+
+export function createViewer(opts: { transparent: boolean; background?: number; antialias?: boolean }): Viewer {
   // renderer —— official basic.html(僅加透明背景參數,桌面疊層需要)
-  const renderer = new THREE.WebGLRenderer({ alpha: opts.transparent, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ alpha: opts.transparent, antialias: opts.antialias !== false });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   if (opts.transparent) renderer.setClearAlpha(0);
@@ -439,6 +482,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     VRMUtils.combineSkeletons(gltf.scene);
     VRMUtils.combineMorphs(next);
     VRMUtils.rotateVRM0(next); // VRM0 校正為面朝 +Z(相機那側)
+    capTextureSize(next); // 必須在進場景之前:大圖一旦上傳 GPU 就白花一次記憶體
 
     // 官方 dnd.html:換模型前把舊的整個 dispose(動作 mixer 綁在舊骨架上,一併停掉)
     disposeMixer();
