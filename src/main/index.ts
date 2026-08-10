@@ -373,12 +373,17 @@ async function pushVrm(petId: string, path: string): Promise<void> {
   }
 }
 
-async function chooseVrm(petId: string): Promise<void> {
+async function chooseVrm(petId: string, parent?: BrowserWindow): Promise<void> {
   app.focus({ steal: true });
-  const result = await dialog.showOpenDialog({
+  const options: Electron.OpenDialogOptions = {
     properties: ['openFile'],
     filters: [{ name: 'VRM', extensions: ['vrm'] }]
-  });
+  };
+  // 有父視窗時掛成 sheet(循 chooseWorkspace 慣例):無父的對話框是 app 層級 modal,
+  // 開著時會凍結設定面板等其他視窗,使用者容易以為面板壞掉。
+  const result = parent
+    ? await dialog.showOpenDialog(parent, options)
+    : await dialog.showOpenDialog(options);
   if (!result.canceled && result.filePaths[0]) await pushVrm(petId, result.filePaths[0]);
 }
 
@@ -1087,7 +1092,7 @@ app.whenReady().then(async () => {
   // 角色分頁的「選擇 VRM 檔」:與 Tray 選單同一條 chooseVrm 路徑(僅設定視窗可呼叫)
   ipcMain.handle('choose-vrm', async (event, id: string) => {
     if (!settingsWin || event.sender !== settingsWin.webContents || !pets.has(id)) return;
-    await chooseVrm(id);
+    await chooseVrm(id, settingsWin);
   });
 
   ipcMain.handle('choose-workspace', (event, id: string) => {

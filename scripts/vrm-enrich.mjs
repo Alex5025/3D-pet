@@ -73,11 +73,18 @@ vrm.secondaryAnimation = {
     { node: humanBones.leftLowerLeg, colliders: limbColliders(humanBones.leftLowerLeg) },
     { node: humanBones.rightLowerLeg, colliders: limbColliders(humanBones.rightLowerLeg) },
   ],
+  // 骨名可能是日文或簡繁中文(MMD 轉制模型的作者各寫各的),pattern 一律兩邊都涵蓋
   boneGroups: [
     { comment: '髪', stiffiness: 0.7, gravityPower: 0.06, gravityDir: { x: 0, y: -1, z: 0 },
-      dragForce: 0.4, center: -1, hitRadius: 0.015, bones: roots(/髪/), colliderGroups: [0] },
+      dragForce: 0.4, center: -1, hitRadius: 0.015, bones: roots(/髪|头发|頭髮/), colliderGroups: [0] },
     { comment: 'スカート', stiffiness: 0.35, gravityPower: 0.15, gravityDir: { x: 0, y: -1, z: 0 },
-      dragForce: 0.5, center: -1, hitRadius: 0.02, bones: roots(/スカート/), colliderGroups: [1, 2, 3, 4] },
+      dragForce: 0.5, center: -1, hitRadius: 0.02, bones: roots(/スカート|裙/), colliderGroups: [1, 2, 3, 4] },
+    // 腰帶/垂飾:長且垂在腿邊,沒物理就會硬邦邦地穿過腿(神子的紅腰帶即此)
+    { comment: '帯', stiffiness: 0.5, gravityPower: 0.12, gravityDir: { x: 0, y: -1, z: 0 },
+      dragForce: 0.45, center: -1, hitRadius: 0.015, bones: roots(/[帯带]|飾り|流蘇/), colliderGroups: [1, 2, 3, 4] },
+    // 髮繩/髮飾:掛在頭上,只吃頭部 collider
+    { comment: '紐', stiffiness: 0.8, gravityPower: 0.05, gravityDir: { x: 0, y: -1, z: 0 },
+      dragForce: 0.4, center: -1, hitRadius: 0.012, bones: roots(/[绳繩紐]/), colliderGroups: [0] },
     { comment: '袖', stiffiness: 0.4, gravityPower: 0.12, gravityDir: { x: 0, y: -1, z: 0 },
       dragForce: 0.45, center: -1, hitRadius: 0.02, bones: roots(/袖/), colliderGroups: [] },
     { comment: '胸', stiffiness: 1.6, gravityPower: 0.02, gravityDir: { x: 0, y: -1, z: 0 },

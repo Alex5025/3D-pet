@@ -197,9 +197,28 @@ export function createViewer(opts: { transparent: boolean; background?: number }
    * 1 = 原廠;<1 加大阻尼、加硬 → 不太晃;>1 變軟 → 更飄。原始值存在 joint 上可還原。 */
   const sway: Sway = { ...DEFAULT_SWAY };
 
+  /* MMD 轉制模型的球面貼圖(sphere/spa)高光層:原意是「加法疊加」的反光,
+   * 但轉檔工具常把它輸出成不透明材質,結果整層近白的高光殼蓋住底下的本體色
+   * (實證:工作坊版八重神子的粉髮被 kami+/maegami+ 蓋成白髮,同檔在原生 app 正常)。
+   * 材質名以 + 結尾且貼圖與本體不同者視為高光層,改回加法混合。 */
+  function fixSphereOverlayMaterials(target: VRM): void {
+    target.scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) {
+        if (!/\+\s*(\(.*\))?$/.test(material.name ?? '')) continue;
+        material.blending = THREE.AdditiveBlending;
+        material.transparent = true;
+        material.depthWrite = false;
+        material.needsUpdate = true;
+      }
+    });
+  }
+
   function swayCategory(boneName: string): keyof Sway {
-    // MMD 轉制模型(UniVRM 匯出)骨名常是日文,一併涵蓋
-    if (/hair|髪/i.test(boneName)) return 'hair';
+    // MMD 轉制模型(UniVRM 匯出)骨名可能是日文或簡繁中文,一併涵蓋
+    if (/hair|髪|头发|頭髮|ponytail|[绳繩紐]/i.test(boneName)) return 'hair'; // ponytail 先於 tail 判定,馬尾歸頭髮;髮繩/髮飾同組
     if (/bust|breast|chest|oppai|胸/i.test(boneName)) return 'chest';
     if (/(?<!pony)tail|shippo|尻尾|しっぽ/i.test(boneName)) return 'tail'; // ponytail 馬尾是頭髮,排除
     return 'cloth';
@@ -404,6 +423,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     // SkinnedMesh 的 geometry 邊界(bind pose + morph 撐爆)不可靠,
     // three 會據此誤剔除整隻模型 → 關掉逐物件剔除(單一角色,成本可忽略)
     vrm.scene.traverse((o) => (o.frustumCulled = false));
+    fixSphereOverlayMaterials(vrm);
     if (vrm.lookAt) {
       vrm.lookAt.target = lookAtTarget; // official lookat.html
       // official three-vrm-animation:VRMA 內含視線軌時需要這個 proxy 才能驅動
