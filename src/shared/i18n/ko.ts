@@ -171,6 +171,7 @@ export const ko = {
   'settings.modelCustom': '{model}(사용자 지정)',
 
   'control.tabOverview': '개요',
+  'control.tabGlobal': '전역 설정',
   'control.tabSandbox': '샌드박스 설정',
   'control.awakePets': '깨어 있는 펫',
   'control.restingPets': '휴식 중인 펫',

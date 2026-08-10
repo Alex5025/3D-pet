@@ -171,6 +171,7 @@ export const ja = {
   'settings.modelCustom': '{model}(カスタム)',
 
   'control.tabOverview': '概要',
+  'control.tabGlobal': '全体設定',
   'control.tabSandbox': 'サンドボックス設定',
   'control.awakePets': '起きているペット',
   'control.restingPets': '休憩中のペット',

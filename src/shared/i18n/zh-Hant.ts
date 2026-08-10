@@ -178,6 +178,7 @@ export const zhHant = {
 
   // ── 中控面板 ──
   'control.tabOverview': '總覽',
+  'control.tabGlobal': '全域設定',
   'control.tabSandbox': '沙盒設定',
   'control.awakePets': '清醒的寵物',
   'control.restingPets': '休息的寵物',

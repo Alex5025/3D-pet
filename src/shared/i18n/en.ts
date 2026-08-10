@@ -171,6 +171,7 @@ export const en = {
   'settings.modelCustom': '{model} (custom)',
 
   'control.tabOverview': 'Overview',
+  'control.tabGlobal': 'Global',
   'control.tabSandbox': 'Sandbox',
   'control.awakePets': 'Awake Pets',
   'control.restingPets': 'Resting Pets',

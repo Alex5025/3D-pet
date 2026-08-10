@@ -142,6 +142,7 @@
 
       <div id="tabs">
         <button data-tab="overview" class="active" data-i18n="control.tabOverview">總覽</button>
+        <button data-tab="global" data-i18n="control.tabGlobal">全域設定</button>
         <button data-tab="sandbox" data-i18n="control.tabSandbox">沙盒設定</button>
       </div>
 
@@ -165,16 +166,18 @@
 
       <h2 data-i18n="control.tasks">任務佇列與狀態</h2>
       <div class="task-table" id="task-table"></div>
-
-      <!-- 全域設定循語言下拉的慣例放中控,不混進每寵的設定視窗 -->
-      <h2 data-i18n="settings.globalWorkspaceRoot">全域：新寵物預設位置</h2>
-      <div class="publish-card">
-        <div class="publish-hint" data-i18n="settings.workspaceRootNote">新增寵物時會自動在此根目錄下建立「寵物名_時間」資料夾（只影響之後新增的寵物）</div>
-        <code id="workspace-root" data-i18n="common.loading">載入中…</code>
-        <div class="publish-row">
-          <button id="change-workspace-root" data-i18n="settings.change">變更…</button>
-        </div>
       </div>
+
+      <!-- 全域設定:不屬於任何一隻寵物,獨立分頁才不會跟逐寵的操作混在一起 -->
+      <div class="tab" id="tab-global">
+        <h2 data-i18n="settings.globalWorkspaceRoot">全域：新寵物預設位置</h2>
+        <div class="publish-card">
+          <div class="publish-hint" data-i18n="settings.workspaceRootNote">新增寵物時會自動在此根目錄下建立「寵物名_時間」資料夾（只影響之後新增的寵物）</div>
+          <code id="workspace-root" data-i18n="common.loading">載入中…</code>
+          <div class="publish-row">
+            <button id="change-workspace-root" data-i18n="settings.change">變更…</button>
+          </div>
+        </div>
       </div>
 
       <div class="tab" id="tab-sandbox">
