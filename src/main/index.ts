@@ -7,6 +7,8 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
 import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
 import { createChatDispatcher, createChatQueue } from './chatQueue';
+import { registerAppearanceIpc } from './appearanceIpc';
+import { registerPetIpc } from './petIpc';
 import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
 import { groupPetsByWorkspace, normalizeWorkspacePath } from '../shared/petGroups';
 import type { AgentBridge } from './agent/bridge';
@@ -1026,48 +1028,19 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('get-pet-collection', () => ({
-    pets: [...pets.values()],
-    selectedPetId: registry.selectedPetId
-  }));
-  ipcMain.handle('create-pet', () => createNewPet());
-  ipcMain.handle('remove-pet', (_event, id: string) => removePet(id));
-  ipcMain.handle('select-pet', (_event, id: string) => selectPet(id));
-  ipcMain.handle('update-pet-meta', (_event, id: string, patch: Partial<PetProfile>) => {
-    const profile = getPet(id);
-    if (!profile) return null;
-    const next: Partial<PetProfile> = {};
-    if (typeof patch.name === 'string') next.name = patch.name.trim() || profile.name;
-    if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
-    if (typeof patch.persona === 'string') next.persona = patch.persona.trim().slice(0, 4000) || undefined;
-    if (Array.isArray(patch.idleMotions)) {
-      const files = [...new Set(patch.idleMotions.filter((f): f is string => typeof f === 'string'))].slice(0, 50);
-      next.idleMotions = files.length ? files : undefined;
-    }
-    if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude')) {
-      const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
-      const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
-      const effort = typeof patch.agent.effort === 'string' &&
-        ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(patch.agent.effort) ? patch.agent.effort : '';
-      const permission = patch.agent.permission === 'ask' || patch.agent.permission === 'auto'
-        ? patch.agent.permission : undefined;
-      next.agent = {
-        kind: patch.agent.kind,
-        ...(sessionId ? { sessionId } : {}),
-        ...(model ? { model } : {}),
-        ...(effort ? { effort } : {}),
-        ...(permission ? { permission } : {})
-      };
-      // 換 agent 種類 = 換家,不共享 session:關掉舊的
-      if (profile.agent?.kind && profile.agent.kind !== patch.agent.kind) void bridge?.closePetSession(id);
-      // sessionId 被清空(「開新對話」鈕或手動清欄位)= 要求開新 session:
-      // 光清 profile 不夠,bridge 記憶體裡還握著舊 session,下一句仍會續用舊對話
-      else if (profile.agent?.sessionId && !sessionId) void bridge?.closePetSession(id);
-    }
-    const updated = updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
-    sendPetProfiles();
-    return updated;
+  // 寵物 CRUD 與中繼資料 IPC 已抽到 petIpc.ts(update-pet-meta 的欄位白名單在那裡)
+  registerPetIpc({
+    listPets: () => [...pets.values()],
+    selectedPetId: () => registry.selectedPetId,
+    getPet,
+    updatePet,
+    createNewPet,
+    removePet,
+    selectPet,
+    sendPetProfiles,
+    closePetSession: (id) => void bridge?.closePetSession(id),
   });
+
   /* ── 參考檔案(拖放到寵物身上;當次對話有效,純記憶體不落盤)──
    * renderer 經 webUtils 取絕對路徑送來;這裡 stat 驗證存在、判資料夾,注入走 bridge 的 turnOpts。 */
   const petRefFiles = new Map<string, { path: string; isDir: boolean }[]>();
@@ -1412,80 +1385,16 @@ app.whenReady().then(async () => {
     app.exit(0);
   });
 
-  ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);
-  ipcMain.on('save-state', (event, id: string, state: PetState) => {
-    if (!win || event.sender !== win.webContents) return;
-    updatePet(id, { state });
-    settingsWin?.webContents.send('apply-state', id, state);
-  });
-  ipcMain.on('set-state', (_event, id: string, state: PetState) => {
-    updatePet(id, { state });
-    win?.webContents.send('apply-state', id, state);
-  });
-
-  ipcMain.on('avatar-icons', (event, id: string, icons: { front: string; side: string }) => {
-    if (!win || event.sender !== win.webContents || !pets.has(id)) return;
-    avatarIcons.set(id, icons);
-    settingsWin?.webContents.send('avatar-icons-apply', id, icons);
-  });
-
-  ipcMain.handle('get-lighting', (_event, id: string) => getPet(id)?.lighting ?? null);
-  ipcMain.on('set-lighting', (_event, id: string, lighting: Lighting) => {
-    updatePet(id, { lighting });
-    win?.webContents.send('apply-lighting', id, lighting);
-  });
-
-  /* VRM 讀檔快取:N 隻寵物用同一個模型檔時開機只讀一次磁碟(VRM 可達十幾 MB)。
-   * mtime 變了就重讀;開機潮過後(30s 無新請求)整批釋放,不長駐大 buffer。 */
-  const vrmReadCache = new Map<string, { mtimeMs: number; data: Promise<Buffer> }>();
-  let vrmCacheSweep: NodeJS.Timeout | null = null;
-  ipcMain.handle('get-boot-vrm', async (_event, id: string) => {
-    const path = getPet(id)?.vrmPath;
-    if (!path) return null;
-    try {
-      const mtimeMs = (await stat(path)).mtimeMs;
-      const hit = vrmReadCache.get(path);
-      const entry = hit && hit.mtimeMs === mtimeMs ? hit : { mtimeMs, data: readFile(path) };
-      vrmReadCache.set(path, entry);
-      if (vrmCacheSweep) clearTimeout(vrmCacheSweep);
-      vrmCacheSweep = setTimeout(() => vrmReadCache.clear(), 30_000);
-      return await entry.data;
-    } catch {
-      vrmReadCache.delete(path);
-      return null;
-    }
-  });
-  ipcMain.handle('get-default-pose', async (_event, id: string) => {
-    const file = getPet(id)?.defaultPose;
-    if (!file) return null;
-    try {
-      return await readFile(join(dataDir(), 'motions', file));
-    } catch {
-      return null;
-    }
-  });
-
-  ipcMain.handle('get-sway', (_event, id: string) => getPet(id)?.sway ?? null);
-  ipcMain.on('set-sway', (_event, id: string, sway: Sway) => {
-    updatePet(id, { sway });
-    win?.webContents.send('apply-sway', id, sway);
-  });
-
-  ipcMain.on('wardrobe-list', (event, id: string, list: { key: string; label: string }[]) => {
-    if (!win || event.sender !== win.webContents || !pets.has(id)) return;
-    wardrobeLists.set(id, list);
-    settingsWin?.webContents.send('wardrobe-list-apply', id, list);
-  });
-  ipcMain.handle('get-wardrobe', (_event, id: string) => ({
-    list: wardrobeLists.get(id) ?? [],
-    states: getPet(id)?.wardrobe ?? {}
-  }));
-  ipcMain.on('set-wardrobe', (_event, id: string, key: string, visible: boolean) => {
-    const profile = getPet(id);
-    if (!profile) return;
-    const states = { ...(profile.wardrobe ?? {}), [key]: visible };
-    updatePet(id, { wardrobe: states });
-    win?.webContents.send('apply-wardrobe', id, states);
+  // 外觀 IPC(位置/光影/晃動/服裝/頭像/預設姿勢/模型讀檔)已抽到 appearanceIpc.ts
+  registerAppearanceIpc({
+    overlay: () => win,
+    settings: () => settingsWin,
+    getPet,
+    updatePet,
+    hasPet: (id) => pets.has(id),
+    avatarIcons,
+    wardrobeLists,
+    dataDir,
   });
 
   ipcMain.on('show-menu', (event, id: string) => {

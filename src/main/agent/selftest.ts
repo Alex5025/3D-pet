@@ -13,6 +13,7 @@ import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
 import { parseProjectSandboxConfig, updateProjectSandboxConfig } from '../sandboxConfig';
 import { resolveWorkspaceDirName, sanitizeWorkspaceName } from '../workspaceDefaults';
 import { getLocale, resolveLocale, setLocale, t, type MessageKey } from '../../shared/i18n';
+import { sanitizePetMeta } from '../petIpc';
 
 /**
  * Headless 回歸自驗(VRM_PET_AGENT_SELFTEST=1 觸發,不開視窗):
@@ -315,6 +316,29 @@ export async function runAgentSelftest(): Promise<boolean> {
     const jaText = t('control.phaseWorking');
     check('i18n:切語言取值不同且 en 無中文', enText !== jaText && !/[一-鿿]/.test(enText));
     setLocale(before);
+  }
+
+  // update-pet-meta 的欄位白名單(唯一從 renderer 寫進設定檔的通道,必須逐欄過濾)
+  {
+    const base = { name: '原名', agent: { kind: 'claude' as const, sessionId: 'old-1' } };
+    const bogus = sanitizePetMeta(base, { name: '  ', vrmPath: '/etc/passwd', enabled: 'yes' } as never);
+    check('petMeta:空白名稱回退原名', bogus.next.name === '原名');
+    check('petMeta:未白名單欄位被丟棄', !('vrmPath' in bogus.next));
+    check('petMeta:型別不符的 enabled 被丟棄', !('enabled' in bogus.next));
+
+    const effort = sanitizePetMeta(base, { agent: { kind: 'claude', effort: 'turbo' } } as never);
+    check('petMeta:非法 effort 被丟棄', !(effort.next.agent as { effort?: string })?.effort);
+
+    const motions = sanitizePetMeta(base, { idleMotions: ['a.vrma', 'a.vrma', 'b.vrma', 5 as never] });
+    check('petMeta:待機動作去重且濾非字串',
+      JSON.stringify((motions.next as { idleMotions?: string[] }).idleMotions) === JSON.stringify(['a.vrma', 'b.vrma']));
+
+    check('petMeta:清空 sessionId 要求關 session',
+      sanitizePetMeta(base, { agent: { kind: 'claude' } }).closeSession === true);
+    check('petMeta:換 agent 種類要求關 session',
+      sanitizePetMeta(base, { agent: { kind: 'codex', sessionId: 'x' } }).closeSession === true);
+    check('petMeta:同家同 session 不關',
+      sanitizePetMeta(base, { agent: { kind: 'claude', sessionId: 'old-1' } }).closeSession === false);
   }
 
   const profile: AgentPetProfile = { id: 'p1', workspacePath: '/tmp', agent: { kind: 'claude' } };
