@@ -361,7 +361,8 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button
   });
 }
 
-const LIGHT_KEYS = ['ambient', 'directional', 'shade'] as const;
+const LIGHT_KEYS = ['ambient', 'directional', 'shade', 'temperature'] as const;
+const NEUTRAL_TEMPERATURE = 6500; // 舊設定檔沒有 temperature 欄位時的中性白
 const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
 /* 高頻 IPC 節流(50ms trailing):滑桿/拖曳墊的 input 事件可達 60/s,每發都送會讓
  * renderer 每發跑一次套用(shade 是整棵材質樹 traverse);到期時讀當下值,最終值保證送達。 */
@@ -537,12 +538,15 @@ function renderNow(): void {
   // 主光強度上限依光源類型切換(點光源要抵銷距離衰減,需要大得多的上限)
   input('directional').max = String(lighting.type === 'point' ? POINT_INTENSITY_MAX : DIR_INTENSITY_MAX);
   for (const key of LIGHT_KEYS) {
-    input(key).value = String(lighting[key]);
+    const value = lighting[key] ?? (key === 'temperature' ? NEUTRAL_TEMPERATURE : 0);
+    input(key).value = String(value);
     el(`${key}-val`).textContent = key === 'shade'
-      ? lighting[key].toFixed(2)
-      : key === 'directional' && lighting.type === 'point'
-        ? lighting[key].toFixed(1) // 點光源上限 500,π 表示法會變 159π,直接顯示原始值
-        : `${(lighting[key] / Math.PI).toFixed(2)} π`;
+      ? value.toFixed(2)
+      : key === 'temperature'
+        ? `${Math.round(value)} K` // 色溫用 K 表示,不套 π
+        : key === 'directional' && lighting.type === 'point'
+          ? value.toFixed(1) // 點光源上限 500,π 表示法會變 159π,直接顯示原始值
+          : `${(value / Math.PI).toFixed(2)} π`;
   }
   for (const key of SWAY_KEYS) {
     input(key).value = String(sway[key]);

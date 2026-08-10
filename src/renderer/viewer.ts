@@ -68,6 +68,28 @@ export interface Lighting {
   y: number;
   z: number; // +Z = 螢幕這側
   shade: number; // 陰影濃度 0..1:把 MToon 陰影色調暗的比例(0 = 模型原設定)
+  /** 色溫(Kelvin,1800=燭光暖橘 / 6500=日光白 / 12000=陰天冷藍);
+   *  同時套在主光與環境光上,舊設定檔缺這欄時視為 6500(中性白,行為不變)。 */
+  temperature?: number;
+}
+
+export const NEUTRAL_TEMPERATURE = 6500;
+export const MIN_TEMPERATURE = 1800;
+export const MAX_TEMPERATURE = 12000;
+
+/** 色溫 → RGB(Tanner Helland 近似式,誤差在肉眼可接受範圍;回傳值已正規化到 0..1)。
+ *  6500K 剛好落在 (1,1,1) 附近,所以中性白時等同沒有著色。 */
+export function kelvinToColor(kelvin: number): THREE.Color {
+  const t = Math.min(MAX_TEMPERATURE, Math.max(MIN_TEMPERATURE, kelvin)) / 100;
+  const clamp255 = (v: number): number => Math.min(255, Math.max(0, v)) / 255;
+  const red = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+  const green = t <= 66
+    ? 99.4708025861 * Math.log(t) - 161.1195681661
+    : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+  const blue = t >= 66
+    ? 255
+    : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  return new THREE.Color(clamp255(red), clamp255(green), clamp255(blue));
 }
 
 /** 晃動強度(0..2,1 = 模型原廠):依 spring 骨骼名稱分類各自控制 */
@@ -87,7 +109,8 @@ export const DEFAULT_LIGHTING: Lighting = {
   x: 0,
   y: 1,
   z: 2,
-  shade: 0.35
+  shade: 0.35,
+  temperature: NEUTRAL_TEMPERATURE
 };
 
 export function createViewer(opts: { transparent: boolean; background?: number }): Viewer {
@@ -269,6 +292,11 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     const isPoint = lighting.type === 'point';
     dirLight.intensity = isPoint ? 0 : lighting.directional;
     pointLight.intensity = isPoint ? lighting.directional : 0;
+    // 色溫著色:三盞燈同色才不會出現「主光暖、環境光白」的違和(舊設定檔無此欄 = 中性白)
+    const tint = kelvinToColor(lighting.temperature ?? NEUTRAL_TEMPERATURE);
+    ambientLight.color.copy(tint);
+    dirLight.color.copy(tint);
+    pointLight.color.copy(tint);
     anchorLight();
     if (lighting.shade !== prevShade) applyShade(); // 只調亮度/位置時不必整棵材質樹重走
     wake();
@@ -643,7 +671,9 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     const keepAmbient = ambientLight.intensity;
     const keepDir = dirLight.intensity;
     const keepPoint = pointLight.intensity;
+    const keepColor = ambientLight.color.clone(); // 色溫同樣不該染到面板小人
     ambientLight.intensity = Math.PI;
+    ambientLight.color.set(0xffffff);
     dirLight.intensity = 0;
     pointLight.intensity = 0;
 
@@ -653,6 +683,7 @@ export function createViewer(opts: { transparent: boolean; background?: number }
     renderer.render(scene, cam);
 
     ambientLight.intensity = keepAmbient;
+    ambientLight.color.copy(keepColor);
     dirLight.intensity = keepDir;
     pointLight.intensity = keepPoint;
     const buf = new Uint8Array(SNAP_W * SNAP_H * 4);

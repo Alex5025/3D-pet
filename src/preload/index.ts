@@ -32,6 +32,8 @@ export interface Lighting {
   y: number;
   z: number;
   shade: number;
+  /** 色溫(Kelvin,1800~12000;缺此欄視為 6500 中性白)。 */
+  temperature?: number;
 }
 
 export interface Sway {

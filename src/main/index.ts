@@ -36,6 +36,8 @@ interface Lighting {
   y: number;
   z: number;
   shade: number;
+  /** 色溫(Kelvin);舊設定檔沒有此欄,renderer 端視為 6500 中性白。 */
+  temperature?: number;
 }
 
 interface Sway {

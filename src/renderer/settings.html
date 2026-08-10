@@ -74,6 +74,24 @@
       .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: #c9c9d2; }
       .val { font-variant-numeric: tabular-nums; color: #8f8fd9; }
       input[type='range'] { width: 100%; accent-color: #6d64d8; }
+      /* 色溫滑桿:軌道直接畫成暖→白→冷的漸層,不用看數字就知道往哪拉 */
+      .temp-range {
+        accent-color: transparent;
+        height: 14px;
+        border-radius: 7px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: linear-gradient(90deg, #ff9a3c 0%, #ffd6a5 25%, #ffffff 50%, #cfe3ff 75%, #9dc0ff 100%);
+      }
+      .temp-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #2b2b33;
+        border: 2px solid #f0f0f5;
+        cursor: pointer;
+      }
 
       .pads { display: flex; gap: 12px; }
       .pad-box { flex: 1; }
@@ -230,6 +248,10 @@
         <div class="row">
           <label><span data-i18n="settings.shade">陰影濃度(立體感)</span> <span class="val" id="shade-val"></span></label>
           <input type="range" id="shade" min="0" max="1" step="0.01" />
+        </div>
+        <div class="row">
+          <label><span data-i18n="settings.temperature">色溫</span> <span class="val" id="temperature-val"></span></label>
+          <input type="range" id="temperature" class="temp-range" min="1800" max="12000" step="50" />
         </div>
 
         <h3 data-i18n="settings.lightPosition">光源位置(相對角色)</h3>
