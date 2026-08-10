@@ -1724,4 +1724,26 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => { /* 常駐 */ });
-app.on('before-quit', shutdownSync);
+/* ⌘Q 誤觸防護:Tray 與中控的「結束」走 app.exit(明確的點擊,不經這裡),
+ * before-quit 只會由 ⌘Q 與系統選單觸發——正好是會手滑的那條路,補一道確認。
+ * 用非同步 dialog:同步版會卡住 event loop,登出/關機時整台機器等在這裡。 */
+let quitPromptOpen = false;
+app.on('before-quit', (event) => {
+  if (quitPromptOpen) { event.preventDefault(); return; } // 連按 ⌘Q 不疊開對話框
+  event.preventDefault();
+  quitPromptOpen = true;
+  app.focus({ steal: true }); // 背景 app(dock 隱藏)的 dialog 會被壓在其他視窗底下
+  const awake = [...pets.values()].filter((profile) => profile.enabled).length;
+  void dialog.showMessageBox({
+    type: 'question',
+    buttons: [t('quit.cancel'), t('quit.confirm')],
+    defaultId: 0,
+    cancelId: 0, // Esc / ⌘. 等同取消
+    message: t('quit.message'),
+    detail: t('quit.detail', { n: awake }),
+  }).then(({ response }) => {
+    quitPromptOpen = false;
+    // 確認後走 app.exit(同 Tray 慣例):不再回到 before-quit,清理自己做
+    if (response === 1) { shutdownSync(); app.exit(0); }
+  }).catch(() => { quitPromptOpen = false; });
+});
