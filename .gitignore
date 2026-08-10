@@ -4,6 +4,7 @@ out
 config.json
 runtime-data/*.json
 runtime-data/pets/
+runtime-data/transcripts/
 models/*
 !models/AvatarSample_A.vrm
 motions/
