@@ -363,6 +363,10 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('#ltype button
 
 const LIGHT_KEYS = ['ambient', 'directional', 'shade', 'temperature'] as const;
 const NEUTRAL_TEMPERATURE = 6500; // 舊設定檔沒有 temperature 欄位時的中性白
+/* 色溫滑桿方向:物理上 Kelvin 越小越暖,但影像工具的習慣是「左冷右暖」。
+ * 存的值仍是實際 Kelvin(渲染端不變),只在滑桿位置上做鏡射。 */
+const TEMP_MIRROR = 1800 + 12000; // 位置 ↔ Kelvin 的互轉常數(自身為反函數)
+const mirrorTemp = (value: number): number => TEMP_MIRROR - value;
 const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
 /* 高頻 IPC 節流(50ms trailing):滑桿/拖曳墊的 input 事件可達 60/s,每發都送會讓
  * renderer 每發跑一次套用(shade 是整棵材質樹 traverse);到期時讀當下值,最終值保證送達。 */
@@ -386,7 +390,8 @@ function sendSwayThrottled(): void {
 for (const key of LIGHT_KEYS) {
   input(key).addEventListener('input', () => {
     if (!selectedPetId) return;
-    lighting[key] = Number(input(key).value);
+    const raw = Number(input(key).value);
+    lighting[key] = key === 'temperature' ? mirrorTemp(raw) : raw;
     sendLightingThrottled();
     render();
   });
@@ -539,7 +544,7 @@ function renderNow(): void {
   input('directional').max = String(lighting.type === 'point' ? POINT_INTENSITY_MAX : DIR_INTENSITY_MAX);
   for (const key of LIGHT_KEYS) {
     const value = lighting[key] ?? (key === 'temperature' ? NEUTRAL_TEMPERATURE : 0);
-    input(key).value = String(value);
+    input(key).value = String(key === 'temperature' ? mirrorTemp(value) : value);
     el(`${key}-val`).textContent = key === 'shade'
       ? value.toFixed(2)
       : key === 'temperature'
