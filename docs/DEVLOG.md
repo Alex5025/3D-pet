@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-07-28。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-07-29。對應的 commit 見 `git log`。
 
 ---
 
@@ -454,3 +454,21 @@ mock selftest 16 項(新增審批 allow/deny、設定不被洗)+ codex e2e 11 �
 2. **「沒有請求權限,直接說被拒絕」**:設定其實正確(`permission: ask` 已落盤),元凶是 §11 的老坑變種——**vite 熱重載讓 renderer 拿到新 UI(能設定新欄位),main 行程卻還是舊碼**(不吃 permission、一律唯讀+never→codex 自動拒絕提權)。「設定看起來生效、行為卻是舊的」= 先懷疑 main 沒重啟。
 3. **fileChange 審批描述退化成方法名**:`item/fileChange/requestApproval` 的 params 常只有可為 null 的 `reason`(協定如此),fallback 補人話「想修改工作目錄中的檔案」。
 4. **自發表演不發生**:「你可以呼叫…」對模型太客氣,effort=low 時幾乎不做份外事。提示改**具體行為規則**(何時切表情/播動作/回報);另建議表演型寵物 effort ≥ medium。
+
+---
+
+## 30. Git 提交與推送前檢查(2026-07-29)
+
+專案原本只靠貢獻者記得手動執行檢查，容易把型別錯誤、建置失敗或疑似憑證帶進 Git 歷史。這輪加入專案共用的 `.githooks/`，並由 `npm ci` 觸發的 `prepare` 自動設定 `core.hooksPath`，不必每位開發者手動複製 hook。
+
+### 檢查分工
+
+- **pre-commit**：先執行 `npm run check:secrets` 掃描已暫存檔案，再執行 `npm run typecheck`。密鑰掃描只看 index，因此不會因工作樹裡尚未準備提交的內容阻擋提交，也能確保檢查的正是即將進入 commit 的版本。
+- **pre-push**：執行 `npm run build`，把成本較高的完整建置留到推送前，兼顧每次提交的速度與遠端分支品質。
+- **全量稽核**：`node scripts/check-secrets.mjs --tracked` 可掃描所有追蹤檔案，適合初次導入或定期檢查。
+
+密鑰檢查涵蓋常見私鑰、雲端與平台 token、JWT、含帳密 URL，以及疑似硬編碼的密碼／金鑰欄位；會跳過二進位檔並允許明確的範例 placeholder。它是提交前的快速防線，不取代專業 secret scanner 或已曝光憑證的撤銷與重新簽發。
+
+### 文件入口
+
+根目錄新增 `README.md`，集中說明環境需求、啟動方式、桌寵操作、AI 權限、開發指令、Git hooks 與運行資料位置，讓初次進入專案的人不必先讀完整 DEVLOG 才能開始使用。
