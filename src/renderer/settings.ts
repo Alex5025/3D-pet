@@ -264,7 +264,8 @@ async function submitAgentBinding(): Promise<void> {
   const model = (el('agent-model') as HTMLSelectElement).value;
   const effort = (el('agent-effort') as HTMLSelectElement).value;
   const permissionValue = (el('agent-permission') as HTMLSelectElement).value;
-  const permission = permissionValue === 'ask' || permissionValue === 'auto' ? permissionValue : undefined;
+  const permission = permissionValue === 'plan' || permissionValue === 'ask' || permissionValue === 'auto'
+    ? permissionValue : undefined; // readonly = 不存欄位(預設值)
   await window.pet.updatePetMeta(profile.id, {
     agent: {
       kind,

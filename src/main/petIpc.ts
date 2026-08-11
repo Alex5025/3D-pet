@@ -50,8 +50,8 @@ export function sanitizePetMeta<TProfile extends { name: string; agent?: AgentBi
     const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
     const effort = typeof patch.agent.effort === 'string' && EFFORTS.includes(patch.agent.effort)
       ? patch.agent.effort : '';
-    const permission = patch.agent.permission === 'ask' || patch.agent.permission === 'auto'
-      ? patch.agent.permission : undefined;
+    const permission = patch.agent.permission === 'plan' || patch.agent.permission === 'ask'
+      || patch.agent.permission === 'auto' ? patch.agent.permission : undefined;
     next['agent'] = {
       kind: patch.agent.kind,
       ...(sessionId ? { sessionId } : {}),

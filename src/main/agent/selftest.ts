@@ -339,6 +339,16 @@ export async function runAgentSelftest(): Promise<boolean> {
       sanitizePetMeta(base, { agent: { kind: 'codex', sessionId: 'x' } }).closeSession === true);
     check('petMeta:同家同 session 不關',
       sanitizePetMeta(base, { agent: { kind: 'claude', sessionId: 'old-1' } }).closeSession === false);
+
+    // 計畫模式:新增的第四種權限要能存進設定檔,非法值仍須擋掉
+    const plan = sanitizePetMeta(base, { agent: { kind: 'claude', sessionId: 'old-1', permission: 'plan' } });
+    check('petMeta:plan 權限被接受',
+      (plan.next.agent as { permission?: string })?.permission === 'plan');
+    const bogusPerm = sanitizePetMeta(base, { agent: { kind: 'claude', permission: 'godmode' } } as never);
+    check('petMeta:非法權限被丟棄',
+      !(bogusPerm.next.agent as { permission?: string })?.permission);
+    check('petMeta:readonly 不存欄位(預設值)',
+      !(sanitizePetMeta(base, { agent: { kind: 'claude', permission: 'readonly' } }).next.agent as { permission?: string })?.permission);
   }
 
   const profile: AgentPetProfile = { id: 'p1', workspacePath: '/tmp', agent: { kind: 'claude' } };

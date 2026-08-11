@@ -6,7 +6,9 @@
 export type AgentKind = 'codex' | 'claude';
 
 /** 權限等級:readonly=唯讀只回答(預設)/ ask=可寫工作目錄、危險操作經泡泡核准 / auto=可寫且不詢問 */
-export type AgentPermission = 'readonly' | 'ask' | 'auto';
+/** 權限等級。plan = 先出計畫不動手(Claude 有原生 permission-mode;Codex 無對應旗標,
+ *  以唯讀沙盒 + 計畫指示模擬)。 */
+export type AgentPermission = 'readonly' | 'plan' | 'ask' | 'auto';
 
 export interface AgentBinding {
   kind: AgentKind;

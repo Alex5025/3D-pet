@@ -185,6 +185,8 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
    *  on-request 是「模型自行判斷」,workspace 內寫入常直接做(e2e 實測不穩);
    *  untrusted 只放行安全唯讀指令,其餘一律發審批(實測 allow/deny 兩向都保證詢問)。 */
   const permissionParams = (permission: AgentPermission): Record<string, string> =>
+    // plan 走唯讀沙盒:codex CLI 沒有對應的 plan 旗標(實測 --help 無此選項),
+    // 「先出計畫不動手」= 唯讀 + 計畫指示(指示在 composeContext 注入)
     permission === 'ask'
       ? { sandbox: 'workspace-write', approvalPolicy: 'untrusted' }
       : permission === 'auto'
@@ -219,13 +221,20 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
     if (!id) throw new Error(t('agent.noThreadId'));
     loadedThreads.add(id);
-    appliedContext.set(id, composeContext(persona, undefined)); // thread/start 只注入 persona,參考檔由首個 turn 的 syncContext 補上
+    appliedContext.set(id, composeContext(persona, undefined, permission)); // thread/start 只注入 persona,參考檔由首個 turn 的 syncContext 補上
     return id;
   }
 
   /** persona + 參考檔案的組合上下文(比對與注入都用這個組合值;'' = 兩者皆無)。 */
-  function composeContext(persona: string | undefined, refFiles: string[] | undefined): string {
+  function composeContext(
+    persona: string | undefined,
+    refFiles: string[] | undefined,
+    permission?: AgentPermission,
+  ): string {
     const parts: string[] = [];
+    // 計畫模式的指示放最前面(權限值成為組合值的一部分 → 切換權限時下個 turn 自動注入,
+    // 與換語言同一個刻意依賴;離開計畫模式時指示消失,codex 就恢復正常動手)
+    if (permission === 'plan') parts.push(t('prompt.planMode'));
     const trimmed = persona?.trim();
     if (trimmed) parts.push(`${t('prompt.personaCurrentIntro')}\n${trimmed}`);
     const refs = refFilesPrompt(refFiles);
@@ -236,8 +245,13 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
   /** 既有 thread 的上下文對齊(persona + 參考檔案):與已生效組合值不同時,以 thread/inject_items
    *  注入 developer 訊息(2026-07 實測:注入可即時生效、壓過 rollout 舊指示與歷史慣性;
    *  resume 換 developerInstructions 則無效)。移除參考檔 = 組合值變了 → 注入「以本則為準」的新清單。 */
-  async function syncContext(threadId: string, persona: string | undefined, refFiles: string[] | undefined): Promise<void> {
-    const wanted = composeContext(persona, refFiles);
+  async function syncContext(
+    threadId: string,
+    persona: string | undefined,
+    refFiles: string[] | undefined,
+    permission?: AgentPermission,
+  ): Promise<void> {
+    const wanted = composeContext(persona, refFiles, permission);
     const applied = appliedContext.get(threadId) ?? null;
     if (wanted === applied) return;
     if (!wanted && applied === null) return; // 未知基準且無上下文:視為無,不注入
@@ -300,7 +314,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
           threadId = fresh; // 通知路由(turnHandlers)/interrupt 都跟著換到新 thread
         }
       }
-      await syncContext(threadId, persona, opts?.refFiles); // 上下文對齊(有變更才注入;失敗不擋 turn)
+      await syncContext(threadId, persona, opts?.refFiles, permission); // 上下文對齊(有變更才注入;失敗不擋 turn)
 
       const buffer: AgentEvent[] = [];
       let wake: (() => void) | null = null;

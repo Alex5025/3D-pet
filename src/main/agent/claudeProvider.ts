@@ -193,6 +193,11 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         args.push('--permission-prompt-tool', 'mcp__vrmpet__approve');
       } else if (permission === 'auto') {
         args.push('--permission-mode', 'bypassPermissions');
+      } else if (permission === 'plan') {
+        // 原生計畫模式:可讀可查、產出計畫,但不動檔案(要動手得先退出 plan mode)。
+        // 寵物工具仍放行,不然計畫過程中不能做表情動作。
+        args.push('--permission-mode', 'plan');
+        if (hub && opts?.petId) args.push('--allowedTools', 'mcp__pettools__*');
       } else if (hub && opts?.petId) {
         // 唯讀但保留寵物工具:dontAsk 靜默拒絕其他工具,白名單放行 pettools
         args.push('--permission-mode', 'dontAsk', '--allowedTools', 'mcp__pettools__*', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
