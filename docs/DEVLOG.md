@@ -866,3 +866,21 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 每隻增量 88MB → 52MB。臉部極限特寫(相機距頭 0.42m,遠近於實際使用)確認眼睛高光、睫毛、唇線都清晰,無可見劣化。
 
 **還沒做的**:真正的天花板是「N 個 WebGL context 各存一份資源」——同款模型的貼圖無法跨 context 共用。要再往下砍得改成單一 renderer + scissor 分區渲染,並讓多隻共用貼圖(材質可 clone,貼圖引用共享)。那是動到 `viewer.ts` 核心的手術,等有實際需求(常態 6 隻以上)再評估。
+
+---
+
+## 55. Git 提交與推送前檢查(2026-07-29，2026-08-11 補記)
+
+專案原本只靠貢獻者記得手動執行檢查，容易把型別錯誤、建置失敗或疑似憑證帶進 Git 歷史。這輪加入專案共用的 `.githooks/`，並由 `npm ci` 觸發的 `prepare` 自動設定 `core.hooksPath`，不必每位開發者手動複製 hook。
+
+### 檢查分工
+
+- **pre-commit**：先執行 `npm run check:secrets` 掃描已暫存檔案，再執行 `npm run typecheck`。密鑰掃描只看 index，因此不會因工作樹裡尚未準備提交的內容阻擋提交，也能確保檢查的正是即將進入 commit 的版本。
+- **pre-push**：執行 `npm run check:secrets:all` 掃描所有追蹤檔案，再執行 `npm run build`，把成本較高的完整檢查留到推送前，兼顧每次提交的速度與遠端分支品質。
+- **全量稽核**：`node scripts/check-secrets.mjs --tracked` 可掃描所有追蹤檔案，適合初次導入或定期檢查。
+
+密鑰檢查涵蓋常見私鑰、雲端與平台 token、JWT、含帳密 URL，以及疑似硬編碼的密碼／金鑰欄位；會跳過二進位檔並允許明確的範例 placeholder。它是提交前的快速防線，不取代專業 secret scanner 或已曝光憑證的撤銷與重新簽發。
+
+### 文件入口
+
+根目錄新增 `README.md`，集中說明環境需求、啟動方式、桌寵操作、AI 權限、開發指令、Git hooks 與運行資料位置，讓初次進入專案的人不必先讀完整 DEVLOG 才能開始使用。

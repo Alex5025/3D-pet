@@ -83,7 +83,11 @@ VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=codex npm run dev   # 真 c
 VRM_PET_AGENT_MOCK=1 npm run dev                                          # 假 agent 走 UI,不耗額度
 VRM_PET_AGENT_DEBUG=1 npm run dev                                         # dump agent argv/payload
 VRM_PET_PERF_LOG=1 npm run dev                                            # 效能量測(疊層無 DevTools 的通道)
+npm run check:secrets                                                     # 掃描已暫存檔案中的疑似憑證
+npm run check:secrets:all                                                 # 掃描所有 Git 追蹤檔案
 ```
+
+`npm install` 或 `npm ci` 會透過 `prepare` 將 Git hooks 路徑設為 `.githooks`。提交前會執行密鑰掃描與型別檢查；推送前會執行全量密鑰掃描與完整建置。
 
 瀏覽器驗證頁(dev server 起來後):`/vrmtest.html` 驗渲染(`window.__viewer`)、`/bubbletest.html` 驗泡泡(`window.__bubble`)。
 
