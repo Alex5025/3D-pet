@@ -6,7 +6,7 @@ import {
   type SpeechBubble,
   type SpeechBubbleAvoidRect,
 } from './speechBubble';
-import type { PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
+import type { AgentModelInfo, PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
 import { setLocale, t, type Locale } from '../shared/i18n';
 import { applyI18nDom } from './i18nDom';
 
@@ -286,6 +286,37 @@ async function loadInitialModel(runtime: PetRuntime): Promise<void> {
 }
 
 /** 泡泡徽章文字:AI 家別 + 模型 + 力度(未設就標預設)。 */
+/* 徽章控制項用的模型清單快取(逐家一份):listAgentModels 會呼叫 CLI,
+ * 每隻寵物各拉一次太浪費;同家共用同一份 promise。 */
+const agentModelLists = new Map<string, Promise<AgentModelInfo[]>>();
+function agentModels(kind: 'codex' | 'claude'): Promise<AgentModelInfo[]> {
+  const hit = agentModelLists.get(kind);
+  if (hit) return hit;
+  const pending = window.pet.listAgentModels(kind).catch(() => [] as AgentModelInfo[]);
+  agentModelLists.set(kind, pending);
+  return pending;
+}
+
+/** 把某寵目前的 agent 設定推給泡泡徽章(可點切換);模型清單非同步補上。 */
+function refreshAgentControls(petId: string): void {
+  const runtime = runtimes.get(petId);
+  if (!runtime) return;
+  const agent = runtime.profile.agent;
+  const kind: 'codex' | 'claude' = agent?.kind === 'claude' ? 'claude' : 'codex';
+  const info = {
+    kind,
+    model: agent?.model ?? '',
+    effort: agent?.effort ?? '',
+    permission: (agent?.permission ?? 'readonly') as 'readonly' | 'plan' | 'ask' | 'auto',
+  };
+  runtime.bubble.setAgentControls({ ...info, models: [] }); // 先畫出來,清單到了再補
+  void agentModels(kind).then((models) => {
+    const current = runtimes.get(petId);
+    if (current?.profile.agent?.kind !== agent?.kind) return; // 等待期間換了家
+    current?.bubble.setAgentControls({ ...info, models });
+  });
+}
+
 function agentInfoText(profile: PetProfile): string {
   const kind = profile.agent?.kind === 'claude' ? 'Claude' : 'Codex';
   const model = profile.agent?.model ?? t('overlay.modelDefault');
@@ -337,12 +368,29 @@ function addRuntime(profile: PetProfile): void {
       onOpenLink: (url) => window.pet.openExternal(url),
       onNewSession: () => window.pet.newSession(profile.id),
       onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path),
-      onRemoveQueued: (taskId) => window.pet.removeQueuedMessage(profile.id, taskId)
+      onRemoveQueued: (taskId) => window.pet.removeQueuedMessage(profile.id, taskId),
+      // 徽章列切換模型/力度/運行模式:走與設定面板同一條 updatePetMeta,
+      // main 回推 pet-profiles-apply 後徽章自然更新(不在這裡樂觀改本地狀態)
+      onAgentChange: (patch) => {
+        const current = runtimes.get(profile.id);
+        const agent = current?.profile.agent;
+        if (!current || !agent) return;
+        void window.pet.updatePetMeta(profile.id, {
+          agent: {
+            kind: agent.kind,
+            ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+            model: patch.model ?? agent.model,
+            effort: patch.effort ?? agent.effort,
+            permission: (patch.permission ?? agent.permission) as typeof agent.permission,
+          },
+        });
+      }
     })
   };
   runtimes.set(profile.id, runtime);
   refreshOrderedRuntimes();
   runtime.bubble.setAgentInfo(agentInfoText(profile));
+  refreshAgentControls(profile.id);
   // 泡泡重建(renderer crash reload / 單寵熱重啟)後主動拉一次佇列現況——廣播式推播蓋不到重建
   void window.pet.getChatQueue(profile.id).then((list) => runtimes.get(profile.id)?.bubble.setQueue(list));
   // 上次對話回填:agent session 本來就續著,泡泡也該接得上(bubble 端會讓進行中的一輪優先)
@@ -390,6 +438,7 @@ function reconcileProfiles(profiles: PetProfile[]): void {
       runtime.bubble.setPetName(profile.name);
       runtime.bubble.setWorkspacePath(profile.workspacePath);
       runtime.bubble.setAgentInfo(agentInfoText(profile)); // 設定面板換模型/力度即時反映
+      refreshAgentControls(profile.id);
     }
   }
   // 用 root data attribute 讓所有泡泡共用同一個響應式上限；vw 會隨螢幕尺寸即時重算。

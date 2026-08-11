@@ -51,6 +51,8 @@ export interface SpeechBubble {
   applyLocale: () => void;
   /** 顯示目前的模型/力度徽章(如「Codex · gpt-5.6-sol · low」);null 隱藏。 */
   setAgentInfo: (text: string | null) => void;
+  /** 徽章列改成可點的控制項:模型 / 推理力度 / 運行模式。null 退回唯讀徽章。 */
+  setAgentControls: (info: AgentControlsInfo | null) => void;
   /** 參考檔案清單(拖放到寵物身上的絕對路徑;泡泡最下方);空陣列隱藏區塊。 */
   setRefFiles: (list: { path: string; isDir: boolean }[]) => void;
 }
@@ -63,6 +65,18 @@ export interface SpeechBubbleAvoidRect {
 }
 
 type BubblePlacement = 'above' | 'below' | 'left' | 'right';
+
+/** 泡泡徽章列的可調項目;models 供模型與力度的選單取值。 */
+export interface AgentControlsInfo {
+  kind: 'codex' | 'claude';
+  /** 目前選中的模型 id('' = 該 CLI 預設)。 */
+  model: string;
+  /** 目前推理力度('' = 預設)。 */
+  effort: string;
+  /** 運行模式(權限)。 */
+  permission: 'readonly' | 'plan' | 'ask' | 'auto';
+  models: { id: string; label: string; efforts: string[]; isDefault?: boolean }[];
+}
 
 interface SpeechBubbleOptions {
   petId?: string;
@@ -85,6 +99,8 @@ interface SpeechBubbleOptions {
   onRemoveRef?: (path: string) => void;
   /** 佇列清單的 ✕(移除該則排隊訊息)。 */
   onRemoveQueued?: (taskId: string) => void;
+  /** 徽章列改了模型/力度/運行模式(只帶變更的那項)。 */
+  onAgentChange?: (patch: { model?: string; effort?: string; permission?: string }) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -250,12 +266,15 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const agentInfo = document.createElement('div');
   agentInfo.className = 'bubble-agent-info';
   const agentInfoText = document.createElement('span');
+  // 可點的控制項(模型 / 力度 / 運行模式);沒有 setAgentControls 時保持隱藏,徽章維持唯讀文字
+  const agentControls = document.createElement('span');
+  agentControls.className = 'bubble-agent-controls';
   const newSessionBtn = document.createElement('button');
   newSessionBtn.type = 'button';
   newSessionBtn.className = 'bubble-new-session';
   newSessionBtn.textContent = t('bubble.newSession');
   newSessionBtn.title = t('bubble.newSessionTitle');
-  agentInfo.append(agentInfoText, newSessionBtn);
+  agentInfo.append(agentInfoText, agentControls, newSessionBtn);
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
   approvalBox.className = 'bubble-approval';
@@ -577,6 +596,108 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   };
   applyStaticTexts();
 
+  /* 徽章列的可調控制項:模型 / 推理力度 / 運行模式。
+   * 用自繪選單而非原生 <select>——疊層視窗不可聚焦,原生下拉的行為不可靠
+   * (同 setPointerCapture 靜默失敗的坑,見 CLAUDE.md 平台實證)。
+   * 選單掛在泡泡內、絕對定位於該 chip 下方,點外面或選完即關。 */
+  let agentMenu: HTMLElement | null = null;
+  const closeAgentMenu = (): void => {
+    agentMenu?.remove();
+    agentMenu = null;
+  };
+  const PERMISSIONS: AgentControlsInfo['permission'][] = ['readonly', 'plan', 'ask', 'auto'];
+  const permissionLabel = (value: AgentControlsInfo['permission']): string => ({
+    readonly: t('bubble.permReadonly'),
+    plan: t('bubble.permPlan'),
+    ask: t('bubble.permAsk'),
+    auto: t('bubble.permAuto'),
+  }[value]);
+
+  function openAgentMenu(
+    anchorEl: HTMLElement,
+    items: { value: string; label: string; active: boolean }[],
+    pick: (value: string) => void,
+  ): void {
+    closeAgentMenu();
+    const menu = document.createElement('div');
+    menu.className = 'bubble-agent-menu';
+    for (const item of items) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = `bubble-agent-option${item.active ? ' active' : ''}`;
+      option.textContent = item.label;
+      option.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeAgentMenu();
+        pick(item.value);
+      });
+      menu.append(option);
+    }
+    // 定位:對齊 chip 左緣、置於其下方(座標相對泡泡,泡泡自身是 position: fixed)
+    const chipRect = anchorEl.getBoundingClientRect();
+    const bubbleRect = element.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, chipRect.left - bubbleRect.left)}px`;
+    menu.style.top = `${chipRect.bottom - bubbleRect.top + 4}px`;
+    element.append(menu);
+    agentMenu = menu;
+  }
+  // 點泡泡任何其他地方就收起選單(選單自身的點擊已 stopPropagation)
+  element.addEventListener('pointerdown', () => closeAgentMenu());
+
+  function renderAgentControls(info: AgentControlsInfo | null): void {
+    closeAgentMenu();
+    agentControls.replaceChildren();
+    agentControls.classList.toggle('open', !!info);
+    if (!info) return;
+    agentInfoText.textContent = info.kind === 'claude' ? 'Claude' : 'Codex';
+
+    const chip = (text: string, title: string, onClick: (el: HTMLElement) => void): HTMLElement => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'bubble-agent-chip';
+      button.textContent = text;
+      button.title = title;
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        // 已開著同一顆就當作切換關閉
+        if (agentMenu) { closeAgentMenu(); return; }
+        onClick(button);
+      });
+      return button;
+    };
+
+    // 模型
+    const current = info.models.find((m) => m.id === info.model);
+    const modelChip = chip(current?.label ?? (info.model || t('bubble.modelDefault')), t('bubble.pickModel'), (el) => {
+      openAgentMenu(el, [
+        { value: '', label: t('bubble.modelDefault'), active: !info.model },
+        ...info.models.map((m) => ({ value: m.id, label: m.label, active: m.id === info.model })),
+      ], (value) => options.onAgentChange?.({ model: value }));
+    });
+    agentControls.append(modelChip);
+
+    // 推理力度(依所選模型可用值;模型未知時用聯集)
+    const efforts = current?.efforts ?? [...new Set(info.models.flatMap((m) => m.efforts))];
+    if (efforts.length) {
+      const effortChip = chip(info.effort || t('bubble.effortDefault'), t('bubble.pickEffort'), (el) => {
+        openAgentMenu(el, [
+          { value: '', label: t('bubble.effortDefault'), active: !info.effort },
+          ...efforts.map((e) => ({ value: e, label: e, active: e === info.effort })),
+        ], (value) => options.onAgentChange?.({ effort: value }));
+      });
+      agentControls.append(effortChip);
+    }
+
+    // 運行模式(權限)
+    const permChip = chip(permissionLabel(info.permission), t('bubble.pickPermission'), (el) => {
+      openAgentMenu(el, PERMISSIONS.map((value) => ({
+        value, label: permissionLabel(value), active: value === info.permission,
+      })), (value) => options.onAgentChange?.({ permission: value }));
+    });
+    permChip.classList.add(`perm-${info.permission}`);
+    agentControls.append(permChip);
+  }
+
   return {
     element,
     input,
@@ -669,6 +790,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       line.textContent = message;
       reply.append(line);
       reply.scrollTop = reply.scrollHeight;
+    },
+    setAgentControls: (info) => {
+      renderAgentControls(info);
     },
     setAgentInfo: (text) => {
       agentInfoText.textContent = text ?? '';

@@ -722,3 +722,79 @@
   border: 0;
   border-top: 1px solid rgba(111, 93, 128, 0.2);
 }
+
+/* 徽章列的可調控制項:模型 / 力度 / 運行模式。
+   外觀維持小字不搶戲,hover 才浮出可點的底色。 */
+.pet-speech-bubble .bubble-agent-controls {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pet-speech-bubble .bubble-agent-controls.open {
+  display: flex;
+}
+
+.pet-speech-bubble .bubble-agent-chip {
+  max-width: 120px;
+  padding: 1px 5px;
+  overflow: hidden;
+  color: #8d8496;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pet-speech-bubble .bubble-agent-chip:hover {
+  color: #4b4458;
+  background: rgba(111, 93, 128, 0.12);
+}
+
+/* 運行模式用顏色暗示風險程度(唯讀最安全 → 全自動最放權) */
+.pet-speech-bubble .bubble-agent-chip.perm-plan { color: #5b7fb5; }
+.pet-speech-bubble .bubble-agent-chip.perm-ask { color: #b5883f; }
+.pet-speech-bubble .bubble-agent-chip.perm-auto { color: #c0524f; }
+
+/* 自繪選單:疊層視窗不可聚焦,原生 select 的下拉不可靠(見 CLAUDE.md 平台實證) */
+.pet-speech-bubble .bubble-agent-menu {
+  position: absolute;
+  z-index: 5;
+  max-height: 220px;
+  min-width: 120px;
+  padding: 4px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.99);
+  border: 1px solid rgba(111, 93, 128, 0.28);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(40, 27, 52, 0.22);
+}
+
+.pet-speech-bubble .bubble-agent-option {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  color: #2f2a38;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pet-speech-bubble .bubble-agent-option:hover {
+  background: rgba(111, 93, 128, 0.12);
+}
+
+.pet-speech-bubble .bubble-agent-option.active {
+  color: #6d64d8;
+  font-weight: 650;
+}
