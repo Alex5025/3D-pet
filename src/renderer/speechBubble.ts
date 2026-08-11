@@ -626,8 +626,12 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       option.type = 'button';
       option.className = `bubble-agent-option${item.active ? ' active' : ''}`;
       option.textContent = item.label;
-      option.addEventListener('click', (event) => {
+      // 選取走 pointerdown:泡泡根元素也監聽 pointerdown 來關選單,
+      // 若這裡只擋 click,pointerdown 會先冒泡上去把選單移除,click 就再也不會觸發
+      // (自驗用 .click() 直接呼叫跳過了 pointerdown,才會測起來正常、實際點卻沒反應)。
+      option.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
+        event.preventDefault(); // 疊層視窗:避免按下時把焦點/拖曳行為帶走
         closeAgentMenu();
         pick(item.value);
       });
@@ -648,6 +652,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     closeAgentMenu();
     agentControls.replaceChildren();
     agentControls.classList.toggle('open', !!info);
+    // 徽章列本身也要開:只呼叫 setAgentControls(不呼叫 setAgentInfo)時,
+    // 父層 .bubble-agent-info 仍是 display:none,chip 會變成 0×0 的隱形元素
+    if (info) agentInfo.classList.add('open');
     if (!info) return;
     agentInfoText.textContent = ''; // 供應商改由下面的 chip 呈現(可點切換)
 
@@ -657,9 +664,11 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       button.className = 'bubble-agent-chip';
       button.textContent = text;
       button.title = title;
-      button.addEventListener('click', (event) => {
+      // 同上:改用 pointerdown,才不會被根元素的關閉監聽搶先
+      button.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
-        // 已開著同一顆就當作切換關閉
+        event.preventDefault();
+        // 已開著就當作切換關閉(再點同一顆 = 收起來)
         if (agentMenu) { closeAgentMenu(); return; }
         onClick(button);
       });

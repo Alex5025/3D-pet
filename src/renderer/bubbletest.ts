@@ -9,7 +9,8 @@ const bubble = createSpeechBubble({
   onRemoveQueued: (id) => console.log('[bubbletest] onRemoveQueued:', id),
   onAgentChange: (patch) => agentChanges.push(patch)
 });
-// 徽章控制項示範:模型/力度/運行模式可點切換
+// 徽章控制項示範:與實際 app 一致——setAgentInfo 開列、setAgentControls 填內容
+bubble.setAgentInfo('Claude');
 bubble.setAgentControls({
   kind: 'claude', model: 'opus', effort: 'high', permission: 'readonly',
   models: [
