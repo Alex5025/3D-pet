@@ -1,6 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { t } from '../../shared/i18n';
 import { createInterface } from 'node:readline';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentEvent, AgentModelInfo, AgentPermission, AgentProvider } from './types';
 import { refFilesPrompt } from './types';
 import type { PetToolsHub } from './petToolsHub';
@@ -29,6 +32,17 @@ interface JsonRpcMessage {
 }
 
 type NotificationHandler = (method: string, params: Record<string, unknown>) => void;
+
+/** 讀 ~/.codex/config.toml 的 model_reasoning_effort(codex 未指定力度時的實際預設)。
+ *  純唯讀、失敗即回 undefined —— 這只是 UI 標示用,拿不到不影響任何行為。 */
+function readCodexDefaultEffort(): string | undefined {
+  try {
+    const text = readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
+    return /^\s*model_reasoning_effort\s*=\s*["']([^"']+)["']/m.exec(text)?.[1];
+  } catch {
+    return undefined;
+  }
+}
 
 export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvider {
   let child: ChildProcess | null = null;
@@ -450,6 +464,9 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     },
     async listModels(): Promise<AgentModelInfo[]> {
       await ensureServer();
+      // 不指定力度時 codex 用 ~/.codex/config.toml 的 model_reasoning_effort;
+      // model/list 不回這個值,只能讀設定檔(唯讀,讀不到就當不知道)
+      const defaultEffort = readCodexDefaultEffort();
       const res = await request('model/list', {});
       if (res.error) throw new Error(res.error.message ?? 'model/list 失敗');
       const data = (res.result?.['data'] ?? []) as Array<{
@@ -465,7 +482,8 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
           id: m.id!,
           label: m.displayName ?? m.id!,
           efforts: (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort!).filter(Boolean),
-          isDefault: m.isDefault === true
+          isDefault: m.isDefault === true,
+          ...(defaultEffort ? { defaultEffort } : {})
         }));
     }
   };

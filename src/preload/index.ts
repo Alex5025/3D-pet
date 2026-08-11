@@ -14,6 +14,8 @@ export interface AgentModelInfo {
   label: string;
   efforts: string[];
   isDefault?: boolean;
+  /** 不指定力度時 CLI 實際會用的值(知道才填)。 */
+  defaultEffort?: string;
 }
 
 export interface PetState {

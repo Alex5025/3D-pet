@@ -33,6 +33,8 @@ export interface AgentModelInfo {
   /** 該模型支援的推理力度(codex 由 model/list 逐模型回報;claude 為固定清單)。 */
   efforts: string[];
   isDefault?: boolean;
+  /** 不指定力度時 CLI 實際會用的值(知道才填;UI 用來標示「預設力度(○○)」)。 */
+  defaultEffort?: string;
 }
 
 /**

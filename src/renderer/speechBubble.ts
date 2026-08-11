@@ -75,7 +75,7 @@ export interface AgentControlsInfo {
   effort: string;
   /** 運行模式(權限)。 */
   permission: 'readonly' | 'plan' | 'ask' | 'auto';
-  models: { id: string; label: string; efforts: string[]; isDefault?: boolean }[];
+  models: { id: string; label: string; efforts: string[]; isDefault?: boolean; defaultEffort?: string }[];
 }
 
 interface SpeechBubbleOptions {
@@ -691,8 +691,16 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     // 模型
     const current = info.models.find((m) => m.id === info.model);
     const modelChip = chip(current?.label ?? (info.model || t('bubble.modelDefault')), t('bubble.pickModel'), (el) => {
+      // 「預設」= 不指定,交給 CLI 決定;把 CLI 實際會挑的那個標在後面才看得懂
+      const cliDefault = info.models.find((m) => m.isDefault);
       openAgentMenu(el, [
-        { value: '', label: t('bubble.modelDefault'), active: !info.model },
+        {
+          value: '',
+          label: cliDefault
+            ? t('bubble.modelDefaultNamed', { name: cliDefault.label })
+            : t('bubble.modelDefault'),
+          active: !info.model,
+        },
         ...info.models.map((m) => ({ value: m.id, label: m.label, active: m.id === info.model })),
       ], (value) => options.onAgentChange?.({ model: value }));
     });
@@ -701,9 +709,19 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     // 推理力度(依所選模型可用值;模型未知時用聯集)
     const efforts = current?.efforts ?? [...new Set(info.models.flatMap((m) => m.efforts))];
     if (efforts.length) {
+      // 力度的預設值不是每家都給得出來(codex 讀得到全域設定,claude 無從得知)——
+      // 知道才標,不知道就維持「預設力度」,不亂猜
+      const defaultEffort = current?.defaultEffort
+        ?? info.models.find((m) => m.defaultEffort)?.defaultEffort;
       const effortChip = chip(info.effort || t('bubble.effortDefault'), t('bubble.pickEffort'), (el) => {
         openAgentMenu(el, [
-          { value: '', label: t('bubble.effortDefault'), active: !info.effort },
+          {
+            value: '',
+            label: defaultEffort
+              ? t('bubble.effortDefaultNamed', { name: defaultEffort })
+              : t('bubble.effortDefault'),
+            active: !info.effort,
+          },
           ...efforts.map((e) => ({ value: e, label: e, active: e === info.effort })),
         ], (value) => options.onAgentChange?.({ effort: value }));
       });

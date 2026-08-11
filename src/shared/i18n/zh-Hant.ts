@@ -94,6 +94,8 @@ export const zhHant = {
   'bubble.actIdle': '閒置',
   'bubble.inputPlaceholder': '輸入訊息…(Shift+Enter 換行)',
   'bubble.modelDefault': '預設模型',
+  'bubble.modelDefaultNamed': '預設模型({name})',
+  'bubble.effortDefaultNamed': '預設力度({name})',
   'bubble.effortDefault': '預設力度',
   'bubble.pickProvider': '切換 AI 供應商(換家會開新對話)',
   'bubble.pickModel': '切換模型',

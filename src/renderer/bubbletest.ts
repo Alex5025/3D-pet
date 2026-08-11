@@ -14,7 +14,8 @@ bubble.setAgentInfo('Claude');
 bubble.setAgentControls({
   kind: 'claude', model: 'opus', effort: 'high', permission: 'readonly',
   models: [
-    { id: 'opus', label: 'opus', efforts: ['low', 'medium', 'high'] },
+    // opus 標成 CLI 預設、且帶 defaultEffort;sonnet 不帶 → 驗「知道才標」
+    { id: 'opus', label: 'opus', efforts: ['low', 'medium', 'high'], isDefault: true, defaultEffort: 'medium' },
     { id: 'sonnet', label: 'sonnet', efforts: ['low', 'high', 'max'] }
   ]
 });

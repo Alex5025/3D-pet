@@ -89,6 +89,8 @@ export const en = {
   'bubble.actIdle': 'Idle',
   'bubble.inputPlaceholder': 'Type a message… (Shift+Enter for newline)',
   'bubble.modelDefault': 'Default model',
+  'bubble.modelDefaultNamed': 'Default model ({name})',
+  'bubble.effortDefaultNamed': 'Default effort ({name})',
   'bubble.effortDefault': 'Default effort',
   'bubble.pickProvider': 'Switch AI provider (starts a new conversation)',
   'bubble.pickModel': 'Switch model',

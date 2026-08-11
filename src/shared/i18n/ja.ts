@@ -89,6 +89,8 @@ export const ja = {
   'bubble.actIdle': '待機',
   'bubble.inputPlaceholder': 'メッセージを入力…(Shift+Enter で改行)',
   'bubble.modelDefault': '既定モデル',
+  'bubble.modelDefaultNamed': '既定モデル({name})',
+  'bubble.effortDefaultNamed': '既定の強度({name})',
   'bubble.effortDefault': '既定の強度',
   'bubble.pickProvider': 'AI プロバイダを切り替え(新しい会話になります)',
   'bubble.pickModel': 'モデルを切り替え',
