@@ -90,6 +90,7 @@ export const ko = {
   'bubble.inputPlaceholder': '메시지 입력…(Shift+Enter 줄바꿈)',
   'bubble.modelDefault': '기본 모델',
   'bubble.effortDefault': '기본 강도',
+  'bubble.pickProvider': 'AI 제공자 전환(새 대화가 시작됩니다)',
   'bubble.pickModel': '모델 전환',
   'bubble.pickEffort': '추론 강도 전환',
   'bubble.pickPermission': '실행 모드 전환',

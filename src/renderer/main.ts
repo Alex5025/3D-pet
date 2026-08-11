@@ -375,14 +375,19 @@ function addRuntime(profile: PetProfile): void {
         const current = runtimes.get(profile.id);
         const agent = current?.profile.agent;
         if (!current || !agent) return;
+        // 換供應商 = 換 CLI:模型 id、力度與 session 都不通用,一律清掉重來
+        // (main 的 sanitizePetMeta 看到 kind 改變也會關掉舊 session)
+        const switching = !!patch.kind && patch.kind !== agent.kind;
         void window.pet.updatePetMeta(profile.id, {
-          agent: {
-            kind: agent.kind,
-            ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
-            model: patch.model ?? agent.model,
-            effort: patch.effort ?? agent.effort,
-            permission: (patch.permission ?? agent.permission) as typeof agent.permission,
-          },
+          agent: switching
+            ? { kind: patch.kind!, permission: agent.permission }
+            : {
+                kind: agent.kind,
+                ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+                model: patch.model ?? agent.model,
+                effort: patch.effort ?? agent.effort,
+                permission: (patch.permission ?? agent.permission) as typeof agent.permission,
+              },
         });
       }
     })

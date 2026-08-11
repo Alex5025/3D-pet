@@ -90,6 +90,7 @@ export const en = {
   'bubble.inputPlaceholder': 'Type a message… (Shift+Enter for newline)',
   'bubble.modelDefault': 'Default model',
   'bubble.effortDefault': 'Default effort',
+  'bubble.pickProvider': 'Switch AI provider (starts a new conversation)',
   'bubble.pickModel': 'Switch model',
   'bubble.pickEffort': 'Switch reasoning effort',
   'bubble.pickPermission': 'Switch run mode',

@@ -90,6 +90,7 @@ export const ja = {
   'bubble.inputPlaceholder': 'メッセージを入力…(Shift+Enter で改行)',
   'bubble.modelDefault': '既定モデル',
   'bubble.effortDefault': '既定の強度',
+  'bubble.pickProvider': 'AI プロバイダを切り替え(新しい会話になります)',
   'bubble.pickModel': 'モデルを切り替え',
   'bubble.pickEffort': '推論強度を切り替え',
   'bubble.pickPermission': '実行モードを切り替え',

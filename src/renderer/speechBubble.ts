@@ -100,7 +100,7 @@ interface SpeechBubbleOptions {
   /** 佇列清單的 ✕(移除該則排隊訊息)。 */
   onRemoveQueued?: (taskId: string) => void;
   /** 徽章列改了模型/力度/運行模式(只帶變更的那項)。 */
-  onAgentChange?: (patch: { model?: string; effort?: string; permission?: string }) => void;
+  onAgentChange?: (patch: { kind?: 'codex' | 'claude'; model?: string; effort?: string; permission?: string }) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -649,7 +649,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     agentControls.replaceChildren();
     agentControls.classList.toggle('open', !!info);
     if (!info) return;
-    agentInfoText.textContent = info.kind === 'claude' ? 'Claude' : 'Codex';
+    agentInfoText.textContent = ''; // 供應商改由下面的 chip 呈現(可點切換)
 
     const chip = (text: string, title: string, onClick: (el: HTMLElement) => void): HTMLElement => {
       const button = document.createElement('button');
@@ -665,6 +665,19 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       });
       return button;
     };
+
+    // 供應商(換家 = 換 CLI,模型/力度/session 都不通用,由 renderer 端一併清掉)
+    const kindChip = chip(info.kind === 'claude' ? 'Claude' : 'Codex', t('bubble.pickProvider'), (el) => {
+      openAgentMenu(el, [
+        { value: 'codex', label: 'Codex', active: info.kind === 'codex' },
+        { value: 'claude', label: 'Claude', active: info.kind === 'claude' },
+      ], (value) => {
+        if (value === info.kind) return; // 沒換就不動,免得白白關掉 session
+        options.onAgentChange?.({ kind: value as 'codex' | 'claude' });
+      });
+    });
+    kindChip.classList.add('provider');
+    agentControls.append(kindChip);
 
     // 模型
     const current = info.models.find((m) => m.id === info.model);
