@@ -141,12 +141,14 @@ export async function runAgyE2E(): Promise<boolean> {
   check('resume 上下文(答出 7+7)', h.textOf().includes('7+7'));
   check('sessionId 不變', h.profile.agent?.sessionId === sid);
 
-  // 3. cancel:長回答中殺行程 → bridge 補 done ok:false;conversation 不丟
+  // 3. cancel:長回答中殺行程 → bridge 補 done ok:false;conversation 不丟。
+  // agy 的文字緩衝到 result 才發,生成中的訊號是逐片段的 thinking——等第二個 thinking
+  // (第一個來自 init)確認 turn 真的在跑,避免「寫太快先完成」的競態。
   h.events.length = 0;
   h.bridge.chatSend('e2e', '請寫一篇 5000 字的超長文,詳細介紹海洋的歷史、生態、洋流與人類的關係。');
   {
     const deadline = Date.now() + 60_000;
-    while (!h.events.some((e) => e.kind === 'text') && Date.now() < deadline) {
+    while (h.events.filter((e) => e.kind === 'thinking').length < 2 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }

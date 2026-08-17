@@ -902,3 +902,5 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 4. AgentKind 加 'agy' 的接線:型別會抓的(providers record、harness、union)不會漏;**七處靜默 fallback 逐一修**(petIpc/agent-models 白名單、settings selectedKind、main.ts 兩處三元、泡泡供應商 chip 的 label/選單/轉型)。
 
 **驗證**:typecheck/build 綠;mock selftest 補 3 項 petMeta 斷言(agy 合法/ask 被擋/plan·auto 照收)全 PASS;`VRM_PET_AGENT_SELFTEST=agy` 真 CLI E2E 七項全 PASS(一問一答+conversation 回存/resume/cancel 競態/取消後 session 續用)。
+
+**追加(同日):agy 亂碼修正**——實機對話出現 `���`:agy 長回覆會分多個 `text_delta` 增量片段,CLI 以 **byte 邊界**切割,多位元組字元在接縫兩側各自解碼成 U+FFFD,**壞字已編進 JSON,片段層無法修復**;但 `result.response` 全文乾淨。修法:agy 的文字片段只緩衝不發,`result` 時一次發出乾淨全文(result 沒帶才退回緩衝片段);片段到達時發 `thinking` 餵 bridge 看門狗,長回覆才不會 5 分鐘無事件被硬中斷。代價:agy 回覆不逐段顯示、完成時一次出現(claude/codex 串流不受影響)。E2E 的 cancel 段改等第二個 thinking(原等首個 text,現在 text 在結尾才來)。另修重啟回填:上次回覆為空(agy 工具被拒的空 turn)不再打開空的回覆框。

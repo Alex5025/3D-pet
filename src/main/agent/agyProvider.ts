@@ -159,8 +159,10 @@ export function createAgyProvider(): AgentProvider {
       let realSessionId = sessionId;
       let sawResult = false;
       let stderrTail = '';
-      /** 同一 step 的 text_delta 防重:記已發出的累計文字,新 delta 若以其開頭只發後綴。 */
-      const emittedByStep = new Map<number, string>();
+      /** 文字緩衝:agy 的 text_delta 以 byte 邊界切割,多位元組字元在接縫變 U+FFFD(實測),
+       *  但 result.response 全文是乾淨的——所以片段只緩衝不發,result 時一次發乾淨全文;
+       *  片段到達時發 thinking 餵 bridge 看門狗(長回覆才不會 5 分鐘無事件被硬中斷)。 */
+      let bufferedText = '';
 
       child.stdin.end(); // prompt 已在 argv(--print 的值);stdin 立即收掉避免 CLI 等輸入
       child.stderr.on('data', (chunk) => {
@@ -197,13 +199,8 @@ export function createAgyProvider(): AgentProvider {
           const su = msg['step_update'] as Record<string, unknown> | undefined;
           if (!su) return;
           if (su['step_type'] === 'agent_response' && typeof su['text_delta'] === 'string') {
-            const stepIndex = Number(su['step_index'] ?? -1);
-            const delta = su['text_delta'];
-            const seen = emittedByStep.get(stepIndex) ?? '';
-            // 累計語意(delta 含之前發過的開頭)→ 只發後綴;增量語意 → 整段照發
-            const fresh = delta.startsWith(seen) ? delta.slice(seen.length) : delta;
-            if (fresh) queue.push({ kind: 'text', text: fresh });
-            emittedByStep.set(stepIndex, delta.startsWith(seen) ? delta : seen + delta);
+            bufferedText += su['text_delta']; // 只緩衝(接縫含 U+FFFD),result 時以乾淨全文取代
+            queue.push({ kind: 'thinking' }); // 餵看門狗:生成有在推進
             return;
           }
           if (su['step_type'] === 'tool') {
@@ -217,7 +214,11 @@ export function createAgyProvider(): AgentProvider {
         if (event === 'result') {
           sawResult = true;
           const result = msg['result'] as Record<string, unknown> | undefined;
+          const clean = typeof result?.['response'] === 'string' ? result['response'] : '';
           if (result?.['status'] === 'SUCCESS') {
+            // 優先用乾淨全文;萬一 result 沒帶(防衛),退回緩衝片段(可能含 U+FFFD 但總比沒有好)
+            const finalText = clean || bufferedText;
+            if (finalText) queue.push({ kind: 'text', text: finalText });
             queue.push({ kind: 'done', ok: true });
           } else if (cancelRequested.has(child)) {
             queue.push({ kind: 'done', ok: false }); // 使用者主動取消,不是錯誤
