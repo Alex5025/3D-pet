@@ -8,6 +8,7 @@ import { createAgentBridge } from './bridge';
 import { createChatDispatcher, createChatQueue } from '../chatQueue';
 import { createClaudeProvider } from './claudeProvider';
 import { createCodexProvider } from './codexProvider';
+import { createAgyProvider } from './agyProvider';
 import { createMockProvider } from './mockProvider';
 import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
 import { parseProjectSandboxConfig, updateProjectSandboxConfig } from '../sandboxConfig';
@@ -21,7 +22,7 @@ import { sanitizePetMeta } from '../petIpc';
  * 仿 [hit] selftest 慣例:終端機印 [agent-selftest] PASS/FAIL,exit code 供 CI 化。
  */
 /** 真 provider 的 headless e2e 骨架:一隻假寵物 + 事件收集,回傳操作句柄。 */
-function makeHarness(kind: 'codex' | 'claude', provider: Parameters<typeof createAgentBridge>[0]['providers']['claude']): {
+function makeHarness(kind: 'codex' | 'claude' | 'agy', provider: Parameters<typeof createAgentBridge>[0]['providers']['claude']): {
   profile: AgentPetProfile;
   events: AgentEvent[];
   bridge: ReturnType<typeof createAgentBridge>;
@@ -41,7 +42,7 @@ function makeHarness(kind: 'codex' | 'claude', provider: Parameters<typeof creat
       return profile;
     },
     send: (_petId, event) => events.push(event),
-    providers: { codex: provider, claude: provider }
+    providers: { codex: provider, claude: provider, agy: provider }
   });
   const terminalCount = (): number => events.filter((e) => e.kind === 'done' || e.kind === 'error').length;
   return {
@@ -112,6 +113,54 @@ export async function runClaudeE2E(): Promise<boolean> {
   hub.dispose();
   const pass = failures.length === 0;
   console.log(`[agent-e2e:claude] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
+  return pass;
+}
+
+/** 真 agy CLI 的 e2e(VRM_PET_AGENT_SELFTEST=agy;會耗 Antigravity 額度,顯式觸發才跑)。
+ *  無審批段(headless 無互動審批,ask 已在 UI/白名單過濾)與寵物工具段(v1 不接 MCC)。 */
+export async function runAgyE2E(): Promise<boolean> {
+  const failures: string[] = [];
+  const check = (name: string, ok: boolean): void => {
+    console.log(`[agent-e2e:agy] ${ok ? 'ok' : 'FAIL'} - ${name}`);
+    if (!ok) failures.push(name);
+  };
+  const h = makeHarness('agy', createAgyProvider());
+
+  // 1. 一問一答 + conversation id 回存
+  h.bridge.chatSend('e2e', '請只回答數字,不要其他文字:7+7=?');
+  await h.waitTerminal(1);
+  check('回覆含 14', h.textOf().includes('14'));
+  check('done ok', h.events.some((e) => e.kind === 'done' && e.ok));
+  const sid = h.profile.agent?.sessionId;
+  check('sessionId 回存(uuid 形)', typeof sid === 'string' && sid.length > 20 && !sid.startsWith('pending-'));
+
+  // 2. resume(--conversation):第二問引用第一問
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '我上一句問的算式是什麼?請只回答算式本身。');
+  await h.waitTerminal(1);
+  check('resume 上下文(答出 7+7)', h.textOf().includes('7+7'));
+  check('sessionId 不變', h.profile.agent?.sessionId === sid);
+
+  // 3. cancel:長回答中殺行程 → bridge 補 done ok:false;conversation 不丟
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '請寫一篇 5000 字的超長文,詳細介紹海洋的歷史、生態、洋流與人類的關係。');
+  {
+    const deadline = Date.now() + 60_000;
+    while (!h.events.some((e) => e.kind === 'text') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  h.bridge.chatCancel('e2e');
+  await h.waitTerminal(1, 30_000);
+  check('cancel → done ok:false', h.events.some((e) => e.kind === 'done' && !e.ok));
+  h.events.length = 0;
+  h.bridge.chatSend('e2e', '不用寫了。請只回答:OK');
+  await h.waitTerminal(1);
+  check('cancel 後 session 仍可用', h.textOf().includes('OK'));
+
+  await h.bridge.dispose();
+  const pass = failures.length === 0;
+  console.log(`[agent-e2e:agy] ${pass ? 'PASS' : `FAIL(${failures.length}):${failures.join('、')}`}`);
   return pass;
 }
 
@@ -349,6 +398,14 @@ export async function runAgentSelftest(): Promise<boolean> {
       !(bogusPerm.next.agent as { permission?: string })?.permission);
     check('petMeta:readonly 不存欄位(預設值)',
       !(sanitizePetMeta(base, { agent: { kind: 'claude', permission: 'readonly' } }).next.agent as { permission?: string })?.permission);
+
+    check('petMeta:agy 為合法 kind',
+      (sanitizePetMeta(base, { agent: { kind: 'agy' } }).next.agent as { kind?: string })?.kind === 'agy');
+    check('petMeta:agy 的 ask 被擋(headless 無互動審批)',
+      !(sanitizePetMeta(base, { agent: { kind: 'agy', permission: 'ask' } }).next.agent as { permission?: string })?.permission);
+    check('petMeta:agy 的 plan/auto 照收',
+      (sanitizePetMeta(base, { agent: { kind: 'agy', permission: 'plan' } }).next.agent as { permission?: string })?.permission === 'plan' &&
+      (sanitizePetMeta(base, { agent: { kind: 'agy', permission: 'auto' } }).next.agent as { permission?: string })?.permission === 'auto');
   }
 
   const profile: AgentPetProfile = { id: 'p1', workspacePath: '/tmp', agent: { kind: 'claude' } };
@@ -362,7 +419,7 @@ export async function runAgentSelftest(): Promise<boolean> {
       return profile;
     },
     send: (_petId, event) => events.push(event),
-    providers: { claude: mockClaude, codex: mockCodex }
+    providers: { claude: mockClaude, codex: mockCodex, agy: mockClaude }
   });
 
   const terminalCount = (): number => events.filter((e) => e.kind === 'done' || e.kind === 'error').length;
@@ -547,7 +604,7 @@ export async function runAgentSelftest(): Promise<boolean> {
       getPet: (id) => (id === qProfile.id ? qProfile : null),
       updatePet: (_id, patch) => { qProfile.agent = patch.agent; return qProfile; },
       send: (_petId, event) => qEvents.push(event),
-      providers: { claude: qMock, codex: qMock },
+      providers: { claude: qMock, codex: qMock, agy: qMock },
       onTurnFinished: () => dispatcher.dispatchAll()
     });
     const qTerminal = (): number => qEvents.filter((e) => e.kind === 'done' || e.kind === 'error').length;

@@ -125,11 +125,21 @@ el('default-pose').addEventListener('change', () => {
   window.pet.setDefaultPose(profile.id, (el('default-pose') as HTMLSelectElement).value || null);
 });
 
+/** agy 不支援 ask(headless 無互動審批):選 agy 時禁用該選項,已選中則退回唯讀。 */
+function syncPermissionOptions(): void {
+  const permissionSelect = el('agent-permission') as HTMLSelectElement;
+  const askOption = permissionSelect.querySelector('option[value="ask"]') as HTMLOptionElement | null;
+  const isAgy = selectedKind() === 'agy';
+  if (askOption) askOption.disabled = isAgy;
+  if (isAgy && permissionSelect.value === 'ask') permissionSelect.value = 'readonly';
+}
+
 function renderWorkSettings(): void {
   const profile = selectedProfile();
   input('pet-name').value = profile?.name ?? '';
   (el('agent-kind') as HTMLSelectElement).value = profile?.agent?.kind ?? 'codex';
   (el('agent-permission') as HTMLSelectElement).value = profile?.agent?.permission ?? 'readonly';
+  syncPermissionOptions();
   void renderAgentModelOptions(profile?.agent?.model ?? '', profile?.agent?.effort ?? '');
   input('agent-session-id').value = profile?.agent?.sessionId ?? '';
   el('pet-enabled-toggle').textContent = profile?.enabled !== false
@@ -215,7 +225,8 @@ input('pet-name').addEventListener('change', async () => {
 const modelLists: Partial<Record<AgentKind, AgentModelInfo[]>> = {};
 
 function selectedKind(): AgentKind {
-  return (el('agent-kind') as HTMLSelectElement).value === 'claude' ? 'claude' : 'codex';
+  const value = (el('agent-kind') as HTMLSelectElement).value;
+  return value === 'claude' || value === 'agy' ? value : 'codex'; // 未知值退回 codex(與 bridge DEFAULT_KIND 一致)
 }
 
 /** 依所選模型重建力度選項(codex 由 model/list 逐模型回報,含 ultra;沒資料退回通用清單)。 */
@@ -279,6 +290,7 @@ async function submitAgentBinding(): Promise<void> {
 
 el('agent-kind').addEventListener('change', async () => {
   // 換家:舊模型名對新家無效,模型/力度歸回預設再送出
+  syncPermissionOptions();
   await renderAgentModelOptions('', '');
   await submitAgentBinding();
 });

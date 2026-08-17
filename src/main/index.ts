@@ -17,7 +17,7 @@ import { createDragMonitor, type DragMonitor } from './dragMonitor';
 import { PET_EXPRESSIONS, createPetToolsHub } from './agent/petToolsHub';
 import type { PetToolsHub } from './agent/petToolsHub';
 import { createProviders } from './agent/providers';
-import { runAgentSelftest, runClaudeE2E, runCodexE2E } from './agent/selftest';
+import { runAgentSelftest, runAgyE2E, runClaudeE2E, runCodexE2E } from './agent/selftest';
 import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
 import { createDefaultWorkspace } from './workspaceDefaults';
 import { LOCALES, getLocale, resolveLocale, setLocale, t, type Locale } from '../shared/i18n';
@@ -788,6 +788,7 @@ app.whenReady().then(async () => {
   if (selftestMode) {
     const pass = selftestMode === 'claude' ? await runClaudeE2E()
       : selftestMode === 'codex' ? await runCodexE2E()
+      : selftestMode === 'agy' ? await runAgyE2E()
       : await runAgentSelftest();
     app.exit(pass ? 0 : 1);
     return;
@@ -1226,7 +1227,7 @@ app.whenReady().then(async () => {
   // 快取 10 分鐘 TTL:CLI 升版新增模型不用重啟 app 才看得到
   const modelListCache = new Map<string, { at: number; list: unknown[] }>();
   ipcMain.handle('agent-models', async (_event, kind: string) => {
-    if (kind !== 'codex' && kind !== 'claude') return [];
+    if (kind !== 'codex' && kind !== 'claude' && kind !== 'agy') return [];
     const cached = modelListCache.get(kind);
     if (cached && Date.now() - cached.at < 600_000) return cached.list;
     const list = (await bridge?.listModels(kind)) ?? [];

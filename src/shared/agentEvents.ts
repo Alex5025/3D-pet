@@ -3,7 +3,7 @@
  * 對應 docs/AGENT-BRIDGE-DESIGN.md §3;跨 IPC 的 discriminated union 只維護這一份,避免雙份漂移。
  */
 
-export type AgentKind = 'codex' | 'claude';
+export type AgentKind = 'codex' | 'claude' | 'agy';
 
 /** 權限等級:readonly=唯讀只回答(預設)/ ask=可寫工作目錄、危險操作經泡泡核准 / auto=可寫且不詢問 */
 /** 權限等級。plan = 先出計畫不動手(Claude 有原生 permission-mode;Codex 無對應旗標,

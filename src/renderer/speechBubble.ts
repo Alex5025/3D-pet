@@ -68,7 +68,7 @@ type BubblePlacement = 'above' | 'below' | 'left' | 'right';
 
 /** 泡泡徽章列的可調項目;models 供模型與力度的選單取值。 */
 export interface AgentControlsInfo {
-  kind: 'codex' | 'claude';
+  kind: 'codex' | 'claude' | 'agy';
   /** 目前選中的模型 id('' = 該 CLI 預設)。 */
   model: string;
   /** 目前推理力度('' = 預設)。 */
@@ -102,7 +102,7 @@ interface SpeechBubbleOptions {
   /** 佇列清單的 ✕(移除該則排隊訊息)。 */
   onRemoveQueued?: (taskId: string) => void;
   /** 徽章列改了模型/力度/運行模式(只帶變更的那項)。 */
-  onAgentChange?: (patch: { kind?: 'codex' | 'claude'; model?: string; effort?: string; permission?: string }) => void;
+  onAgentChange?: (patch: { kind?: 'codex' | 'claude' | 'agy'; model?: string; effort?: string; permission?: string }) => void;
 }
 
 const VIEWPORT_MARGIN = 12;
@@ -745,13 +745,15 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     agentInfoText.textContent = ''; // 供應商改由下面的 chip 呈現(可點切換)
 
     // 供應商(換家 = 換 CLI,模型/力度/session 都不通用,由 renderer 端一併清掉)
-    const kindChip = chip(info.kind === 'claude' ? 'Claude' : 'Codex', t('bubble.pickProvider'), (el) => {
+    const KIND_LABELS: Record<AgentControlsInfo['kind'], string> = { codex: 'Codex', claude: 'Claude', agy: 'Antigravity' };
+    const kindChip = chip(KIND_LABELS[info.kind], t('bubble.pickProvider'), (el) => {
       openAgentMenu(el, [
         { value: 'codex', label: 'Codex', active: info.kind === 'codex' },
         { value: 'claude', label: 'Claude', active: info.kind === 'claude' },
+        { value: 'agy', label: 'Antigravity', active: info.kind === 'agy' },
       ], (value) => {
         if (value === info.kind) return; // 沒換就不動,免得白白關掉 session
-        options.onAgentChange?.({ kind: value as 'codex' | 'claude' });
+        options.onAgentChange?.({ kind: value as AgentControlsInfo['kind'] });
       });
     });
     kindChip.classList.add('provider');
@@ -799,7 +801,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
 
     // 運行模式(權限)
     const permChip = chip(permissionLabel(info.permission), t('bubble.pickPermission'), (el) => {
-      openAgentMenu(el, PERMISSIONS.map((value) => ({
+      // agy headless 無互動審批 → 不列 ask(main 端白名單也會擋,雙保險)
+      const available = PERMISSIONS.filter((value) => value !== 'ask' || info.kind !== 'agy');
+      openAgentMenu(el, available.map((value) => ({
         value, label: permissionLabel(value), active: value === info.permission,
       })), (value) => options.onAgentChange?.({ permission: value }));
     });

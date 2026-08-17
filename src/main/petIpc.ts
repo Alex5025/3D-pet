@@ -45,13 +45,15 @@ export function sanitizePetMeta<TProfile extends { name: string; agent?: AgentBi
     const files = [...new Set(patch.idleMotions.filter((file): file is string => typeof file === 'string'))].slice(0, 50);
     next['idleMotions'] = files.length ? files : undefined;
   }
-  if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude')) {
+  if (patch.agent && (patch.agent.kind === 'codex' || patch.agent.kind === 'claude' || patch.agent.kind === 'agy')) {
     const sessionId = typeof patch.agent.sessionId === 'string' ? patch.agent.sessionId.trim() : '';
     const model = typeof patch.agent.model === 'string' ? patch.agent.model.trim() : '';
     const effort = typeof patch.agent.effort === 'string' && EFFORTS.includes(patch.agent.effort)
       ? patch.agent.effort : '';
-    const permission = patch.agent.permission === 'plan' || patch.agent.permission === 'ask'
+    let permission = patch.agent.permission === 'plan' || patch.agent.permission === 'ask'
       || patch.agent.permission === 'auto' ? patch.agent.permission : undefined;
+    // agy(Antigravity)headless 無互動審批機制,ask 擋在白名單層(UI 也已過濾,這裡是最後防線)
+    if (patch.agent.kind === 'agy' && permission === 'ask') permission = undefined;
     next['agent'] = {
       kind: patch.agent.kind,
       ...(sessionId ? { sessionId } : {}),

@@ -1,7 +1,7 @@
 # 開發日誌(DEVLOG)
 
 VRM 桌寵(Electron + three.js + @pixiv/three-vrm)的議題記錄:每一條 = 症狀 → 根因 → 處理方式。
-時間跨度 2026-07-19 ~ 2026-08-10。對應的 commit 見 `git log`。
+時間跨度 2026-07-19 ~ 2026-08-17。對應的 commit 見 `git log`。
 
 ---
 
@@ -888,3 +888,17 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 ## 46. 泡泡就地換工作目錄、輸入歷史與交辦列(2026-08-17)
 
 **內容**:(1) 工作目錄改成徽章列第一顆 chip——點了直接開資料夾對話框改這隻寵的 cwd(重用設定面板同一條 choose-workspace IPC;main 改完 sendPetProfiles,徽章由 reconcile 寫回,renderer 不接回傳值)。未設定時也顯示「選擇工作目錄…」當最短補救入口。徽章列改恆開、chip 抽共用工廠(pointerdown + stopPropagation,沿 §67a2112 的選單關閉坑)。(2) 輸入框 ↑/↓ 叫回送出過的訊息(像 shell):只留記憶體上限 50 筆、連續重複不收;空白時按 ↑ 進歷史,內容一改就退出翻閱,方向鍵還給多行編輯;IME 選字中(isComposing)絕不攔。(3) `beginTurn(text)` 帶原話——交辦內容釘在回覆上方(兩行截斷,title 全文),多寵同時在跑時一眼認出哪句交給了誰;重啟回填時同列顯示「上次你說」。applyLocale 一併重套 chip 文字與交辦列前綴。bubbletest 補 onChooseWorkspace 計數與 beginTurn 帶字案例。
+
+## 47. 第三家 provider:agy(Antigravity CLI)串接(2026-08-17)
+
+**評估**:`agy`(v1.1.13)介面與 claude CLI 高度同構(`--print` + `--output-format stream-json`、`--conversation <id>` resume、`--model/--effort/--mode`),AgentProvider 介面本就多家設計,claudeProvider 整份當樣板。一次接入 Gemini 3.x 全系列 + Claude 4.6 + GPT-OSS。
+
+**煙霧測試定案**(樣本存 scratchpad/agy-smoke):事件形狀 `init`(conversation_id + 工具清單 + permission_mode)→ `step_update`(agent_response 的 text_delta / tool 的 tool_name)→ `result`(status)。**文字整段一次到達非逐字增量**,解析器仍做同 step 後綴防重,兩種語意都安全。**headless 下需權限的工具被 CLI 自動拒絕**(「Add an allow-rule under permissions.allow」)——所以 readonly = 預設行為(天然唯讀)、auto = `--dangerously-skip-permissions`、plan = `--mode plan`;**ask 做不了**(無 permission-prompt 等效),三層過濾:泡泡運行模式選單不列、設定面板選項禁用、petIpc 白名單最後防線。寵物工具 MCC v1 不接(無逐 turn mcp-config 旗標,不碰全域 settings.json)。
+
+**實作要點**:
+1. `agyProvider.ts` 複製 claudeProvider 骨架(EventQueue、pending-N handle、cancel 2.5s 強制終結保險、close 只刪仍指向本 child 的條目全保留);resume 改 `--conversation`;無 `--append-system-prompt` → persona/參考檔案走 **codex 式上下文注入**(組合值變了才在 prompt 前綴【上下文更新】,換語言自動觸發重注入)。
+2. **`--print` 是帶值旗標(Go flag 風格)**:prompt 必須當它的參數值;光給 `-p` 再餵 stdin 會把下一個旗標吃成問題本身(E2E 抓到:回覆變成「請說明 --output-format 的用法」)。這是與 claude(stdin 餵 prompt)最大的差異。
+3. **模型 id 把力度編在尾碼**(gemini-3.7-flash-high):listModels 執行 `agy models` 解析 `id\t label`,三檔位齊的摺疊成「基底 + efforts」,spawn 時接回尾碼;無檔位變體的(claude-* 等)原樣列出走 `--effort` 旗標。
+4. AgentKind 加 'agy' 的接線:型別會抓的(providers record、harness、union)不會漏;**七處靜默 fallback 逐一修**(petIpc/agent-models 白名單、settings selectedKind、main.ts 兩處三元、泡泡供應商 chip 的 label/選單/轉型)。
+
+**驗證**:typecheck/build 綠;mock selftest 補 3 項 petMeta 斷言(agy 合法/ask 被擋/plan·auto 照收)全 PASS;`VRM_PET_AGENT_SELFTEST=agy` 真 CLI E2E 七項全 PASS(一問一答+conversation 回存/resume/cancel 競態/取消後 session 續用)。

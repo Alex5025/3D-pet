@@ -6,7 +6,7 @@ import {
   type SpeechBubble,
   type SpeechBubbleAvoidRect,
 } from './speechBubble';
-import type { AgentModelInfo, PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
+import type { AgentKind, AgentModelInfo, PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
 import { setLocale, t, type Locale } from '../shared/i18n';
 import { applyI18nDom } from './i18nDom';
 
@@ -289,7 +289,7 @@ async function loadInitialModel(runtime: PetRuntime): Promise<void> {
 /* 徽章控制項用的模型清單快取(逐家一份):listAgentModels 會呼叫 CLI,
  * 每隻寵物各拉一次太浪費;同家共用同一份 promise。 */
 const agentModelLists = new Map<string, Promise<AgentModelInfo[]>>();
-function agentModels(kind: 'codex' | 'claude'): Promise<AgentModelInfo[]> {
+function agentModels(kind: AgentKind): Promise<AgentModelInfo[]> {
   const hit = agentModelLists.get(kind);
   if (hit) return hit;
   const pending = window.pet.listAgentModels(kind).catch(() => [] as AgentModelInfo[]);
@@ -302,7 +302,7 @@ function refreshAgentControls(petId: string): void {
   const runtime = runtimes.get(petId);
   if (!runtime) return;
   const agent = runtime.profile.agent;
-  const kind: 'codex' | 'claude' = agent?.kind === 'claude' ? 'claude' : 'codex';
+  const kind: AgentKind = agent?.kind === 'claude' || agent?.kind === 'agy' ? agent.kind : 'codex';
   const info = {
     kind,
     model: agent?.model ?? '',
@@ -318,7 +318,7 @@ function refreshAgentControls(petId: string): void {
 }
 
 function agentInfoText(profile: PetProfile): string {
-  const kind = profile.agent?.kind === 'claude' ? 'Claude' : 'Codex';
+  const kind = profile.agent?.kind === 'claude' ? 'Claude' : profile.agent?.kind === 'agy' ? 'Antigravity' : 'Codex';
   const model = profile.agent?.model ?? t('overlay.modelDefault');
   const effort = profile.agent?.effort ? ` · ${profile.agent.effort}` : '';
   return `${kind} · ${model}${effort}`;
