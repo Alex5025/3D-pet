@@ -96,6 +96,8 @@ export const ko = {
   'bubble.pickModel': '모델 전환',
   'bubble.pickEffort': '추론 강도 전환',
   'bubble.pickPermission': '실행 모드 전환',
+  'bubble.pickWorkspace': '작업 디렉터리 변경',
+  'bubble.workspaceEmpty': '디렉터리 선택…',
   'bubble.permReadonly': '읽기 전용',
   'bubble.permPlan': '계획',
   'bubble.permAsk': '승인',
@@ -119,6 +121,7 @@ export const ko = {
   'bubble.actDenied': '거부됨, 조정 중',
   'bubble.actControlHandled': '컨트롤 패널에서 처리됨, 실행 중',
   'bubble.lastChatYou': '지난번 대화:',
+  'bubble.taskLabel': '요청한 내용:',
 
   'settings.currentPet': '현재 펫',
   'settings.addPet': '펫 추가',

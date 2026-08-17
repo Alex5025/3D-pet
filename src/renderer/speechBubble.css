@@ -359,6 +359,31 @@
 }
 
 /* 回覆區:內容只往下長、可捲動;預設收合 */
+/* 交辦列:這一輪送出的原話，釘在回覆上方（多寵同跑時用來認人）。
+   最多兩行，超出以 … 收尾，完整內容在 title。 */
+.pet-speech-bubble .bubble-task {
+  display: none;
+  margin: 0 2px 6px;
+  padding-left: 8px;
+  overflow: hidden;
+  color: #6f6780;
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  border-left: 3px solid rgba(111, 93, 128, 0.3);
+}
+
+.pet-speech-bubble .bubble-task.open {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.pet-speech-bubble .bubble-task-label {
+  color: #8d8496;
+  font-weight: 650;
+}
+
 .pet-speech-bubble .bubble-reply {
   display: none;
   max-height: 200px;
@@ -503,19 +528,13 @@
   border: 1px solid rgba(111, 93, 128, 0.28);
 }
 
-/* 工作目錄：只顯示專案根目錄最後一層，完整路徑放在 title。 */
+/* 工作目錄：徽章列的第一顆 chip，只顯示最後一層資料夾，完整路徑放在 title。 */
 .pet-speech-bubble .bubble-workspace {
-  display: none;
-  margin: -3px 2px 6px;
-  overflow: hidden;
+  max-width: 150px;
   color: #70677b;
   font-size: 11.5px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-
-.pet-speech-bubble .bubble-workspace.open { display: block; }
 
 /* 模型/力度徽章 */
 .pet-speech-bubble .bubble-agent-info {
@@ -526,16 +545,24 @@
   letter-spacing: 0.02em;
 }
 
+/* 徽章一律靠左；chip 從 4 顆變 5 顆，窄泡泡要能換行不被裁掉 */
 .pet-speech-bubble .bubble-agent-info.open {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  justify-content: space-between;
+  row-gap: 4px;
+  justify-content: flex-start;
 }
+
+/* 有可點 chip 時 agentInfoText 會被清空——空的 span 不該再吃掉一份 gap，
+   否則 chip 就貼不齊左緣 */
+.pet-speech-bubble .bubble-agent-info > span:empty { display: none; }
 
 /* 「新對話」鈕:徽章列右側的小字鈕,不搶視覺 */
 .pet-speech-bubble .bubble-new-session {
   flex: none;
+  margin-left: auto;
   padding: 2px 8px;
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 999px;

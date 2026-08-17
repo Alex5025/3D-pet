@@ -33,8 +33,8 @@ export interface SpeechBubble {
   setQueue: (list: { id: string; text: string; hasImages: boolean }[]) => void;
   /** 就地錯誤(workspace 未設定/佇列滿):回覆區紅字 + activity 提示,不動 busy 狀態。 */
   showError: (message: string) => void;
-  /** turn 開始:鎖輸入框、清回覆區、顯示狀態列。 */
-  beginTurn: () => void;
+  /** turn 開始:清回覆區、顯示狀態列;text = 這一輪交辦的內容,會釘在回覆上方(省略則清空該列)。 */
+  beginTurn: (text?: string) => void;
   /** 回覆文字增量(自動展開回覆區並捲到底)。 */
   appendText: (chunk: string) => void;
   /** 回填上次對話(重啟後);已有進行中或已顯示的內容時不覆蓋。 */
@@ -95,6 +95,8 @@ interface SpeechBubbleOptions {
   onOpenLink?: (url: string) => void;
   /** 「新對話」鈕:清掉 session,下一句從零開始。 */
   onNewSession?: () => void;
+  /** 徽章列的 📁:開資料夾對話框改這隻寵的工作目錄。 */
+  onChooseWorkspace?: () => void;
   /** 參考檔案清單的 ✕(移除該路徑)。 */
   onRemoveRef?: (path: string) => void;
   /** 佇列清單的 ✕(移除該則排隊訊息)。 */
@@ -125,13 +127,17 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const label = document.createElement('label');
   label.textContent = labelText();
 
-  const workspace = document.createElement('div');
-  workspace.className = 'bubble-workspace';
+  // 工作目錄:徽章列的第一顆 chip(chip 是下面的 function 宣告,已提升)。
+  // 點了就開資料夾對話框改這隻寵的 cwd;沒設定時也照樣顯示,那是最短的補救入口
+  // (沒 workspacePath 送訊息本來就會被擋)。
+  let currentWorkspacePath: string | undefined;
+  const workspace = chip('', '', () => options.onChooseWorkspace?.());
+  workspace.classList.add('bubble-workspace');
   const setWorkspacePath = (path?: string): void => {
+    currentWorkspacePath = path;
     const name = workspaceFolderName(path);
-    workspace.textContent = name ? `📁 ${name}` : '';
-    workspace.title = path ?? '';
-    workspace.classList.toggle('open', !!name);
+    workspace.textContent = `📁 ${name || t('bubble.workspaceEmpty')}`;
+    workspace.title = path || t('bubble.pickWorkspace');
   };
   setWorkspacePath(options.workspacePath);
 
@@ -214,6 +220,25 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   };
   input.addEventListener('input', autosize);
 
+  /* 送出過的訊息歷史(↑/↓ 叫回,像 shell)。只留在這顆泡泡的記憶體裡,不落盤;
+   * 重啟後由 restoreTranscript 的最後一則使用者訊息 seed 一筆。 */
+  const HISTORY_MAX = 50;
+  const history: string[] = [];
+  let historyIndex: number | null = null; // null = 沒在翻歷史
+  const pushHistory = (text: string): void => {
+    const value = text.trim();
+    if (!value || history[history.length - 1] === value) return; // 連續重複的不重複收
+    history.push(value);
+    if (history.length > HISTORY_MAX) history.shift();
+  };
+  /** 帶入某一筆歷史;index 為 null 表示回到空白的 composer。 */
+  const applyHistory = (index: number | null): void => {
+    historyIndex = index;
+    input.value = index === null ? '' : (history[index] ?? '');
+    input.setSelectionRange(input.value.length, input.value.length); // 游標擺結尾,接著打就是續寫
+    autosize();
+  };
+
   // 回覆區 + 狀態列(含停止鈕):agent 對話的顯示面;泡泡是笨元件,事件對映由 main.ts 做。
   const reply = document.createElement('div');
   reply.className = 'bubble-reply';
@@ -237,6 +262,26 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       renderReply();
     });
   };
+  /* 交辦內容:把這一輪送出的那句釘在回覆上方(最多兩行,完整內容放 title)。
+   * 多隻寵物同時在跑時,光看回覆認不出哪句交辦給了誰——這一行就是答案。 */
+  const task = document.createElement('div');
+  task.className = 'bubble-task';
+  const taskLabel = document.createElement('span');
+  taskLabel.className = 'bubble-task-label';
+  const taskText = document.createElement('span');
+  task.append(taskLabel, taskText);
+  let currentTask: { text: string; labelKey: 'bubble.taskLabel' | 'bubble.lastChatYou' } | null = null;
+  const setTask = (
+    text: string | null,
+    labelKey: 'bubble.taskLabel' | 'bubble.lastChatYou' = 'bubble.taskLabel',
+  ): void => {
+    currentTask = text ? { text, labelKey } : null;
+    task.classList.toggle('open', !!text);
+    taskLabel.textContent = text ? t(labelKey) : '';
+    taskText.textContent = text ?? '';
+    task.title = text ?? '';
+  };
+
   /** containsPoint 的 rect 快取(100ms):見 containsPoint 內註解。 */
   let cachedRect: DOMRect | null = null;
   let cachedRectAt = 0;
@@ -262,9 +307,10 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   });
 
   // 模型/力度徽章(標題右下的小字)
-  // 徽章列:左邊「家別 · 模型 · 力度」,右邊「新對話」鈕
+  // 徽章列:靠左排「工作目錄 · 家別 · 模型 · 力度 · 運行模式」,「新對話」鈕留在最右
   const agentInfo = document.createElement('div');
-  agentInfo.className = 'bubble-agent-info';
+  // 恆開:工作目錄 chip 住在這一列,沒有 agent 資訊時也要看得到、點得到
+  agentInfo.className = 'bubble-agent-info open';
   const agentInfoText = document.createElement('span');
   // 可點的控制項(模型 / 力度 / 運行模式);沒有 setAgentControls 時保持隱藏,徽章維持唯讀文字
   const agentControls = document.createElement('span');
@@ -274,7 +320,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   newSessionBtn.className = 'bubble-new-session';
   newSessionBtn.textContent = t('bubble.newSession');
   newSessionBtn.title = t('bubble.newSessionTitle');
-  agentInfo.append(agentInfoText, agentControls, newSessionBtn);
+  // 工作目錄 chip 掛在 agentInfo 直接子層,不進 agentControls——
+  // renderAgentControls() 會 replaceChildren() 清空 controls,兩條更新路徑分開才不會互相洗掉
+  agentInfo.append(workspace, agentInfoText, agentControls, newSessionBtn);
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
   approvalBox.className = 'bubble-approval';
@@ -369,7 +417,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const queueBox = document.createElement('div');
   queueBox.className = 'bubble-queue';
 
-  element.append(pinHotspot, activity, label, workspace, agentInfo, reply, approvalBox, statusRow, imagesBox, queueBox, input, refsBox);
+  element.append(pinHotspot, activity, label, agentInfo, task, reply, approvalBox, statusRow, imagesBox, queueBox, input, refsBox);
 
   // 左右邊緣的寬度把手：拖曳＝手動設定這顆泡泡的寬度上限（內容少時照樣縮小、多時撐到這裡為止）；
   // 雙擊還原純密度上限。只存記憶體，寵物重啟後回到自動。
@@ -476,6 +524,27 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     }
     // Esc 只收鍵盤焦點;中斷執行以停止鈕為主
     if (event.key === 'Escape') input.blur();
+    /* ↑/↓ 叫回送出過的訊息:空白時按 ↑ 進歷史;進去之後只要內容沒被改過就繼續翻,
+     * 一改就自動退出,方向鍵回到 textarea 原本的游標移動(才不會卡到多行編輯)。
+     * IME 選字中(注音/日文)的方向鍵是選字用的,絕對不可攔。 */
+    if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.isComposing) {
+      const browsing = historyIndex !== null && input.value === history[historyIndex];
+      if (event.key === 'ArrowUp') {
+        if (browsing) {
+          if (historyIndex! > 0) { event.preventDefault(); applyHistory(historyIndex! - 1); }
+          else event.preventDefault(); // 已經是最舊的一筆,停住不動
+        } else if (input.value === '' && history.length) {
+          event.preventDefault();
+          applyHistory(history.length - 1);
+        }
+        return;
+      }
+      if (browsing) {
+        event.preventDefault();
+        // 翻回最新一筆之後再按 ↓ = 回到空白的 composer
+        applyHistory(historyIndex! < history.length - 1 ? historyIndex! + 1 : null);
+      }
+    }
   });
   stop.addEventListener('click', () => options.onCancel?.());
 
@@ -584,6 +653,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     approvalFeedback.placeholder = t('bubble.approvalFeedbackPlaceholder');
     newSessionBtn.textContent = t('bubble.newSession');
     newSessionBtn.title = t('bubble.newSessionTitle');
+    setWorkspacePath(currentWorkspacePath); // 未設定時的文字與 title 都是 i18n
+    if (currentTask) setTask(currentTask.text, currentTask.labelKey); // 交辦列的前綴也要跟著換語言
     allowButton.textContent = t('common.allow');
     denyButton.textContent = t('common.deny');
     clearImages.textContent = t('bubble.removeImages');
@@ -605,6 +676,24 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     agentMenu?.remove();
     agentMenu = null;
   };
+  /* 徽章列的 chip 共用工廠(工作目錄與模型/力度/運行模式都用這顆)。
+   * 用 function 宣告是為了提升——工作目錄 chip 在檔案上方就要建出來。 */
+  function chip(text: string, title: string, onClick: (el: HTMLElement) => void): HTMLElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'bubble-agent-chip';
+    button.textContent = text;
+    button.title = title;
+    // 改用 pointerdown,才不會被根元素的關閉監聽搶先(見下方 openAgentMenu 的註解)
+    button.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      // 已開著就當作切換關閉(再點同一顆 = 收起來)
+      if (agentMenu) { closeAgentMenu(); return; }
+      onClick(button);
+    });
+    return button;
+  }
   const PERMISSIONS: AgentControlsInfo['permission'][] = ['readonly', 'plan', 'ask', 'auto'];
   const permissionLabel = (value: AgentControlsInfo['permission']): string => ({
     readonly: t('bubble.permReadonly'),
@@ -652,28 +741,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     closeAgentMenu();
     agentControls.replaceChildren();
     agentControls.classList.toggle('open', !!info);
-    // 徽章列本身也要開:只呼叫 setAgentControls(不呼叫 setAgentInfo)時,
-    // 父層 .bubble-agent-info 仍是 display:none,chip 會變成 0×0 的隱形元素
-    if (info) agentInfo.classList.add('open');
     if (!info) return;
     agentInfoText.textContent = ''; // 供應商改由下面的 chip 呈現(可點切換)
-
-    const chip = (text: string, title: string, onClick: (el: HTMLElement) => void): HTMLElement => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'bubble-agent-chip';
-      button.textContent = text;
-      button.title = title;
-      // 同上:改用 pointerdown,才不會被根元素的關閉監聽搶先
-      button.addEventListener('pointerdown', (event) => {
-        event.stopPropagation();
-        event.preventDefault();
-        // 已開著就當作切換關閉(再點同一顆 = 收起來)
-        if (agentMenu) { closeAgentMenu(); return; }
-        onClick(button);
-      });
-      return button;
-    };
 
     // 供應商(換家 = 換 CLI,模型/力度/session 都不通用,由 renderer 端一併清掉)
     const kindChip = chip(info.kind === 'claude' ? 'Claude' : 'Codex', t('bubble.pickProvider'), (el) => {
@@ -783,8 +852,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     isBusy: () => busy,
     isPinned: () => pinned,
     isResizing: () => resizing,
-    beginTurn: () => {
+    beginTurn: (text) => {
       busy = true;
+      setTask(text ?? null); // 這一輪交辦的內容;沒帶就清掉,免得留著上一輪的誤導
       setActivity('working', t('bubble.actRunning'));
       // 不清 input/附件、不 disable——佇列接續時使用者可能正在打下一句;
       // composer 的清空由「送出被接受」時的 clearComposer() 負責
@@ -796,6 +866,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       statusRow.classList.add('open');
     },
     clearComposer: () => {
+      // 這裡是「送出被 main 接受」的唯一時機(被拒收不會呼叫),歷史就在這收
+      pushHistory(input.value);
+      historyIndex = null;
       input.value = '';
       input.style.height = 'auto'; // 多行送出後收回單行高度
       pendingImages = [];
@@ -835,8 +908,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       renderAgentControls(info);
     },
     setAgentInfo: (text) => {
-      agentInfoText.textContent = text ?? '';
-      agentInfo.classList.toggle('open', !!text);
+      agentInfoText.textContent = text ?? ''; // 整列的顯示不再跟著這行文字開關(工作目錄 chip 一直在)
     },
     setRefFiles: (list) => {
       refsBox.replaceChildren();
@@ -883,10 +955,10 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     restoreTranscript: (transcript) => {
       // 進行中的一輪永遠優先:重啟後的回填是非同步的,不能覆蓋已經開始串流的內容
       if (busy || replyRaw) return;
-      const quoted = transcript.user
-        ? `> ${t('bubble.lastChatYou')}${transcript.user.replace(/\n/g, '\n> ')}\n\n`
-        : '';
-      replyRaw = quoted + transcript.reply;
+      if (transcript.user) pushHistory(transcript.user); // 重啟後 ↑ 至少叫得回上一句
+      // 使用者那句改釘在交辦列(以前是塞進回覆當 markdown 引言,長輸出一捲就看不到了)
+      setTask(transcript.user || null, 'bubble.lastChatYou');
+      replyRaw = transcript.reply;
       reply.classList.add('open');
       queueRenderReply();
       reply.scrollTop = 0; // 回填的是舊內容,從頭看起(串流才需要跟到底)

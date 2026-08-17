@@ -96,6 +96,8 @@ export const ja = {
   'bubble.pickModel': 'モデルを切り替え',
   'bubble.pickEffort': '推論強度を切り替え',
   'bubble.pickPermission': '実行モードを切り替え',
+  'bubble.pickWorkspace': '作業ディレクトリを変更',
+  'bubble.workspaceEmpty': 'ディレクトリを選択…',
   'bubble.permReadonly': '読み取り',
   'bubble.permPlan': 'プラン',
   'bubble.permAsk': '承認',
@@ -119,6 +121,7 @@ export const ja = {
   'bubble.actDenied': '拒否しました。調整中',
   'bubble.actControlHandled': 'コントロールパネルで処理済み。実行中',
   'bubble.lastChatYou': '前回のあなた:',
+  'bubble.taskLabel': '依頼した内容:',
 
   'settings.currentPet': '現在のペット',
   'settings.addPet': 'ペットを追加',

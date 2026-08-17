@@ -96,6 +96,8 @@ export const en = {
   'bubble.pickModel': 'Switch model',
   'bubble.pickEffort': 'Switch reasoning effort',
   'bubble.pickPermission': 'Switch run mode',
+  'bubble.pickWorkspace': 'Change working directory',
+  'bubble.workspaceEmpty': 'Choose directory…',
   'bubble.permReadonly': 'Read-only',
   'bubble.permPlan': 'Plan',
   'bubble.permAsk': 'Approve',
@@ -119,6 +121,7 @@ export const en = {
   'bubble.actDenied': 'Denied, adjusting',
   'bubble.actControlHandled': 'Handled in Control Panel, running',
   'bubble.lastChatYou': 'Last time you said: ',
+  'bubble.taskLabel': 'You asked: ',
 
   'settings.currentPet': 'Current pet',
   'settings.addPet': 'Add pet',

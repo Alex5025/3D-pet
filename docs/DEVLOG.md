@@ -884,3 +884,7 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 ### 文件入口
 
 根目錄新增 `README.md`，集中說明環境需求、啟動方式、桌寵操作、AI 權限、開發指令、Git hooks 與運行資料位置，讓初次進入專案的人不必先讀完整 DEVLOG 才能開始使用。
+
+## 46. 泡泡就地換工作目錄、輸入歷史與交辦列(2026-08-17)
+
+**內容**:(1) 工作目錄改成徽章列第一顆 chip——點了直接開資料夾對話框改這隻寵的 cwd(重用設定面板同一條 choose-workspace IPC;main 改完 sendPetProfiles,徽章由 reconcile 寫回,renderer 不接回傳值)。未設定時也顯示「選擇工作目錄…」當最短補救入口。徽章列改恆開、chip 抽共用工廠(pointerdown + stopPropagation,沿 §67a2112 的選單關閉坑)。(2) 輸入框 ↑/↓ 叫回送出過的訊息(像 shell):只留記憶體上限 50 筆、連續重複不收;空白時按 ↑ 進歷史,內容一改就退出翻閱,方向鍵還給多行編輯;IME 選字中(isComposing)絕不攔。(3) `beginTurn(text)` 帶原話——交辦內容釘在回覆上方(兩行截斷,title 全文),多寵同時在跑時一眼認出哪句交給了誰;重啟回填時同列顯示「上次你說」。applyLocale 一併重套 chip 文字與交辦列前綴。bubbletest 補 onChooseWorkspace 計數與 beginTurn 帶字案例。

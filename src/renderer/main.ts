@@ -367,6 +367,9 @@ function addRuntime(profile: PetProfile): void {
         window.pet.chatApproval(profile.id, requestId, allow, feedback),
       onOpenLink: (url) => window.pet.openExternal(url),
       onNewSession: () => window.pet.newSession(profile.id),
+      // 徽章列的 📁:重用設定面板同一條 choose-workspace(main 端改完會 sendPetProfiles,
+      // reconcileProfiles 的 setWorkspacePath 會把新路徑寫回徽章,這裡不必接回傳值)
+      onChooseWorkspace: () => { void window.pet.chooseWorkspace(profile.id); },
       onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path),
       onRemoveQueued: (taskId) => window.pet.removeQueuedMessage(profile.id, taskId),
       // 徽章列切換模型/力度/運行模式:走與設定面板同一條 updatePetMeta,
@@ -537,7 +540,7 @@ window.pet.onChatEvent((petId, event) => {
   // AgentEvent → 泡泡方法的對映(泡泡是笨元件,不認識事件型別)
   switch (event.kind) {
     case 'turnStart': // 佇列任務開始執行(dispatcher 專發):原樂觀 beginTurn 搬到這裡
-      bubble.beginTurn();
+      bubble.beginTurn(event.text); // 事件本來就帶著這一輪的原文,釘到交辦列供辨識
       bubble.setStatus(t('overlay.statusConnecting'));
       placeActivity();
       break;

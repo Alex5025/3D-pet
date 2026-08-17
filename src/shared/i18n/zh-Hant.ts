@@ -101,6 +101,8 @@ export const zhHant = {
   'bubble.pickModel': '切換模型',
   'bubble.pickEffort': '切換推理力度',
   'bubble.pickPermission': '切換運行模式',
+  'bubble.pickWorkspace': '更改工作目錄',
+  'bubble.workspaceEmpty': '選擇工作目錄…',
   'bubble.permReadonly': '唯讀',
   'bubble.permPlan': '計畫',
   'bubble.permAsk': '需核准',
@@ -124,6 +126,7 @@ export const zhHant = {
   'bubble.actDenied': '已拒絕，調整中',
   'bubble.actControlHandled': '已在中控面板處理,執行中',
   'bubble.lastChatYou': '上次你說:',
+  'bubble.taskLabel': '你交辦:',
 
   // ── 設定面板 ──
   'settings.currentPet': '目前寵物',
