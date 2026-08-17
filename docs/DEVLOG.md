@@ -904,3 +904,5 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **驗證**:typecheck/build 綠;mock selftest 補 3 項 petMeta 斷言(agy 合法/ask 被擋/plan·auto 照收)全 PASS;`VRM_PET_AGENT_SELFTEST=agy` 真 CLI E2E 七項全 PASS(一問一答+conversation 回存/resume/cancel 競態/取消後 session 續用)。
 
 **追加(同日):agy 亂碼修正**——實機對話出現 `���`:agy 長回覆會分多個 `text_delta` 增量片段,CLI 以 **byte 邊界**切割,多位元組字元在接縫兩側各自解碼成 U+FFFD,**壞字已編進 JSON,片段層無法修復**;但 `result.response` 全文乾淨。修法:agy 的文字片段只緩衝不發,`result` 時一次發出乾淨全文(result 沒帶才退回緩衝片段);片段到達時發 `thinking` 餵 bridge 看門狗,長回覆才不會 5 分鐘無事件被硬中斷。代價:agy 回覆不逐段顯示、完成時一次出現(claude/codex 串流不受影響)。E2E 的 cancel 段改等第二個 thinking(原等首個 text,現在 text 在結尾才來)。另修重啟回填:上次回覆為空(agy 工具被拒的空 turn)不再打開空的回覆框。
+
+**再追加(同日):泡泡切不了 agy 模型**——模型選單只剩「預設模型」:`agy models` 在 **stdin 是掛著的 pipe 時會等輸入直到逾時**(execFile 預設 stdio 如此,實測 SIGTERM 收場),`stdin: 'ignore'` 才正常吐清單——listModels 改 spawn + stdin ignore + 10s 逾時。另外裸基底模型 id(gemini-3.7-flash)會被 agy 拒絕:錯誤訊息明載「requires --effort」且證實原生就吃「基底 model + --effort」組合——放棄接尾碼,一律傳 `--model 基底 --effort 力度`,基底模型未選力度時退 medium(不在清單取第一個;gemini-3.1-pro 實際只有 low/high)。實測:listModels 7 模型與 agy 自家 UI 一致、選模型未選力度可正常對話。

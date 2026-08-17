@@ -1,4 +1,4 @@
-import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,8 +70,8 @@ export function createAgyProvider(): AgentProvider {
   const queueByChild = new WeakMap<ChildProcess, EventQueue>();
   /** session → 上次注入的上下文組合值(persona+refFiles):變了才注入「上下文更新」前綴。 */
   const appliedContext = new Map<string, string>();
-  /** listModels 摺疊出的「基底模型」(gemini-3.7-flash 之類):spawn 時把力度接回 model id 尾碼。 */
-  const collapsedBases = new Set<string>();
+  /** listModels 摺疊出的「基底模型 → 可用力度」(gemini-3.7-flash 之類):基底模型必帶 --effort。 */
+  const collapsedBases = new Map<string, string[]>();
   const imageDir = mkdtempSync(join(tmpdir(), 'vrm-pet-agy-'));
   let pendingSeq = 0;
   let pastedImageSeq = 0;
@@ -107,16 +107,20 @@ export function createAgyProvider(): AgentProvider {
       else if (permission === 'plan') args.push('--mode', 'plan');
       // readonly 與(不該出現的)ask 都走預設 request-review:headless 自動拒絕需權限的工具
 
-      // 模型/力度:gemini 系列把力度編在 model id 尾碼(gemini-3.7-flash-high),
-      // listModels 摺疊成基底 + efforts,spawn 時接回去;其他模型走獨立 --effort 旗標。
+      // 模型/力度:agy 原生吃「基底 model + --effort」(實測錯誤訊息明載);
+      // 基底模型(listModels 摺疊出的 gemini 系列)必帶 --effort,未選時退 medium。
       if (opts?.model) {
-        const useSuffix = opts.effort && (EFFORT_SUFFIXES as readonly string[]).includes(opts.effort)
-          && (collapsedBases.has(opts.model)
-            || (/^gemini-/.test(opts.model) && !/-(?:high|medium|low)$/.test(opts.model)));
-        if (useSuffix) args.push('--model', `${opts.model}-${opts.effort}`);
-        else {
-          args.push('--model', opts.model);
-          if (opts.effort) args.push('--effort', opts.effort);
+        args.push('--model', opts.model);
+        const knownEfforts = collapsedBases.get(opts.model)
+          ?? ((/^gemini-/.test(opts.model) && !/-(?:high|medium|low)$/.test(opts.model))
+            ? [...EFFORT_SUFFIXES] : null);
+        if (knownEfforts) {
+          const effort = opts.effort && knownEfforts.includes(opts.effort)
+            ? opts.effort
+            : knownEfforts.includes('medium') ? 'medium' : knownEfforts[0]!;
+          args.push('--effort', effort);
+        } else if (opts.effort) {
+          args.push('--effort', opts.effort);
         }
       } else if (opts?.effort) {
         args.push('--effort', opts.effort);
@@ -283,10 +287,23 @@ export function createAgyProvider(): AgentProvider {
     async listModels() {
       // `agy models` 有機器可讀輸出(id\tlabel);gemini 系列把力度編在尾碼,
       // 三檔位齊的摺疊成「基底模型 + efforts」,其餘原樣列出(靠 --effort 旗標)。
+      // stdin 必須 'ignore':掛著的 pipe 會讓 agy models 等輸入直到逾時(實測)。
       const stdout = await new Promise<string>((resolve, reject) => {
-        execFile('agy', ['models'], { timeout: 10_000 }, (error, out) => {
-          if (error) reject(error);
-          else resolve(out);
+        const child = spawn('agy', ['models'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error('agy models timeout'));
+        }, 10_000);
+        child.stdout.on('data', (chunk) => (out += String(chunk)));
+        child.on('error', (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          if (code === 0) resolve(out);
+          else reject(new Error(`agy models exit ${code}`));
         });
       });
       const raw: { id: string; label: string }[] = [];
@@ -311,8 +328,8 @@ export function createAgyProvider(): AgentProvider {
         if (base && (byBase.get(base)?.size ?? 0) >= 2) {
           if (consumed.has(base)) continue; // 同基底只列一次
           consumed.add(base);
-          collapsedBases.add(base);
           const efforts = EFFORT_SUFFIXES.filter((effort) => byBase.get(base)!.has(effort));
+          collapsedBases.set(base, [...efforts]);
           models.push({
             id: base,
             label: model.label.replace(/\s*\((?:High|Medium|Low)\)\s*$/, ''),
