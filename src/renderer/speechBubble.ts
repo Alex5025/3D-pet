@@ -963,6 +963,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       // 使用者那句改釘在交辦列(以前是塞進回覆當 markdown 引言,長輸出一捲就看不到了)
       setTask(transcript.user || null, 'bubble.lastChatYou');
       replyRaw = transcript.reply;
+      if (!replyRaw) return; // 上次回覆是空的(如 agy 工具被拒的空 turn):不開回覆區,免得留一個空框
       reply.classList.add('open');
       queueRenderReply();
       reply.scrollTop = 0; // 回填的是舊內容,從頭看起(串流才需要跟到底)
