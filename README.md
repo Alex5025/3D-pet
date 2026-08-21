@@ -2,18 +2,18 @@
 
 **繁體中文** | [English](README.en.md) | [日本語](README.ja.md)
 
-macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three-vrm](https://github.com/pixiv/three-vrm))——但牠們不只是裝飾。**每隻寵物都綁著一個真正的 coding agent**(OpenAI Codex 或 Claude Code)與一個工作目錄:對泡泡說一句話,寵物就去改 code、跑測試、寫文件,危險操作先回頭問你,做完還配表情動作向你回報。
+macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three-vrm](https://github.com/pixiv/three-vrm))——但牠們不只是裝飾。**每隻寵物都綁著一個真正的 coding agent**(OpenAI Codex、Claude Code 或 Google Antigravity)與一個工作目錄:對泡泡說一句話,寵物就去改 code、跑測試、寫文件,危險操作先回頭問你,做完還配表情動作向你回報。
 
 養一隻是桌寵,養一群就是工程團隊。
 
 ## 為什麼特別
 
 - **桌寵會做事**——不是聊天玩具。每寵各自的 agent、模型、推理力度、角色個性與工作目錄;拖檔案給牠當參考資料、貼圖片給牠看,牠在你的 repo 裡實際動手。
-- **不燒 API 費**——一律走本機 CLI 的訂閱登入(Codex CLI / Claude Code),沒有 API key,沒有帳單驚喜。
+- **不燒 API 費**——一律走本機 CLI 的訂閱登入(Codex CLI / Claude Code / Antigravity CLI),沒有 API key,沒有帳單驚喜。
 - **多寵協作**——對話有佇列(輸入永不鎖、排隊接續),任務可投給指定寵物或丟進公用任務池由有空的寵物認領;
 - **中控面板**一頁總覽全部寵物的狀態、代答審批、集中指派。
 - **權限收得住**——三檔權限(唯讀/可寫需審批/全自動),審批拒絕時還能附上修改方向讓 AI 同輪修正;Codex 沙盒策略由主程序直接管理,不經 AI、不跑任意腳本。
-- **桌寵該有的完成度**——像素級點擊穿透(透明處滑鼠直接穿過去)、視線跟隨、拖曳/旋轉/縮放、待機動作隨機播放;**物理晃動逐部位可調**:頭髮、衣襬、尾巴各自的搖曳強度分開調校,狐狸尾巴的蓬鬆搖擺是可以自己調出來的。閒置自動節流、電池/過熱降頻、鎖屏全停,常駐也不吃電。
+- **桌寵該有的完成度**——像素級點擊穿透(透明處滑鼠直接穿過去)、視線跟隨、拖曳/旋轉/縮放、待機動作隨機播放;**物理晃動逐部位可調**:頭髮、衣襬、胸部、尾巴各自的搖曳強度分開調校,狐狸尾巴的蓬鬆搖擺是可以自己調出來的。閒置自動節流、電池/過熱降頻、鎖屏全停,常駐也不吃電。
 - **四語介面**——繁中/英/日/韓,預設跟隨系統,AI 的回覆語言也跟著切。
 
 ## 功能總覽
@@ -21,18 +21,18 @@ macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three
 **桌寵本體**
 - 任意替換 VRM 模型(Tray 選單/拖放到接收窗),多寵同時運行、各自獨立設定
 - 視線跟隨游標、拖曳移動、右鍵旋轉、滾輪縮放;透明區域點擊穿透(像素級命中)
-- 光影(平行光/點光源/陰影)、**逐部位物理晃動強度**(頭髮/衣服/胸部/尾巴,spring bone 物理各自獨立調)、服裝顯示開關(可脫???)
+- 光影(平行光/點光源/陰影/色溫 1800~12000K)、**逐部位物理晃動強度**(頭髮/衣服/胸部/尾巴,spring bone 物理各自獨立調)、服裝顯示開關(可脫???)
 - VRMA 動作播放、開機預設姿勢、待機動作(勾一組,20~60 秒隨機播放)
 - 功率檔位:閒置節流 + `powerMonitor` 聯動(電池/過熱降頻、鎖屏/睡眠全停、ProMotion 螢幕鎖回 60Hz 設計值)
 - 寵物可「休息」釋放資源(WebGL context/快取/agent session),要用再喚醒
 
 **AI 助手(對話泡泡)**
-- 每寵綁定 **Codex**(`codex app-server`,JSON-RPC 長駐)或 **Claude Code**(CLI spawn);模型動態清單、推理力度 low~ultra、角色個性注入 system prompt
-- **對話佇列**:執行中輸入框不鎖,訊息排隊自動接續;每則可撤回
+- 每寵綁定 **Codex**(`codex app-server`,JSON-RPC 長駐)、**Claude Code**(CLI spawn)或 **Antigravity**(`agy` CLI spawn,Gemini 3.x/Claude/GPT-OSS 模型;運行模式支援唯讀/計畫/全自動,無審批模式);模型動態清單、推理力度 low~ultra、角色個性注入 system prompt
+- **對話佇列**:執行中輸入框不鎖,訊息排隊自動接續;每則可撤回;輸入框 ↑/↓ 叫回送出過的訊息(50 筆,IME 選字不干擾)
 - 回覆 Markdown 渲染(GFM、DOMPurify 消毒)、模型/力度徽章、外側狀態膠囊(執行中/等審批/完成,已讀才消失)
 - **圖片訊息**:PNG/JPEG/WebP 直接貼進輸入框(最多 4 張、單張 8 MiB),AI 可讀
 - **拖放參考檔案**:檔案/資料夾拖向寵物,放進亮起的接收窗——絕對路徑注入對話,AI 知道去哪查
-- **泡泡好用細節**:圖釘常駐展開、左右邊緣拖曳調寬(雙擊還原自動)、寬度隨內容伸縮、多寵擁擠時自動縮上限
+- **泡泡好用細節**:圖釘常駐展開、左右邊緣拖曳調寬(雙擊還原自動)、寬度隨內容伸縮、多寵擁擠時自動縮上限;徽章列 📁 chip 就地換工作目錄;交辦列把你說的話釘在回覆上方(多寵同跑認得出哪句交給誰,重啟顯示「上次你說」)
 - session 持久化(重啟接續上次對話)、可中斷、crash 自動重連、「＋ 新對話」一鍵清空
 - **寵物工具(MCP)**:agent 自主呼叫 `pet_play_motion` / `pet_show_expression` / `pet_speak`,邊做事邊表演
 
@@ -52,7 +52,7 @@ macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three
 
 - macOS(Apple Silicon 實測)
 - Node.js 22+
-- 要用 AI 功能:[Codex CLI](https://github.com/openai/codex) 與/或 [Claude Code](https://claude.com/claude-code) 已安裝並登入(訂閱帳號)
+- 要用 AI 功能:[Codex CLI](https://github.com/openai/codex)、[Claude Code](https://claude.com/claude-code) 與/或 [Antigravity](https://antigravity.google)(`agy` CLI)已安裝並登入(訂閱帳號),三家擇一即可
 
 ## 快速開始
 
@@ -72,6 +72,20 @@ npm run start   # 脫離終端機啟動;關掉這個終端機(或對 IDE 按 ⌘
 
 > `.codex/config.toml` 可能包含專案沙盒策略與本機路徑,提交前請確認內容適合分享;憑證、token、API key 不得寫入 repository。
 
+## 啟動參數(環境變數)
+
+啟動時可用環境變數調整行為,例如 `VRM_PET_DATA_DIR=/tmp/pets npm run dev`:
+
+| 變數 | 值 | 作用 |
+|---|---|---|
+| `VRM_PET_DATA_DIR` | 路徑 | 運行資料根目錄(`config.json`、`models/`、`motions/`、`runtime-data/` 都在其下)。預設:開發模式=專案根目錄,打包後=系統 `userData`。測試時指到 `$(mktemp -d)` 可完全隔離,不動到日常寵物的設定 |
+| `VRM_PET_AGENT_SELFTEST` | `1` \| `claude` \| `codex` \| `agy` | Headless 回歸自驗(不開視窗,跑完即退出)。`1`=MockProvider 全鏈自驗,不耗額度;`claude`/`codex`/`agy`=對真 CLI 跑 e2e,**會耗訂閱額度**,顯式觸發才跑 |
+| `VRM_PET_AGENT_MOCK` | `1` | 所有寵物改用假 agent(照腳本吐事件),正常開視窗走完整 UI 鏈路,驗 UI 不耗額度 |
+| `VRM_PET_AGENT_DEBUG` | `1` | 把 agent 子行程的 argv 與收發 payload 印到終端機,除錯串接問題用 |
+| `VRM_PET_PERF_LOG` | `1` | 每 5 秒印 renderer 的 render/rAF 比例(疊層視窗開不了 DevTools,這是唯一的效能觀測通道) |
+
+> `VRM_PET_PERM_SOCKET` / `VRM_PET_PERM_TOKEN` / `VRM_PET_TOOLS_SOCKET` / `VRM_PET_TOOLS_TOKEN` / `VRM_PET_PET_ID` / `VRM_PET_TURN_KEY` 是主程序自動設給 agent 子行程的內部通道(審批與 MCP 寵物工具),**不要手動設定**。
+
 ## 開發與驗證
 
 ```bash
@@ -80,6 +94,7 @@ npm run typecheck && npm run build
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=1 npm run dev       # MockProvider 全鏈自驗
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=claude npm run dev  # 真 claude e2e(耗訂閱額度)
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=codex npm run dev   # 真 codex e2e(耗訂閱額度)
+VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=agy npm run dev     # 真 agy(Antigravity)e2e(耗額度)
 VRM_PET_AGENT_MOCK=1 npm run dev                                          # 假 agent 走 UI,不耗額度
 VRM_PET_AGENT_DEBUG=1 npm run dev                                         # dump agent argv/payload
 VRM_PET_PERF_LOG=1 npm run dev                                            # 效能量測(疊層無 DevTools 的通道)
@@ -95,6 +110,8 @@ npm run check:secrets:all                                                 # 掃�
 
 - [docs/DEVLOG.md](docs/DEVLOG.md) — 開發日誌:每個議題的症狀 → 根因 → 處理(含大量 macOS 疊層視窗的平台實證知識)
 - [docs/AGENT-BRIDGE-DESIGN.md](docs/AGENT-BRIDGE-DESIGN.md) — agent 串接架構(AgentProvider 抽象、審批、佇列、MCP 寵物工具)
+- [docs/SYSTEM-INVENTORY.md](docs/SYSTEM-INVENTORY.md) — 系統盤點:能力清單與資料流(IPC/事件地圖,改了介面請順手更新)
+- [docs/EXTRACT-GUIDE.md](docs/EXTRACT-GUIDE.md) — Unity 遊戲 → VRM/VRMA 抽取教學(模型/動作/姿勢轉換管線,僅限個人使用)
 - [CLAUDE.md](CLAUDE.md) — 開發守則(渲染逐行對照 three-vrm 官方範例,不自創)
 
 ## 授權

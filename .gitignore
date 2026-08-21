@@ -9,3 +9,8 @@ models/*
 !models/AvatarSample_A.vrm
 motions/
 /.codex/config.toml
+
+# 遊戲資產抽取管線:venv 與抽出的版權資產不入版控(工具腳本要入)
+extract-yourmom/.venv/
+extract-yourmom/*.vrm
+extract-yourmom/vrma/

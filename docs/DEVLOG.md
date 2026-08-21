@@ -906,3 +906,24 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **追加(同日):agy 亂碼修正**——實機對話出現 `���`:agy 長回覆會分多個 `text_delta` 增量片段,CLI 以 **byte 邊界**切割,多位元組字元在接縫兩側各自解碼成 U+FFFD,**壞字已編進 JSON,片段層無法修復**;但 `result.response` 全文乾淨。修法:agy 的文字片段只緩衝不發,`result` 時一次發出乾淨全文(result 沒帶才退回緩衝片段);片段到達時發 `thinking` 餵 bridge 看門狗,長回覆才不會 5 分鐘無事件被硬中斷。代價:agy 回覆不逐段顯示、完成時一次出現(claude/codex 串流不受影響)。E2E 的 cancel 段改等第二個 thinking(原等首個 text,現在 text 在結尾才來)。另修重啟回填:上次回覆為空(agy 工具被拒的空 turn)不再打開空的回覆框。
 
 **再追加(同日):泡泡切不了 agy 模型**——模型選單只剩「預設模型」:`agy models` 在 **stdin 是掛著的 pipe 時會等輸入直到逾時**(execFile 預設 stdio 如此,實測 SIGTERM 收場),`stdin: 'ignore'` 才正常吐清單——listModels 改 spawn + stdin ignore + 10s 逾時。另外裸基底模型 id(gemini-3.7-flash)會被 agy 拒絕:錯誤訊息明載「requires --effort」且證實原生就吃「基底 model + --effort」組合——放棄接尾碼,一律傳 `--model 基底 --effort 力度`,基底模型未選力度時退 medium(不在清單取第一個;gemini-3.1-pro 實際只有 low/high)。實測:listModels 7 模型與 agy 自家 UI 一致、選模型未選力度可正常對話。
+
+## 48. Unity 遊戲資產抽取:VRM/VRMA 轉換管線(2026-08-17~21)
+
+**目標**:從 Steam 遊戲 Your Mom(Unity 6000.0.48f1)抽出角色模型與動作給桌寵用。角色是 VRChat avatar 形式的 Unity 資產(場景裡的 Rosette 五套服裝實體 + StreamingAssets bundle 裡的 Vivian),沒有現成 VRM;動作 171 個 AnimationClip,全身動作是 humanoid **肌肉曲線**(muscle clip),不是骨骼旋轉。工具鏈:`extract-yourmom/`(python venv + UnityPy 1.25),教學見 [EXTRACT-GUIDE.md](EXTRACT-GUIDE.md)。
+
+**管線**:
+- `build_vrm.py`:bundle/.assets → VRM 1.0。網格/蒙皮/貼圖/blendshape→VRM 表情(候選名單制,相容 MMD 與英文命名)/Avatar→humanoid 對應/VRCPhysBone→VRMC_springBone。座標系 Unity 左手→glTF 右手一律 x 翻轉:位置 `(-x,y,z)`、四元數 `(x,-y,-z,w)`、三角形反繞向、UV `v'=1-v`、bindpose `M·B·M`(M=diag(-1,1,1,1))。
+- `build_vrma.py`:muscle clip → VRMA。StreamedClip 是「time + 每鍵 `(curveIndex, c0..c3)` 三次多項式」流;binding 佔位規則 Transform 位置/旋轉/縮放各佔 3/4/3 槽、其餘每條 1 槽;muscle 值→骨骼旋轉走 swing-twist(`preQ ⊗ st(x·w, y, z) ⊗ postQ⁻¹`,限位選 max/-min、乘 sgn),twist 沿四肢鏈按 armTwist/legTwist 權重下推;hips 由 RootT/RootQ 經**質心重建**(四肢根建座標系 + HumanBoneMass 加權質心)。數學出自 lox9973/uvw.js 的 HumanPoseHandler(AssetStudio 只有 curve 解碼,humanoid 轉換直接跳過,別在那找)。
+- `cdp-shot.mjs`:headless Chrome CDP + `npx vite serve src/renderer` 驅動 vrmtest.html 截圖自驗。**不能用 `npm run dev` 驗**——predev 的 pkill 會把正在跑的桌寵殺掉。
+
+**踩過的坑**(症狀 → 根因):
+1. **動作播放手臂上舉、左右交叉,但模型與表情全正常** → mecanim `m_HumanBoneIndex` 的骨序 **UpperChest 插在 Chest 之後第 9 位**,與 C# HumanTrait 列舉(UpperChest 在最後)不同;錯用後 Neck 以後全部錯位一格,「leftUpperArm」實際指到右肩。模型渲染不經 humanoid 對應表所以看不出來,播動作才爆。
+2. **VRMA 數學驗算正確、瀏覽器裡姿勢全毀** → three-vrm-animation 的重定向假設 VRMA 骨架是**正規化**的(rest 旋轉全 identity,UniVRM 輸出慣例);直接塞 Unity 骨架 rest(腿骨帶 175° 軸向旋轉)必錯。修法:節點位移=rest 世界位置差、rest 旋轉省略,軌值 = `W_rest(parent)⊗W_t(parent)⁻¹⊗W_t(node)⊗W_rest(node)⁻¹`。
+3. **.assets 的 MonoBehaviour 讀不出**(bundle 卻可以)→ .assets 不內嵌 typetree;用 `TypeTreeGeneratorAPI` 從遊戲 Managed DLL 現場生成接到 `env.typetree_generator`(PhysBone 參數全靠這個)。
+4. **ConstantClip 解出來是 list 不是 dict** → 它的欄位名就叫 `data`,通用的 `{"data": …}` unwrap 會誤剝一層。
+5. **手勢 clip 播放時整個人沉到地下** → 手勢只繫手指曲線,沒 RootT;muscles=0 + 質心重建把 hips 放到原點。修法:**部分 VRMA**——只輸出有曲線的骨、無 root 曲線不寫 hips 軌,手勢變成可疊加的部分動畫(單獨播身體維持原姿勢)。
+6. **three 載入丟 `normalizeSkinWeights` 讀不到 count** → 單骨蒙皮網格(headdress/beret)只有 JOINTS 沒 WEIGHTS(權重隱含 1),補 `(1,0,0,0)`。
+
+**產出**:`models/Vivian.vrm`(23.6MB,65 條彈簧骨)、`models/Rosette_Maid.vrm`(20.2MB,42 條);`motions/` 85 個 VRMA(動作 46/姿勢 29/手勢 10),**每個都截圖看過才取中文名**,原名對照在 `motions/動作對照表.txt`。表情六態 + 口型 + 眨眼全接到 VRM expression preset,桌寵的 `pet_show_expression`/`pet_play_motion` 直接可用。
+
+**驗證方法論**:肌肉數學先在 Python 端 FK 驗(手臂方向向量與正規化組合一致才進瀏覽器);結構過 `npx @gltf-transform/cli validate`;視覺全靠 vrmtest.html 截圖,彈簧骨用 `?rootMotion=1` 自動判定(注意內建閾值對高阻尼參數過嚴,0.0000 rad 才是真的沒動)。
