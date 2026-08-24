@@ -2,16 +2,17 @@
 
 ## 3D-pet とは
 
-3D-pet は macOS 向けの VRM デスクトップペットシステムです。各ペットに Codex または Claude Code、作業ディレクトリ、モデル、推論レベル、権限、性格を設定できます。会話だけでなく、コード編集、テスト実行、ドキュメント作成も行えます。
+3D-pet は macOS／Windows 向けの VRM デスクトップペットシステムです。各ペットに Codex、Claude Code、Antigravity、作業ディレクトリ、モデル、推論レベル、権限、性格を設定できます。会話だけでなく、コード編集、テスト実行、ドキュメント作成も行えます。
 
 ## 必要環境
 
-- macOS（Apple Silicon で動作確認済み）
+- macOS（Apple Silicon で動作確認済み）または Windows 11 x64
 - Node.js 22 以降
 - npm
 - 次のうち少なくとも一つをインストールしてログイン済みであること：
   - OpenAI Codex CLI
   - Claude Code CLI
+  - Antigravity `agy` CLI
 - 利用権限を確認した `.vrm` モデルと `.vrma` モーション
 
 AI 機能はローカル CLI のサブスクリプション認証を利用します。API キーを repository に保存しないでください。
@@ -24,6 +25,8 @@ cd 3D-pet
 npm install
 npm run dev
 ```
+
+パッケージ版は Windows で NSIS `.exe` を実行し、macOS では DMG の `VRM Pet.app` を Applications にコピーします。Node.js は不要です。未署名のテスト版は SmartScreen／Gatekeeper の警告対象になるため、公開版では各プラットフォームの署名が必要です。
 
 起動すると透明なデスクトップオーバーレイにキャラクターが表示されます。ポインターをペットに重ねると操作でき、離すと透明部分へのクリックは背後のアプリへ通過します。
 
@@ -48,12 +51,16 @@ npm run dev
 | Enter | メッセージを送信 |
 | Shift+Enter | 改行 |
 | 光る受信ウィンドウへドロップ | 参照追加、VRM 交換、VRMA 再生 |
+| バブルの 📎 | システムダイアログで参照ファイル／フォルダを追加（Windows の安定した代替手段） |
 
 ## 動作確認
 
 ```bash
 npm run typecheck
 npm run build
+npm run pack
+npm run dist:win
+npm run dist:mac
 ```
 
 サブスクリプション枠を消費せず agent パイプラインを確認するには：

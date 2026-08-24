@@ -18,6 +18,7 @@
 | `src/renderer/main.ts` | Multi-pet runtimes, interaction, hit testing, and bubble coordination |
 | `src/renderer/viewer.ts` | Three.js/VRM loading, rendering, animation, and disposal |
 | `src/main/agent/` | Codex, Claude, and Mock providers; approvals and sessions |
+| `src/main/platform.ts` | Platform capabilities, overlay options, named-pipe/Unix-socket paths, and packaged helper paths |
 | `src/shared/` | Cross-process types, i18n, chat, and sandbox schemas |
 
 ## Agent bridge
@@ -38,6 +39,7 @@ Every turn must end with exactly one `done` or `error` event. The bridge handles
 
 - `runtime-data/` contains local profiles, the PID record, and runtime state; it is not versioned.
 - `models/` and `motions/` contain local assets.
+- Packaged settings live under system `userData`; executable agent helpers are kept outside asar through `extraResources`.
 - Renderers do not receive direct Node.js access.
 - Sandbox IPC accepts fixed enums and booleans; main validates workspaces and symbolic links.
 - Never commit credentials, tokens, API keys, machine-specific paths, or unlicensed assets.
@@ -49,6 +51,9 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
+npm run pack
+npm run dist:win
+npm run dist:mac
 npm run check:secrets
 ```
 
@@ -57,7 +62,9 @@ npm run check:secrets
 - `/vrmtest.html`: model loading, transparency, motions, and interaction.
 - `/bubbletest.html`: Markdown, images, approvals, and message queues.
 - `VRM_PET_AGENT_SELFTEST=1`: full MockProvider pipeline.
-- `VRM_PET_AGENT_SELFTEST=codex|claude`: real CLI e2e; consumes subscription quota.
+- `VRM_PET_AGENT_SELFTEST=codex|claude|agy`: real CLI e2e; consumes subscription quota.
+
+GitHub Actions builds on native macOS and Windows runners. Windows uses NSIS x64 and macOS uses DMG/ZIP; public releases additionally require Authenticode and Developer ID/notarization.
 
 ## Contribution rules
 

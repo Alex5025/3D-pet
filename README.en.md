@@ -49,7 +49,7 @@ One pet is a desktop companion. A few of them are an engineering team.
 
 ## Requirements
 
-- macOS (tested on Apple Silicon)
+- macOS (tested on Apple Silicon) or Windows 11 x64
 - Node.js 22+
 - For AI features: [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code), and/or [Antigravity](https://antigravity.google) (`agy` CLI) installed and logged in (subscription account) — any one of the three is enough
 
@@ -57,10 +57,10 @@ One pet is a desktop companion. A few of them are an engineering team.
 
 ```bash
 npm install
-npm run start   # detaches from the terminal; closing it (or ⌘Q on the IDE) won't take the pets with it
+npm run dev     # shared development command for macOS and Windows
 ```
 
-> For live logs during development use `npm run dev` instead — but that keeps the pet system attached to the terminal: closing it sends SIGHUP and kills the pets without the quit confirmation.
+> On macOS, `npm run start` remains available as a detached development launcher. Packaged apps do not depend on zsh or Node.js.
 
 - Your character appears on the desktop; the window becomes interactive when the mouse is over the pet and click-through everywhere else.
 - **Chat**: hover over the pet → type in the bubble → Enter to send (Shift+Enter for newline); keep typing while a turn runs and messages queue up.
@@ -89,6 +89,9 @@ Behavior can be tuned at launch via environment variables, e.g. `VRM_PET_DATA_DI
 
 ```bash
 npm run typecheck && npm run build
+npm run pack       # unpacked app for the current platform
+npm run dist:win   # Windows x64 NSIS installer (run on Windows)
+npm run dist:mac   # macOS DMG + ZIP (run on macOS)
 
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=1 npm run dev       # full-chain self-test with MockProvider
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=claude npm run dev  # real claude e2e (uses subscription quota)
@@ -98,6 +101,8 @@ VRM_PET_AGENT_MOCK=1 npm run dev                                          # fake
 VRM_PET_AGENT_DEBUG=1 npm run dev                                         # dump agent argv/payload
 VRM_PET_PERF_LOG=1 npm run dev                                            # perf metrics (the only channel — overlay has no DevTools)
 ```
+
+The packaging icon source is `build/icon.png`; Electron Builder derives the platform-specific formats. Public releases still require Windows Authenticode and macOS Developer ID/notarization credentials.
 
 Browser verification pages (with the dev server running): `/vrmtest.html` for rendering (`window.__viewer`), `/bubbletest.html` for the bubble (`window.__bubble`).
 

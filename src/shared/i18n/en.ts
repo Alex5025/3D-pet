@@ -45,6 +45,9 @@ export const en = {
 
   'dialog.chooseWorkspace': 'Choose Working Directory',
   'dialog.chooseWorkspaceRoot': 'Choose Default Workspace Root for New Pets',
+  'dialog.chooseReferences': 'Choose Reference Files or Folders',
+  'dialog.chooseFiles': 'Choose Files',
+  'dialog.chooseFolder': 'Choose Folder',
   'window.settings': 'Pet Settings',
   'window.control': 'Control Panel',
 
@@ -113,6 +116,7 @@ export const en = {
   'bubble.resizeTitle': 'Drag to adjust bubble width (double-click to restore auto)',
   'bubble.removeQueuedTitle': 'Remove this message from the queue',
   'bubble.removeRefTitle': 'Remove this reference file',
+  'bubble.addRefsTitle': 'Add reference files or folders',
   'bubble.actRunning': 'Working',
   'bubble.actDone': 'Done',
   'bubble.actFailed': 'Failed',

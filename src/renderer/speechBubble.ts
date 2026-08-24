@@ -97,6 +97,8 @@ interface SpeechBubbleOptions {
   onNewSession?: () => void;
   /** 徽章列的 📁:開資料夾對話框改這隻寵的工作目錄。 */
   onChooseWorkspace?: () => void;
+  /** 徽章列的 📎:以系統對話框加入參考檔案或資料夾。 */
+  onChooseRefFiles?: () => void;
   /** 參考檔案清單的 ✕(移除該路徑)。 */
   onRemoveRef?: (path: string) => void;
   /** 佇列清單的 ✕(移除該則排隊訊息)。 */
@@ -320,9 +322,14 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   newSessionBtn.className = 'bubble-new-session';
   newSessionBtn.textContent = t('bubble.newSession');
   newSessionBtn.title = t('bubble.newSessionTitle');
+  const addRefsBtn = document.createElement('button');
+  addRefsBtn.type = 'button';
+  addRefsBtn.className = 'bubble-new-session';
+  addRefsBtn.textContent = '📎';
+  addRefsBtn.title = t('bubble.addRefsTitle');
   // 工作目錄 chip 掛在 agentInfo 直接子層,不進 agentControls——
   // renderAgentControls() 會 replaceChildren() 清空 controls,兩條更新路徑分開才不會互相洗掉
-  agentInfo.append(workspace, agentInfoText, agentControls, newSessionBtn);
+  agentInfo.append(workspace, agentInfoText, agentControls, addRefsBtn, newSessionBtn);
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
   approvalBox.className = 'bubble-approval';
@@ -379,6 +386,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     setTimeout(() => (newSessionBtn.textContent = t('bubble.newSession')), 1400);
     options.onNewSession?.();
   });
+  addRefsBtn.addEventListener('click', () => options.onChooseRefFiles?.());
 
   // 參考檔案清單(泡泡最下方):拖放檔案/資料夾到寵物身上後出現,每列可 ✕ 移除
   const refsBox = document.createElement('div');
@@ -653,6 +661,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     approvalFeedback.placeholder = t('bubble.approvalFeedbackPlaceholder');
     newSessionBtn.textContent = t('bubble.newSession');
     newSessionBtn.title = t('bubble.newSessionTitle');
+    addRefsBtn.title = t('bubble.addRefsTitle');
     setWorkspacePath(currentWorkspacePath); // 未設定時的文字與 title 都是 i18n
     if (currentTask) setTask(currentTask.text, currentTask.labelKey); // 交辦列的前綴也要跟著換語言
     allowButton.textContent = t('common.allow');

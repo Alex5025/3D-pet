@@ -45,6 +45,9 @@ export const ko = {
 
   'dialog.chooseWorkspace': '작업 디렉터리 선택',
   'dialog.chooseWorkspaceRoot': '새 펫의 기본 작업 루트 선택',
+  'dialog.chooseReferences': '참조 파일 또는 폴더 선택',
+  'dialog.chooseFiles': '파일 선택',
+  'dialog.chooseFolder': '폴더 선택',
   'window.settings': '펫 설정',
   'window.control': '컨트롤 패널',
 
@@ -113,6 +116,7 @@ export const ko = {
   'bubble.resizeTitle': '드래그로 말풍선 너비 조절(더블클릭으로 자동 복원)',
   'bubble.removeQueuedTitle': '이 메시지를 큐에서 삭제',
   'bubble.removeRefTitle': '이 참조 파일을 삭제',
+  'bubble.addRefsTitle': '참조 파일 또는 폴더 추가',
   'bubble.actRunning': '실행 중',
   'bubble.actDone': '완료',
   'bubble.actFailed': '실패',

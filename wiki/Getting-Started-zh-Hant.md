@@ -2,16 +2,17 @@
 
 ## 這是什麼？
 
-3D-pet 是 macOS 桌面上的 VRM 3D 桌寵系統。每隻寵物都能綁定 Codex 或 Claude Code、工作目錄、模型、推理力度與角色個性，除了陪伴，也能直接修改程式、跑測試和撰寫文件。
+3D-pet 是 macOS 與 Windows 上的 VRM 3D 桌寵系統。每隻寵物都能綁定 Codex、Claude Code 或 Antigravity、工作目錄、模型、推理力度與角色個性，除了陪伴，也能直接修改程式、跑測試和撰寫文件。
 
 ## 系統需求
 
-- macOS（Apple Silicon 已實測）
+- macOS（Apple Silicon 已實測）或 Windows 11 x64
 - Node.js 22 或更新版本
 - npm
 - AI 功能至少安裝並登入其中一項：
   - OpenAI Codex CLI
   - Claude Code CLI
+  - Antigravity `agy` CLI
 - 自備具合法使用權的 `.vrm` 模型與 `.vrma` 動作
 
 本專案使用 CLI 的訂閱登入，不需要把 API key 寫進專案。
@@ -24,6 +25,8 @@ cd 3D-pet
 npm install
 npm run dev
 ```
+
+若使用安裝包，Windows 執行 NSIS `.exe`，macOS 開啟 DMG 後將 `VRM Pet.app` 放入 Applications；安裝版不需要 Node.js。未簽章測試包可能觸發 SmartScreen 或 Gatekeeper 警告，公開版應使用平台憑證簽章。
 
 啟動後，角色會出現在桌面透明疊層。滑鼠移到角色上時可以互動，移開後透明區域會恢復點擊穿透。
 
@@ -48,12 +51,16 @@ npm run dev
 | Enter | 送出訊息 |
 | Shift+Enter | 在輸入框換行 |
 | 拖放檔案到亮起的接收窗 | 加入參考檔案、替換 VRM 或播放 VRMA |
+| 點泡泡的 📎 | 以系統對話框加入參考檔案或資料夾（Windows 的可靠替代入口） |
 
 ## 驗證安裝
 
 ```bash
 npm run typecheck
 npm run build
+npm run pack
+npm run dist:win
+npm run dist:mac
 ```
 
 若要測試 agent 管線但不消耗訂閱額度：

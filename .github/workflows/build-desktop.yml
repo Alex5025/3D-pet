@@ -1,0 +1,33 @@
+name: Build desktop apps
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: npx electron-builder --mac zip --arm64 --publish never
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vrm-pet-${{ runner.os }}
+          path: release/*
+          if-no-files-found: error

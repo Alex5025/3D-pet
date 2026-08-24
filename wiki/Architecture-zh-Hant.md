@@ -19,6 +19,7 @@
 | `src/renderer/main.ts` | 多寵 runtime、互動、命中測試與泡泡協調 |
 | `src/renderer/viewer.ts` | Three.js／VRM 載入、渲染、動畫與資源釋放 |
 | `src/main/agent/` | Codex／Claude／Mock provider、審批與 session bridge |
+| `src/main/platform.ts` | 平台能力、疊層視窗選項、named pipe／Unix socket 與打包 helper 路徑 |
 | `src/shared/` | 跨程序型別、i18n、聊天與沙盒資料結構 |
 
 ## Agent 架構
@@ -39,6 +40,7 @@
 
 - `runtime-data/`：本機 profile、PID 與執行狀態，不納入版控。
 - `models/`、`motions/`：本機角色與動作資產。
+- 安裝版設定放在系統 `userData`；Agent helper 以 `extraResources` 放在 asar 外。
 - Renderer 不直接取得 Node.js 權限。
 - 沙盒設定 IPC 只接受固定 enum／boolean，main 再驗證工作目錄與符號連結。
 - 憑證、token、API key 不得進入 repository。
@@ -50,6 +52,9 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
+npm run pack
+npm run dist:win
+npm run dist:mac
 npm run check:secrets
 ```
 
@@ -58,7 +63,9 @@ npm run check:secrets
 - `/vrmtest.html`：模型、透明度、動作與互動。
 - `/bubbletest.html`：泡泡 Markdown、附件、審批與佇列。
 - `VRM_PET_AGENT_SELFTEST=1`：MockProvider 全鏈自驗。
-- `VRM_PET_AGENT_SELFTEST=codex|claude`：真實 CLI e2e，會消耗訂閱額度。
+- `VRM_PET_AGENT_SELFTEST=codex|claude|agy`：真實 CLI e2e，會消耗訂閱額度。
+
+GitHub Actions 分別在 macOS 與 Windows runner 建置平台產物。Windows 使用 NSIS x64，macOS 使用 DMG/ZIP；正式公開發行另需 Authenticode 與 Developer ID/notarization。
 
 ## 貢獻規範
 

@@ -927,3 +927,19 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **產出**:`models/Vivian.vrm`(23.6MB,65 條彈簧骨)、`models/Rosette_Maid.vrm`(20.2MB,42 條);`motions/` 85 個 VRMA(動作 46/姿勢 29/手勢 10),**每個都截圖看過才取中文名**,原名對照在 `motions/動作對照表.txt`。表情六態 + 口型 + 眨眼全接到 VRM expression preset,桌寵的 `pet_show_expression`/`pet_play_motion` 直接可用。
 
 **驗證方法論**:肌肉數學先在 Python 端 FK 驗(手臂方向向量與正規化組合一致才進瀏覽器);結構過 `npx @gltf-transform/cli validate`;視覺全靠 vrmtest.html 截圖,彈簧骨用 `?rootMotion=1` 自動判定(注意內建閾值對高阻尼參數過嚴,0.0000 rad 才是真的沒動)。
+
+## 49. Windows 相容與雙平台安裝包(2026-08-24)
+
+**問題**:渲染與 IPC 本來大多是 Electron 共用碼，但開發啟動用 `pkill`/`$(pwd)`、整體重啟硬編 `/bin/zsh`、全域檔案拖曳只靠 macOS JXA，Agent helper 又從 `app.getAppPath()/src` 啟動。結果是 Windows 連 `npm run dev` 都過不了；即使只把 `out/` 塞進 Electron，安裝版的 helper 也會指進 asar，外部 Node 無法執行。
+
+**處理**:
+
+1. 新增 `platform.ts` 集中視窗層級、macOS panel/跨工作區、外部 helper 實體路徑，以及本機 IPC 位址。Unix 使用 socket 檔，Windows 改用 `\\.\pipe\...` named pipe。
+2. `predev` 改成 Node 腳本依 PID 檔清理；安裝版重啟使用 `app.relaunch()`，開發版由跨平台 launcher 等舊 Electron 結束後重新執行 npm。另加 single-instance lock，第二次啟動只叫出中控。
+3. 參考檔案驗證由 `startsWith('/')` 改用 `path.isAbsolute()`，Windows 的 `C:\...` 不再被丟棄。泡泡新增 📎 系統選檔入口；Windows/Linux 因 native dialog 不能同時選檔案與資料夾，先選模式再開對應 dialog。macOS 的 JXA 全域拖曳保留，Windows 第一版用此入口可靠降級。
+4. 加入 Electron Builder：Windows x64 產 NSIS、macOS arm64 產 DMG/ZIP；Agent `.mjs` 以 `extraResources` 放到 asar 外，設定與運行資料則落在系統 `userData`。Vite 以自訂 plugin 明確輸出預設 VRM，不再依賴 Windows checkout 可能失真的 symlink。
+5. 新增雙平台 GitHub Actions；production HTML sanitizer 同步升級，`npm audit --omit=dev` 歸零。ImageGen 產生 1024px 桌寵圖示作為兩平台打包來源。
+
+**驗證**:`typecheck`、production build、`git diff --check` 全過；macOS unpacked app 執行 MockProvider 全鏈 selftest 全 PASS；Windows x64 cross-package 與 NSIS 成功，helper/asar/預設 VRM 均在正確位置。實際 DMG 已安裝至 `/Applications/VRM Pet.app` 並正常啟動 main、GPU、renderer，運行資料正確建立在 `~/Library/Application Support/VRM Pet`。
+
+**仍需外部環境**:Windows 11 真機的透明視窗、DPI、多螢幕與 Explorer 重啟回歸；正式公開發行前的 Windows Authenticode、macOS Developer ID/notarization；Windows 原生全域拖曳 helper。未簽章產物只供內部測試。

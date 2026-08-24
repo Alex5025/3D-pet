@@ -18,6 +18,7 @@
 | `src/renderer/main.ts` | 複数ペット runtime、操作、hit test、バブル連携 |
 | `src/renderer/viewer.ts` | Three.js／VRM のロード、描画、アニメーション、解放 |
 | `src/main/agent/` | Codex／Claude／Mock provider、承認、session |
+| `src/main/platform.ts` | platform capability、overlay 設定、named pipe／Unix socket、packaged helper path |
 | `src/shared/` | IPC 間の型、i18n、chat、sandbox schema |
 
 ## Agent bridge
@@ -38,6 +39,7 @@
 
 - `runtime-data/`：ローカル profile、PID、実行状態。Git 管理外。
 - `models/`、`motions/`：ローカルアセット。
+- パッケージ版の設定は system `userData` に保存し、実行する agent helper は `extraResources` で asar 外へ配置します。
 - Renderer に Node.js への直接アクセスを与えません。
 - Sandbox IPC は固定 enum／boolean のみ受け付け、main が workspace と symlink を検証します。
 - 認証情報、token、API key、端末固有パス、再配布不可アセットを commit しないでください。
@@ -49,6 +51,9 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
+npm run pack
+npm run dist:win
+npm run dist:mac
 npm run check:secrets
 ```
 
@@ -57,7 +62,9 @@ npm run check:secrets
 - `/vrmtest.html`：モデル、透明度、モーション、操作。
 - `/bubbletest.html`：Markdown、画像、承認、メッセージキュー。
 - `VRM_PET_AGENT_SELFTEST=1`：MockProvider の全経路。
-- `VRM_PET_AGENT_SELFTEST=codex|claude`：実 CLI e2e。サブスクリプション枠を消費します。
+- `VRM_PET_AGENT_SELFTEST=codex|claude|agy`：実 CLI e2e。サブスクリプション枠を消費します。
+
+GitHub Actions は macOS／Windows の native runner で各 platform package を作成します。Windows は NSIS x64、macOS は DMG/ZIP を使用し、公開版には Authenticode と Developer ID/notarization が別途必要です。
 
 ## コントリビューション
 

@@ -50,7 +50,7 @@ macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three
 
 ## 需求
 
-- macOS(Apple Silicon 實測)
+- macOS(Apple Silicon 實測)或 Windows 11 x64
 - Node.js 22+
 - 要用 AI 功能:[Codex CLI](https://github.com/openai/codex)、[Claude Code](https://claude.com/claude-code) 與/或 [Antigravity](https://antigravity.google)(`agy` CLI)已安裝並登入(訂閱帳號),三家擇一即可
 
@@ -58,10 +58,10 @@ macOS 桌面透明疊層上的 VRM 3D 桌寵(Electron + three.js + [@pixiv/three
 
 ```bash
 npm install
-npm run start   # 脫離終端機啟動;關掉這個終端機(或對 IDE 按 ⌘Q)不會帶走寵物
+npm run dev     # macOS 與 Windows 共用的開發啟動方式
 ```
 
-> 開發時要看即時 log 可改用 `npm run dev`,但那會把寵物系統掛在該終端機下——終端機一關,寵物跟著被 SIGHUP 帶走(不經結束確認)。
+> macOS 另可用 `npm run start` 脫離終端機啟動；這是開發便利腳本，不是安裝版的執行依賴。
 
 - 角色出現在桌面;滑鼠壓到角色變可互動,移開自動穿透。
 - **對話**:滑到角色上 → 泡泡輸入 → Enter 送出(Shift+Enter 換行);執行中繼續打字會自動排隊。
@@ -90,6 +90,9 @@ npm run start   # 脫離終端機啟動;關掉這個終端機(或對 IDE 按 ⌘
 
 ```bash
 npm run typecheck && npm run build
+npm run pack       # 建立目前平台的未封裝測試 app
+npm run dist:win   # Windows x64 NSIS 安裝器（在 Windows runner 執行）
+npm run dist:mac   # macOS DMG + ZIP（在 macOS runner 執行）
 
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=1 npm run dev       # MockProvider 全鏈自驗
 VRM_PET_DATA_DIR=$(mktemp -d) VRM_PET_AGENT_SELFTEST=claude npm run dev  # 真 claude e2e(耗訂閱額度)
@@ -101,6 +104,8 @@ VRM_PET_PERF_LOG=1 npm run dev                                            # 效�
 npm run check:secrets                                                     # 掃描已暫存檔案中的疑似憑證
 npm run check:secrets:all                                                 # 掃描所有 Git 追蹤檔案
 ```
+
+打包圖示來源為 `build/icon.png`；Electron Builder 會為各平台產生對應格式。公開發行仍需另外設定 Windows Authenticode 與 macOS Developer ID／notarization 憑證。
 
 `npm install` 或 `npm ci` 會透過 `prepare` 將 Git hooks 路徑設為 `.githooks`。提交前會執行密鑰掃描與型別檢查；推送前會執行全量密鑰掃描與完整建置。
 

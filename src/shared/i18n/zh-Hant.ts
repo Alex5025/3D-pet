@@ -46,6 +46,9 @@ export const zhHant = {
   // ── 對話框與視窗 ──
   'dialog.chooseWorkspace': '選擇工作目錄',
   'dialog.chooseWorkspaceRoot': '選擇新寵物的預設工作根目錄',
+  'dialog.chooseReferences': '選擇參考檔案或資料夾',
+  'dialog.chooseFiles': '選擇檔案',
+  'dialog.chooseFolder': '選擇資料夾',
   'window.settings': '桌寵設定',
   'window.control': '中控面板',
 
@@ -118,6 +121,7 @@ export const zhHant = {
   'bubble.resizeTitle': '拖曳調整泡泡寬度（雙擊還原自動）',
   'bubble.removeQueuedTitle': '從佇列移除這則訊息',
   'bubble.removeRefTitle': '移除這個參考檔案',
+  'bubble.addRefsTitle': '加入參考檔案或資料夾',
   'bubble.actRunning': '執行中',
   'bubble.actDone': '已完成',
   'bubble.actFailed': '執行失敗',

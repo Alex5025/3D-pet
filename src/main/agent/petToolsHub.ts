@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { app } from 'electron';
+import { helperScriptPath, localSocketPath } from '../platform';
 
 /**
  * 寵物工具中樞(v3):petToolsServer.mjs(由各 CLI 以 MCP 掛載)經本機 socket 回連這裡,
@@ -34,8 +34,8 @@ export const PET_EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised',
 export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
   const token = randomUUID();
   const dir = mkdtempSync(join(tmpdir(), 'vrm-pet-tools-'));
-  const socketPath = join(dir, 'tools.sock');
-  const scriptPath = join(app.getAppPath(), 'src/main/agent/petToolsServer.mjs');
+  const socketPath = localSocketPath(`tools-${token}`, dir);
+  const scriptPath = helperScriptPath('petToolsServer.mjs');
 
   const server: Server = createServer((socket) => {
     let buffer = '';

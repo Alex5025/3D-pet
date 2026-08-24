@@ -45,6 +45,9 @@ export const ja = {
 
   'dialog.chooseWorkspace': '作業ディレクトリを選択',
   'dialog.chooseWorkspaceRoot': '新規ペットのデフォルト作業ルートを選択',
+  'dialog.chooseReferences': '参照ファイルまたはフォルダを選択',
+  'dialog.chooseFiles': 'ファイルを選択',
+  'dialog.chooseFolder': 'フォルダを選択',
   'window.settings': 'ペット設定',
   'window.control': 'コントロールパネル',
 
@@ -113,6 +116,7 @@ export const ja = {
   'bubble.resizeTitle': 'ドラッグで吹き出しの幅を調整(ダブルクリックで自動に戻す)',
   'bubble.removeQueuedTitle': 'このメッセージをキューから削除',
   'bubble.removeRefTitle': 'この参照ファイルを削除',
+  'bubble.addRefsTitle': '参照ファイルまたはフォルダを追加',
   'bubble.actRunning': '実行中',
   'bubble.actDone': '完了',
   'bubble.actFailed': '失敗',

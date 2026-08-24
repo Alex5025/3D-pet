@@ -180,6 +180,7 @@ const api = {
    * Electron 33 已移除 File.path,取絕對路徑必須經 preload 的 webUtils。 */
   getFilePath: (file: File): string => webUtils.getPathForFile(file),
   addRefFiles: (petId: string, paths: string[]) => ipcRenderer.send('ref-files-add', petId, paths),
+  chooseRefFiles: (petId: string): Promise<void> => ipcRenderer.invoke('choose-ref-files', petId),
   removeRefFile: (petId: string, path: string) => ipcRenderer.send('ref-files-remove', petId, path),
   onRefFiles: (callback: (petId: string, list: RefFile[]) => void) =>
     ipcRenderer.on('ref-files-apply', (_event, petId, list) => callback(petId, list)),

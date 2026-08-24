@@ -6,7 +6,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { app } from 'electron';
+import { helperScriptPath, localSocketPath } from '../platform';
 import type { AgentEvent, AgentProvider } from './types';
 import { refFilesPrompt } from './types';
 import type { PetToolsHub } from './petToolsHub';
@@ -73,7 +73,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
    * 腳本經本機 socket 回連這裡 → 轉成 approval 事件 → 使用者在泡泡按 允許/拒絕 → 回寫 socket。 */
   const permToken = randomUUID();
   const permDir = mkdtempSync(join(tmpdir(), 'vrm-pet-perm-'));
-  const permSocketPath = join(permDir, 'perm.sock');
+  const permSocketPath = localSocketPath(`perm-${permToken}`, permDir);
   let permServer: Server | null = null;
   /** turnKey → 該 turn 的事件佇列(審批事件路由)。 */
   const approvalQueues = new Map<string, EventQueue>();
@@ -135,7 +135,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
     if (turnKey) {
       servers['vrmpet'] = {
         command: 'node',
-        args: [join(app.getAppPath(), 'src/main/agent/permPromptServer.mjs')],
+        args: [helperScriptPath('permPromptServer.mjs')],
         env: { VRM_PET_PERM_SOCKET: permSocketPath, VRM_PET_PERM_TOKEN: permToken, VRM_PET_TURN_KEY: turnKey }
       };
     }

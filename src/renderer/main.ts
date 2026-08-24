@@ -370,6 +370,7 @@ function addRuntime(profile: PetProfile): void {
       // 徽章列的 📁:重用設定面板同一條 choose-workspace(main 端改完會 sendPetProfiles,
       // reconcileProfiles 的 setWorkspacePath 會把新路徑寫回徽章,這裡不必接回傳值)
       onChooseWorkspace: () => { void window.pet.chooseWorkspace(profile.id); },
+      onChooseRefFiles: () => { void window.pet.chooseRefFiles(profile.id); },
       onRemoveRef: (path) => window.pet.removeRefFile(profile.id, path),
       onRemoveQueued: (taskId) => window.pet.removeQueuedMessage(profile.id, taskId),
       // 徽章列切換模型/力度/運行模式:走與設定面板同一條 updatePetMeta,

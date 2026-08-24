@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
@@ -21,6 +21,7 @@ import { runAgentSelftest, runAgyE2E, runClaudeE2E, runCodexE2E } from './agent/
 import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
 import { createDefaultWorkspace } from './workspaceDefaults';
 import { LOCALES, getLocale, resolveLocale, setLocale, t, type Locale } from '../shared/i18n';
+import { configureOverlayWindow, overlayPlatformOptions } from './platform';
 
 interface PetState {
   x: number;
@@ -112,6 +113,9 @@ let clearTranscriptHook: ((petId: string) => void) | null = null;
 let dispatchAllHook: (() => void) | null = null;
 /** 中控面板快照重推(whenReady 注入,50ms debounce):寵物/佇列/agent 狀態變更時呼叫。 */
 let scheduleControlStatusHook: (() => void) | null = null;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -594,16 +598,18 @@ function shutdownSync(): void {
 }
 
 function restartApp(): void {
-  // Electron 只觸發固定地端腳本；PID 讀取、終止程序與 npm run dev 全由腳本負責。
   persistConfigSync();
-  const scriptPath = join(app.getAppPath(), 'scripts/restart-pet-system.sh');
-  const child = spawn('/bin/zsh', [scriptPath], {
-    cwd: app.getAppPath(),
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
-  });
-  child.unref();
+  shutdownSync();
+  if (app.isPackaged) {
+    app.relaunch();
+  } else {
+    const scriptPath = join(app.getAppPath(), 'scripts/restart-dev.mjs');
+    const child = spawn('node', [scriptPath, String(process.pid), app.getAppPath()], {
+      cwd: app.getAppPath(), detached: true, stdio: 'ignore', windowsHide: true,
+    });
+    child.unref();
+  }
+  app.exit(0);
 }
 
 function petMenu(requestedId?: string): Menu {
@@ -746,16 +752,14 @@ function createOverlay(): BrowserWindow {
     skipTaskbar: true,
     backgroundColor: '#00000000',
     focusable: false,
-    ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
+    ...overlayPlatformOptions(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
-  overlay.setAlwaysOnTop(true, 'screen-saver');
-  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  overlay.setIgnoreMouseEvents(true, { forward: true });
+  configureOverlayWindow(overlay);
   overlay.webContents.on('console-message', (_event, _level, message) => console.log('[overlay]', message));
   overlay.webContents.on('render-process-gone', (_event, details) => {
     console.log('[main] renderer gone:', details.reason, '→ 強制恢復穿透並重載');
@@ -795,6 +799,15 @@ app.whenReady().then(async () => {
   }
   if (process.platform === 'darwin') app.dock?.hide();
   loadConfigSync();
+
+  app.on('second-instance', () => {
+    if (controlWin && !controlWin.isDestroyed()) {
+      controlWin.show();
+      controlWin.focus();
+    } else {
+      openControlPanel();
+    }
+  });
 
   /* ── 串流文字合併(效能優化階段 3)──
    * provider 的 text delta 是 token 級,每 token 一次 IPC 太密(renderer 每次都全文重渲);
@@ -1047,14 +1060,10 @@ app.whenReady().then(async () => {
   const petRefFiles = new Map<string, { path: string; isDir: boolean }[]>();
   const sendRefFiles = (petId: string): void =>
     win?.webContents.send('ref-files-apply', petId, petRefFiles.get(petId) ?? []);
-  ipcMain.on('ref-files-add', (event, petId: string, paths: string[]) => {
-    // 來源:疊層(保留給未來平台)或拖放接收窗
-    const fromDropWin = [...dropWindows.values()].some((w) => !w.isDestroyed() && w.webContents === event.sender);
-    if ((!fromDropWin && event.sender !== win?.webContents) || !pets.has(petId) || !Array.isArray(paths)) return;
-    void (async () => {
+  const addReferencePaths = async (petId: string, paths: string[]): Promise<void> => {
       const list = petRefFiles.get(petId) ?? [];
       let changed = false;
-      for (const path of paths.filter((p): p is string => typeof p === 'string' && p.startsWith('/'))) {
+      for (const path of paths.filter((p): p is string => typeof p === 'string' && isAbsolute(p))) {
         // .vrm/.vrma 維持原本拖放語意(換模型/播動作)——疊層收不到拖放後,接收窗是它們唯一的拖放入口
         const lower = path.toLowerCase();
         if (lower.endsWith('.vrm')) {
@@ -1079,7 +1088,37 @@ app.whenReady().then(async () => {
         petRefFiles.set(petId, list);
         sendRefFiles(petId);
       }
-    })();
+  };
+  ipcMain.on('ref-files-add', (event, petId: string, paths: string[]) => {
+    // 來源:疊層(保留給未來平台)或拖放接收窗
+    const fromDropWin = [...dropWindows.values()].some((w) => !w.isDestroyed() && w.webContents === event.sender);
+    if ((!fromDropWin && event.sender !== win?.webContents) || !pets.has(petId) || !Array.isArray(paths)) return;
+    void addReferencePaths(petId, paths);
+  });
+  ipcMain.handle('choose-ref-files', async (event, petId: string): Promise<void> => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    app.focus({ steal: true });
+    let properties: Electron.OpenDialogOptions['properties'];
+    if (process.platform === 'darwin') {
+      properties = ['openFile', 'openDirectory', 'multiSelections'];
+    } else {
+      // Windows/Linux 的 native dialog 不能同時選檔案與資料夾，先讓使用者選模式。
+      const choice = await dialog.showMessageBox({
+        type: 'question',
+        message: t('dialog.chooseReferences'),
+        buttons: [t('dialog.chooseFiles'), t('dialog.chooseFolder'), t('quit.cancel')],
+        defaultId: 0,
+        cancelId: 2,
+      });
+      if (choice.response === 2) return;
+      properties = choice.response === 0 ? ['openFile', 'multiSelections'] : ['openDirectory'];
+    }
+    const result = await dialog.showOpenDialog({
+      title: t('dialog.chooseReferences'),
+      buttonLabel: t('common.select'),
+      properties,
+    });
+    if (!result.canceled) await addReferencePaths(petId, result.filePaths);
   });
   ipcMain.on('ref-files-remove', (event, petId: string, path: string) => {
     if (!win || event.sender !== win.webContents || !petRefFiles.has(petId)) return;
