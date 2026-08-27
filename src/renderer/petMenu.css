@@ -1,0 +1,140 @@
+@import './tokens.css';
+
+/* 寵物右鍵選單(自繪):原生 Menu 無法套設計語言;疊層視窗不可聚焦,
+ * 自繪 DOM 也是泡泡下拉(bubble-agent-menu)已驗證的路線。 */
+.pet-menu {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 5px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  color: var(--text-1);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+.pet-menu .menu-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px 0;
+  font-weight: 650;
+}
+
+.pet-menu .menu-head .menu-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.pet-menu .menu-head .menu-dot.resting { background: var(--border-strong); }
+
+.pet-menu .menu-head .menu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-menu .menu-workspace {
+  padding: 0 9px 4px;
+  color: var(--text-3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-menu hr {
+  margin: 4px 6px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 清單過長時可捲動(動作幾十個時);上限放寬到近整個螢幕高,主頁一般整頁可見 */
+.pet-menu .menu-list {
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.pet-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pet-menu .menu-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.pet-menu .menu-item:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.pet-menu .menu-item .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 子選單箭頭與 radio 勾號 */
+.pet-menu .menu-item .chev { flex: none; color: var(--text-3); font-size: 11px; }
+.pet-menu .menu-item:hover:not(:disabled) .chev { color: var(--on-accent); }
+.pet-menu .menu-item .mark { flex: none; width: 14px; color: var(--accent); }
+.pet-menu .menu-item:hover:not(:disabled) .mark { color: var(--on-accent); }
+
+.pet-menu .menu-item.danger { color: var(--err); }
+.pet-menu .menu-item.danger:hover:not(:disabled) {
+  background: var(--err);
+  color: var(--on-accent);
+}
+
+/* 子頁返回列 */
+.pet-menu .menu-back {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pet-menu .menu-back:hover { background: var(--bg-hover); color: var(--text-1); }
+
+/* 子頁的群組標(工作區資料夾) */
+.pet-menu .menu-group {
+  padding: 4px 9px 1px;
+  color: var(--text-3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

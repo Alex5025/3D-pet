@@ -9,6 +9,7 @@ import {
 import type { AgentKind, AgentModelInfo, PetProfile, PetState, PowerProfile, WardrobeItem } from '../preload/index';
 import { setLocale, t, type Locale } from '../shared/i18n';
 import { applyI18nDom } from './i18nDom';
+import { isPetMenuOpen, showPetMenu } from './petMenu';
 
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 const MAX_CAMERA_Z = 30;
@@ -645,6 +646,12 @@ function scheduleBubbleHide(): void {
 let lastBubblePosAt = 0;
 
 function updateHover(x: number, y: number): void {
+  // 自繪右鍵選單開著:整段互動判斷讓位,保持可互動且不收合泡泡
+  if (isPetMenuOpen()) {
+    cancelBubbleHide();
+    setInteractive(true);
+    return;
+  }
   // 寬度把手拖曳中:游標可能甩出泡泡範圍(貼緣或超出上限),仍須保持互動且不得收合/重新定位。
   for (const runtime of runtimes.values()) {
     if (runtime.bubble.isResizing()) {
@@ -792,7 +799,7 @@ addEventListener('mouseup', (event) => {
     const moved = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 4;
     if (runtime) {
       if (moved) scheduleSave(runtime);
-      else window.pet.showMenu(runtime.profile.id);
+      else void showPetMenu(event.clientX, event.clientY, runtime.profile.id);
     }
   }
   interactionRuntime = null;

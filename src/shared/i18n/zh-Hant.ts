@@ -87,6 +87,7 @@ export const zhHant = {
   'overlay.modelDefault': '預設模型',
 
   // ── 泡泡 ──
+  'menu.back': '‹ 返回',
   'bubble.aria': '角色對話',
   'bubble.promptLabel': '{name}：想對我說什麼？',
   'bubble.pinAriaOn': '取消保持對話泡泡展開',

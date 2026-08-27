@@ -82,6 +82,7 @@ export const en = {
   'overlay.notSent': 'Message not sent',
   'overlay.modelDefault': 'default model',
 
+  'menu.back': '‹ Back',
   'bubble.aria': 'Character chat',
   'bubble.promptLabel': '{name}: What would you like to say?',
   'bubble.pinAriaOn': 'Stop keeping the chat bubble open',

@@ -121,6 +121,14 @@ const api = {
     ipcRenderer.on('apply-state', (_event, petId, state) => callback(petId, state)),
 
   showMenu: (petId: string) => ipcRenderer.send('show-menu', petId),
+  /* 自繪右鍵選單(petMenu.ts)的動作:回 main 走與 Tray 選單相同的函式。 */
+  playMotion: (petId: string, file: string) => ipcRenderer.send('menu-play-motion', petId, file),
+  stopMotion: (petId: string) => ipcRenderer.send('menu-stop-motion', petId),
+  openSettings: (tab: 'light' | 'char' | 'motion' | 'project', petId: string) =>
+    ipcRenderer.send('menu-open-settings', tab, petId),
+  openControlPanel: (tab?: 'sandbox') => ipcRenderer.send('menu-open-control', tab),
+  resetPetState: (petId: string) => ipcRenderer.send('menu-reset-state', petId),
+  restartPet: (petId: string) => ipcRenderer.send('menu-restart-pet', petId),
   onSwitchTab: (callback: (tab: string) => void) =>
     ipcRenderer.on('switch-tab', (_event, tab) => callback(tab)),
 

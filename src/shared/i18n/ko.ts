@@ -82,6 +82,7 @@ export const ko = {
   'overlay.notSent': '메시지가 전송되지 않았습니다',
   'overlay.modelDefault': '기본 모델',
 
+  'menu.back': '‹ 뒤로',
   'bubble.aria': '캐릭터 대화',
   'bubble.promptLabel': '{name}: 무슨 말을 하고 싶나요?',
   'bubble.pinAriaOn': '말풍선 고정 해제',

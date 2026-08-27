@@ -1461,6 +1461,41 @@ app.whenReady().then(async () => {
     void refreshMotions().then(() => petMenu(id).popup({ window: win! }));
   });
 
+  /* ── 自繪右鍵選單(overlay DOM)動作 ──
+   * 原生 Menu 無法套用設計語言,寵物右鍵選單改由 renderer 自繪(petMenu.ts);
+   * 動作經這組 IPC 回到 main,走與 Tray 選單完全相同的函式。Tray 仍用原生 petMenu()。 */
+  ipcMain.on('menu-play-motion', async (event, petId: string, file: string) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    await refreshMotions();
+    if (!motionFiles.includes(file)) return; // 白名單:只接受 motions/ 裡的檔名
+    try {
+      win.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+    } catch (error) {
+      console.log('[main] vrma read failed', error);
+    }
+  });
+  ipcMain.on('menu-stop-motion', (event, petId: string) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    win.webContents.send('vrma-stop', petId);
+  });
+  ipcMain.on('menu-open-settings', (event, tab: string, petId: string) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    const valid = tab === 'light' || tab === 'char' || tab === 'motion' || tab === 'project';
+    openSettings(valid ? tab : 'light', petId);
+  });
+  ipcMain.on('menu-open-control', (event, tab?: string) => {
+    if (!win || event.sender !== win.webContents) return;
+    openControlPanel(tab === 'sandbox' ? 'sandbox' : undefined);
+  });
+  ipcMain.on('menu-reset-state', (event, petId: string) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    resetState(petId);
+  });
+  ipcMain.on('menu-restart-pet', (event, petId: string) => {
+    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
+    void restartPet(petId);
+  });
+
   let overlayBounds = win.getBounds();
   // 主顯示器變更(換螢幕/改解析度/闔蓋切外接)時,疊層要跟著鋪滿新的主顯示——
   // 視窗不會自己調整;不同步的話新螢幕比舊視窗寬的部分成為界外,寵物站在那裡就被切掉。
