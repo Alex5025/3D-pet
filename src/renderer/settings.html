@@ -63,7 +63,17 @@
       .tab { display: none; }
       .tab.active { display: block; }
 
-      h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 10px 0 6px; font-size: 13px; color: var(--accent); font-weight: 600; }
+      /* 區塊卡片:每個設定群組一張卡,與中控面板同語彙 */
+      .card {
+        margin-bottom: 10px;
+        padding: 12px 14px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+      .card > h3:first-child { margin-top: 0; }
+
+      h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 10px 0 6px; font-size: 13px; color: var(--text-1); font-weight: 600; }
       /* 區塊右上角的「還原預設」小字鈕:調壞了不用全部重來 */
       .sec-reset {
         padding: 1px 6px;
@@ -101,20 +111,30 @@
         cursor: pointer;
       }
 
+      /* 兩墊各分一半寬(min-width:0 允許收縮),數值改放墊內右上角,卡片不再被撐爆 */
       .pads { display: flex; gap: 12px; }
-      .pad-box { flex: 1; }
+      .pad-box { flex: 1 1 0; min-width: 0; }
       .pad-box .cap {
         display: flex;
-        justify-content: space-between;
         align-items: baseline;
         gap: 6px;
         color: var(--text-2);
         margin-bottom: 3px;
         font-size: 12px;
-        white-space: nowrap; /* 標題不因數值寬度換行 */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
-      /* 數值預留固定寬度(容得下 "-100.0, -100.0")+ 靠右 + 等寬數字,位數變化不re排版 */
-      .pad-box .cap .val { min-width: 104px; text-align: right; }
+      /* 座標數值:墊內右上角,等寬數字位數變化不跳動 */
+      .pad .pad-val {
+        position: absolute;
+        top: 3px;
+        right: 6px;
+        color: var(--text-2);
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
       .pad {
         position: relative;
         width: 100%;
@@ -174,7 +194,7 @@
         gap: 8px;
         padding: 5px 8px;
         border-radius: 8px;
-        background: var(--bg-hover);
+        background: var(--bg-inset);
         cursor: pointer;
       }
       #wardrobe input, #idle-motions input { accent-color: var(--accent); }
@@ -196,9 +216,9 @@
       /* 工作設定 */
       .project-note { margin: 0 0 12px; color: var(--text-2); }
       .workspace-card {
-        padding: 14px;
+        padding: 12px 14px;
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 14px;
         background: var(--bg-card);
       }
       .workspace-label { margin-bottom: 5px; color: var(--text-2); font-size: 12px; }
@@ -244,6 +264,7 @@
 
       <!-- ── 光影 ── -->
       <div class="tab active" id="tab-light">
+        <div class="card">
         <h3><span data-i18n="settings.lightType">光源類型</span><button class="sec-reset" id="reset-light" data-i18n="settings.resetSection">還原預設</button></h3>
         <div id="ltype">
           <button data-t="directional" class="active" data-i18n="settings.lightDirectional">平行光(太陽)</button>
@@ -267,30 +288,36 @@
           <label><span data-i18n="settings.temperature">色溫</span> <span class="val" id="temperature-val"></span></label>
           <input type="range" id="temperature" class="temp-range" min="1800" max="12000" step="50" />
         </div>
+        </div>
 
+        <div class="card">
         <h3><span data-i18n="settings.lightPosition">光源位置(相對角色)</span><button class="sec-reset" id="reset-light-pos" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="pads">
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span><span class="val" id="lxy-val"></span></div>
+            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span></div>
             <div class="pad hx vy" id="light-xy">
+              <span class="pad-val" id="lxy-val"></span>
               <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
               <span class="hint l" data-i18n="settings.hintLeft">左</span><span class="hint r" data-i18n="settings.hintRight">右</span>
               <span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div>
             </div>
           </div>
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b><span data-i18n="settings.capSideLight">(側視,右=朝你)</span></span><span class="val" id="lyz-val"></span></div>
+            <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b><span data-i18n="settings.capSideLight">(側視,右=朝你)</span></span></div>
             <div class="pad hz vy" id="light-yz">
+              <span class="pad-val" id="lyz-val"></span>
               <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
               <span class="hint l" data-i18n="settings.hintBack">身後</span><span class="hint r" data-i18n="settings.hintFront">朝你</span>
               <span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div>
             </div>
           </div>
         </div>
+        </div>
       </div>
 
       <!-- ── 角色 ── -->
       <div class="tab" id="tab-char">
+        <div class="card">
         <h3 data-i18n="settings.petName">寵物名稱</h3>
         <input class="text-input" id="pet-name" type="text" maxlength="40" data-i18n-placeholder="settings.petNamePlaceholder" placeholder="例如：小粉" style="width: 100%;" />
 
@@ -304,6 +331,9 @@
           style="width: 100%; resize: vertical; min-height: 72px; line-height: 1.5;"
           placeholder="用自由文字定義這隻角色的個性與說話風格,例如:&#10;你是活潑的貓娘工程師,說話簡短俏皮,句尾偶爾加「喵」,回報問題時一針見血。&#10;會注入對話的 system prompt,存檔後下一句對話生效。"></textarea>
 
+        </div>
+
+        <div class="card">
         <h3><span data-i18n="settings.sway">晃動強度(1 = 模型原廠)</span><button class="sec-reset" id="reset-sway" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="row">
           <label><span data-i18n="settings.hair">頭髮</span> <span class="val" id="hair-val"></span></label>
@@ -322,37 +352,49 @@
           <input type="range" id="tail" min="0" max="2" step="0.02" />
         </div>
 
+        </div>
+
+        <div class="card">
         <h3><span data-i18n="settings.wardrobe">服裝顯示</span><button class="sec-reset" id="reset-wardrobe" data-i18n="settings.resetSection">還原預設</button></h3>
         <div id="wardrobe"><span class="empty">載入中…</span></div>
+        </div>
 
+        <div class="card">
         <h3><span data-i18n="settings.charPosition">角色位置</span><button class="sec-reset" id="reset-pet-pos" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="pads">
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span><span class="val" id="pxy-val"></span></div>
+            <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span></div>
             <div class="pad hx vy" id="pet-xy">
+              <span class="pad-val" id="pxy-val"></span>
               <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
               <span class="hint l" data-i18n="settings.hintLeft">左</span><span class="hint r" data-i18n="settings.hintRight">右</span>
               <div class="dot"></div>
             </div>
           </div>
           <div class="pad-box">
-            <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b><span data-i18n="settings.capSideChar">(側面)</span></span><span class="val" id="pzy-val"></span></div>
+            <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b><span data-i18n="settings.capSideChar">(側面)</span></span></div>
             <div class="pad hz vy" id="pet-zy">
+              <span class="pad-val" id="pzy-val"></span>
               <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
               <span class="hint l" data-i18n="settings.hintBack">身後</span><span class="hint r" data-i18n="settings.hintFront">朝你</span>
               <div class="dot"></div>
             </div>
           </div>
         </div>
+        </div>
       </div>
 
       <!-- ── 動作設定 ── -->
       <div class="tab" id="tab-motion">
+        <div class="card">
         <h3 data-i18n="settings.defaultPose">預設姿勢</h3>
         <select class="text-input" id="default-pose" style="width: 100%;"></select>
+        </div>
 
+        <div class="card">
         <h3 data-i18n="settings.idleMotions">待機動作（勾選後隨機播放）</h3>
         <div id="idle-motions"><span class="empty">載入中…</span></div>
+        </div>
       </div>
 
       <!-- ── 工作設定 ── -->

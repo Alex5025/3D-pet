@@ -985,3 +985,17 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **驗證**:bubbletest.html 深淺各一張——節標與分隔線、常駐把手豎條、外角常駐圖釘皆可見;typecheck/build 過。
 
 **至此 DESIGN-TODO 四步實作順序全部完成**:tokens.css(§51)→ 中控卡片化(§52)→ 設定面板(§53)→ 泡泡(§54)。剩餘的深水區項目(對話歷史往上翻、服裝縮圖命名、模型選擇器、動作預覽)仍留在 DESIGN-TODO 待辦。
+
+## 55. 介面重設計⑤:寵物右鍵選單自繪(2026-08-27)
+
+**動機**:原生 Electron Menu 無法套用設計語言;疊層視窗不可聚焦,自繪 DOM 也是泡泡下拉(bubble-agent-menu)已驗證的路線。
+
+**做法**:新增 `petMenu.ts`/`petMenu.css`,結構比照 main 的 `petMenu()`(切換寵物/播放動作/預設姿勢/設定/中控/沙盒/選 VRM/重置/重啟/休息/新增/重啟系統/結束)。子選單不做飛出面板(疊層上易超出邊界),改就地換頁+「‹ 返回」列;radio 頁(預設姿勢/切換寵物)以 ✓ 標記現值,休息寵物灰掉,「結束」紅色 danger。動作經六個新 IPC(`menu-play-motion` 含 motions/ 白名單、`menu-stop-motion`、`menu-open-settings`、`menu-open-control`、`menu-reset-state`、`menu-restart-pet`)回 main 走與 Tray 相同的函式;Tray 仍用原生選單。`main.ts` 右鍵改呼叫 `showPetMenu`,`updateHover` 開頭加選單開啟守衛(保持互動、不收合泡泡);點選單外 mousedown(捕獲階段)收合。
+
+**驗證**:新增 `menutest.html`(掛 `window.__menu`,stub window.pet、動作記到陣列)。互動回歸全過:播放動作後選單關閉且動作有記錄、切換寵物頁群組標/休息灰階/現值勾號正確、結束鈕 danger、點外收合。深淺截圖 OK。清單上限 `calc(100vh - 120px)`,主頁一般整頁可見,動作幾十個時才捲動。
+
+## 56. 介面重設計⑥:設定面板卡片化(2026-08-27)
+
+**改動**:每個設定群組包進 `.card`(光影 2 卡、角色 4 卡、動作 2 卡;工作分頁的 workspace-card 統一圓角),區塊標題由紫色改回主文字色(卡片已承擔分組,紫標題到處都是反而吵)。順修既有的拖曳墊撐爆問題:座標數值原在標題列預留 104px 造成 pad-box 超過半寬、卡片被撐出橫向捲軸——數值移進墊內右上角(`.pad-val`,等寬數字),`.pad-box` 改 `flex: 1 1 0; min-width: 0`,兩墊乖乖各分一半。服裝/待機清單列底色 bg-hover → bg-inset(白卡上 6% 透明度幾乎看不見)。
+
+**驗證**:CDP stub 深淺截光影/角色/動作三分頁,無橫向捲軸,墊內數值顯示正確。
