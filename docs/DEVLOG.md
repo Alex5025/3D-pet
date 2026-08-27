@@ -955,3 +955,11 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **驗證**:`npm run typecheck`、`npm run build`、`npm run pack` 全過；實際 macOS unpacked app 同時確認 `Resources/models/AvatarSample_A.vrm` 與 `app.asar/out/renderer/AvatarSample_A.vrm` 存在，沒有誤收任何 `.vrma`。
 
 **安裝實測補記(2026-08-27)**:資源雖已正確打包與複製，乾淨設定的預設寵物仍不可見。根因是 `get-boot-vrm` 對沒有自訂 `vrmPath` 的寵物回傳 `null`，renderer 隨後載入絕對網址 `/AvatarSample_A.vrm`；dev server 能解析這個網址，但 production 的 `file://` 會把它指到磁碟根目錄。修正為 main 在沒有自訂路徑時直接從 `userData/models/AvatarSample_A.vrm` 讀取 buffer，與自訂模型共用既有快取及 IPC 載入路徑，不再依賴 production URL 解析。
+
+## 51. 介面重設計①:設計語言 token 化,三介面統一色票(2026-08-27)
+
+**背景**:泡泡(淺色薰衣草紫)、設定面板(深色 #1c1c20 靛紫)、中控面板(深色 #17171c 另一色號靛紫)三套視覺各自為政,DESIGN-TODO 定案為雙主題 token 化(跟隨系統深淺)。設計稿與規範:`docs/design/redesign-v1.html`。
+
+**做法**:新增 `src/renderer/tokens.css`——只放 CSS 變數不放元件樣式(疊層視窗背景必須保持透明,此檔不畫任何背景)。淺色為 `:root` 預設,深色走 `prefers-color-scheme` 跟隨系統;`data-theme` 覆寫僅供自驗頁強制切換。三個介面接上:control.html 與 settings.html 各加 `<link>`,speechBubble.css 檔首 `@import`(由 speechBubble.ts 的 CSS import 鏈帶進 overlay)。版面完全不動,只把硬編碼色票換成變數;色溫漸層與 XYZ 軸色是語意色,保留字面值。狀態色順帶對齊:泡泡狀態點 working 由藍改綠、done 由綠改藍,與中控任務徽章(執行中=綠、已完成=藍)一致。
+
+**驗證**:typecheck/build 過;因寵物系統正在跑,不用 `npm run dev`(predev 會 pkill Electron 誤殺寵物),改起獨立 `npx vite src/renderer` + headless Chrome CDP(`Emulation.setEmulatedMedia` 模擬 prefers-color-scheme)截 bubbletest/control/settings 三頁深淺共六張,泡泡尾巴與卡片同色、深色下輸入框/徽章/佇列列對比正常。

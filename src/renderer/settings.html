@@ -3,12 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <title>設定</title>
+    <link rel="stylesheet" href="./tokens.css" />
     <style>
       html, body {
         margin: 0;
         height: 100%;
-        background: #1c1c20;
-        color: #f2f2f4;
+        background: var(--bg-app);
+        color: var(--text-1);
         font: 400 13px/1.6 system-ui, -apple-system, "Noto Sans TC", sans-serif;
         user-select: none;
         overflow-y: auto;
@@ -21,9 +22,9 @@
         box-sizing: border-box;
         min-width: 0;
         padding: 7px 9px;
-        color: #eeeeF4;
-        background: #28282e;
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: var(--text-1);
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
         border-radius: 8px;
         font: inherit;
         outline: none;
@@ -31,14 +32,14 @@
       #pet-select { flex: 1; }
       #pet-toolbar button {
         width: 36px;
-        color: #eeeef4;
-        background: rgba(255, 255, 255, 0.07);
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: var(--text-1);
+        background: var(--bg-card);
+        border: 1px solid var(--border);
         border-radius: 8px;
         font: 600 17px/1 system-ui;
         cursor: pointer;
       }
-      #pet-toolbar button:hover { background: rgba(255, 255, 255, 0.12); }
+      #pet-toolbar button:hover { background: var(--bg-hover); }
       #pet-toolbar button[disabled] { opacity: 0.45; cursor: default; }
 
       /* 分頁 */
@@ -46,34 +47,34 @@
       #tabs button {
         flex: 1;
         padding: 7px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        border: 1px solid var(--border);
         border-radius: 9px;
-        background: rgba(255, 255, 255, 0.05);
-        color: #c9c9d2;
+        background: var(--bg-card);
+        color: var(--text-2);
         font: inherit;
         cursor: pointer;
       }
-      #tabs button.active { background: #4f46c8; border-color: #4f46c8; color: #fff; }
+      #tabs button.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
       #ltype { display: flex; gap: 6px; }
       #ltype button {
         flex: 1;
         padding: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        border: 1px solid var(--border);
         border-radius: 9px;
-        background: rgba(255, 255, 255, 0.05);
-        color: #c9c9d2;
+        background: var(--bg-card);
+        color: var(--text-2);
         font: inherit;
         cursor: pointer;
       }
-      #ltype button.active { background: #4f46c8; border-color: #4f46c8; color: #fff; }
+      #ltype button.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
       .tab { display: none; }
       .tab.active { display: block; }
 
-      h3 { margin: 10px 0 6px; font-size: 13px; color: #a9a9e6; font-weight: 600; }
+      h3 { margin: 10px 0 6px; font-size: 13px; color: var(--accent); font-weight: 600; }
       .row { margin-bottom: 10px; }
-      .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: #c9c9d2; }
-      .val { font-variant-numeric: tabular-nums; color: #8f8fd9; }
-      input[type='range'] { width: 100%; accent-color: #6d64d8; }
+      .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: var(--text-2); }
+      .val { font-variant-numeric: tabular-nums; color: var(--accent); }
+      input[type='range'] { width: 100%; accent-color: var(--accent); }
       /* 色溫滑桿:軌道直接畫成冷→白→暖的漸層,不用看數字就知道往哪拉
          (影像工具的習慣是左冷右暖;實際 Kelvin 與位置相反,由 settings.ts 鏡射) */
       .temp-range {
@@ -89,8 +90,8 @@
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        background: #2b2b33;
-        border: 2px solid #f0f0f5;
+        background: var(--bg-card);
+        border: 2px solid var(--text-1);
         cursor: pointer;
       }
 
@@ -101,7 +102,7 @@
         justify-content: space-between;
         align-items: baseline;
         gap: 6px;
-        color: #c9c9d2;
+        color: var(--text-2);
         margin-bottom: 3px;
         font-size: 12px;
         white-space: nowrap; /* 標題不因數值寬度換行 */
@@ -112,13 +113,13 @@
         position: relative;
         width: 100%;
         aspect-ratio: 1;
-        background: #26262c;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
         border-radius: 10px;
         cursor: crosshair;
         touch-action: none;
       }
-      .pad::before, .pad::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.07); }
+      .pad::before, .pad::after { content: ''; position: absolute; background: var(--border); }
       .pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
       .pad::after { top: 50%; left: 0; right: 0; height: 1px; }
       .pad.hx::after { background: rgba(255, 99, 99, 0.55); }
@@ -147,8 +148,8 @@
         height: 12px;
         margin: -6px 0 0 -6px;
         border-radius: 50%;
-        background: #6d64d8;
-        box-shadow: 0 0 6px rgba(109, 100, 216, 0.9);
+        background: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
         pointer-events: none;
       }
 
@@ -161,39 +162,39 @@
         gap: 8px;
         padding: 5px 8px;
         border-radius: 8px;
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--bg-hover);
         cursor: pointer;
       }
-      #wardrobe input, #idle-motions input { accent-color: #6d64d8; }
-      #wardrobe .empty, #idle-motions .empty { color: #6f6f7a; }
+      #wardrobe input, #idle-motions input { accent-color: var(--accent); }
+      #wardrobe .empty, #idle-motions .empty { color: var(--text-3); }
 
       button.wide {
         width: 100%;
         margin-top: 12px;
         padding: 7px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        border: 1px solid var(--border);
         border-radius: 8px;
-        background: rgba(255, 255, 255, 0.07);
+        background: var(--bg-card);
         color: inherit;
         font: inherit;
         cursor: pointer;
       }
-      button.wide:hover { background: rgba(255, 255, 255, 0.12); }
+      button.wide:hover { background: var(--bg-hover); }
 
       /* 工作設定 */
-      .project-note { margin: 0 0 12px; color: #a9a9b3; }
+      .project-note { margin: 0 0 12px; color: var(--text-2); }
       .workspace-card {
         padding: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--border);
         border-radius: 12px;
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--bg-card);
       }
-      .workspace-label { margin-bottom: 5px; color: #c9c9d2; font-size: 12px; }
-      .field { display: block; margin-bottom: 11px; color: #c9c9d2; }
+      .workspace-label { margin-bottom: 5px; color: var(--text-2); font-size: 12px; }
+      .field { display: block; margin-bottom: 11px; color: var(--text-2); }
       .field > span { display: block; margin-bottom: 4px; font-size: 12px; }
       .text-input { width: 100%; user-select: text; }
-      .toggle-field { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: #c9c9d2; }
-      .toggle-field input { accent-color: #6d64d8; }
+      .toggle-field { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--text-2); }
+      .toggle-field input { accent-color: var(--accent); }
       #workspace-path,
       #workspace-root {
         display: block;
@@ -201,15 +202,15 @@
         width: 100%;
         min-height: 52px;
         padding: 9px 10px;
-        color: #dedee8;
-        background: #151519;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--text-1);
+        background: var(--bg-inset);
+        border: 1px solid var(--border);
         border-radius: 8px;
         font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
         overflow-wrap: anywhere;
         user-select: text;
       }
-      #workspace-path.empty { color: #777783; }
+      #workspace-path.empty { color: var(--text-3); }
       #change-workspace[disabled],
       #change-workspace-root[disabled] { opacity: 0.55; cursor: wait; }
       #workspace-root { min-height: 0; margin-bottom: 8px; }

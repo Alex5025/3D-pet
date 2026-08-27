@@ -1,21 +1,23 @@
+@import './tokens.css';
+
 .pet-speech-bubble {
   --tail-left: 42px;
   --tail-top: 42px;
   position: fixed;
   z-index: 10;
   box-sizing: border-box;
-  /* 寬度隨內容伸縮，只受上限約束：1–4 隻醒著的寵物上限近半屏；5 隻以上改近三分之一，避免泡泡互相遮擋。
-     min-width 保住空泡泡輸入框的基本寬度（小螢幕時退讓給上限）。 */
+  /* 寬度隨內容伸縮,只受上限約束:1–4 隻醒著的寵物上限近半屏;5 隻以上改近三分之一,避免泡泡互相遮擋。
+     min-width 保住空泡泡輸入框的基本寬度(小螢幕時退讓給上限)。 */
   width: max-content;
   min-width: min(280px, var(--bubble-max-width, calc(50vw - 24px)));
   max-width: var(--bubble-max-width, calc(50vw - 24px));
   padding: 14px;
-  color: #2f2a38;
+  color: var(--text-1);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(111, 93, 128, 0.24);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 18px;
-  box-shadow: 0 10px 28px rgba(40, 27, 52, 0.2);
+  box-shadow: var(--shadow);
   /* 隱藏只用 visibility 不用 opacity:opacity:0 會蓋掉整棵子樹,
    * 未讀狀態膠囊(.bubble-activity)要能在收合後用 visibility:visible 突圍。 */
   visibility: hidden;
@@ -49,14 +51,14 @@
 
 .pet-speech-bubble::before {
   bottom: -12px;
-  border-top: 12px solid rgba(111, 93, 128, 0.24);
+  border-top: 12px solid var(--border);
   border-right: 11px solid transparent;
   border-left: 11px solid transparent;
 }
 
 .pet-speech-bubble::after {
   bottom: -10px;
-  border-top: 11px solid rgba(255, 255, 255, 0.96);
+  border-top: 11px solid var(--bg-card);
   border-right: 10px solid transparent;
   border-left: 10px solid transparent;
 }
@@ -69,14 +71,14 @@
   top: -12px;
   bottom: auto;
   border-top: 0;
-  border-bottom: 12px solid rgba(111, 93, 128, 0.24);
+  border-bottom: 12px solid var(--border);
 }
 
 .pet-speech-bubble.below::after {
   top: -10px;
   bottom: auto;
   border-top: 0;
-  border-bottom: 11px solid rgba(255, 255, 255, 0.96);
+  border-bottom: 11px solid var(--bg-card);
 }
 
 .pet-speech-bubble.left-of,
@@ -108,7 +110,7 @@
   border: 0;
   border-top: 11px solid transparent;
   border-bottom: 11px solid transparent;
-  border-left: 12px solid rgba(111, 93, 128, 0.24);
+  border-left: 12px solid var(--border);
 }
 
 .pet-speech-bubble.left-of::after {
@@ -116,14 +118,14 @@
   border: 0;
   border-top: 10px solid transparent;
   border-bottom: 10px solid transparent;
-  border-left: 11px solid rgba(255, 255, 255, 0.96);
+  border-left: 11px solid var(--bg-card);
 }
 
 .pet-speech-bubble.right-of::before {
   left: -12px;
   border: 0;
   border-top: 11px solid transparent;
-  border-right: 12px solid rgba(111, 93, 128, 0.24);
+  border-right: 12px solid var(--border);
   border-bottom: 11px solid transparent;
 }
 
@@ -131,7 +133,7 @@
   left: -10px;
   border: 0;
   border-top: 10px solid transparent;
-  border-right: 11px solid rgba(255, 255, 255, 0.96);
+  border-right: 11px solid var(--bg-card);
   border-bottom: 10px solid transparent;
 }
 
@@ -166,10 +168,10 @@
   width: 14px;
   height: 14px;
   padding: 0;
-  border: 2px solid rgba(255, 255, 255, 0.96);
+  border: 2px solid var(--bg-card);
   border-radius: 50%;
-  box-shadow: 0 1px 5px rgba(40, 27, 52, 0.28);
-  background: #d5cfdb;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
+  background: var(--border-strong);
   cursor: pointer;
   opacity: 0;
   transform: scale(0.72);
@@ -181,7 +183,7 @@
   width: 10px;
   height: 10px;
   margin: 0;
-  fill: #fff;
+  fill: var(--bg-card);
 }
 
 .pet-speech-bubble .bubble-pin-hotspot:hover .bubble-pin,
@@ -195,10 +197,10 @@
 }
 
 .pet-speech-bubble .bubble-pin.active {
-  background: #8060a0;
+  background: var(--accent);
 }
 
-/* 寬度把手：左右邊緣拖曳手動調寬、雙擊還原自動；hover 浮出短豎條提示。
+/* 寬度把手:左右邊緣拖曳手動調寬、雙擊還原自動;hover 浮出短豎條提示。
    上下各留 20px 避開角落的圖釘/狀態熱區。 */
 .pet-speech-bubble .bubble-resize {
   position: absolute;
@@ -220,7 +222,7 @@
   height: 30px;
   content: '';
   border-radius: 2px;
-  background: rgba(111, 93, 128, 0.45);
+  background: var(--border-strong);
   opacity: 0;
   transform: translate(-50%, -50%);
   transition: opacity 120ms ease;
@@ -239,14 +241,14 @@
   gap: 4px;
   max-width: 180px;
   padding: 3px 6px 3px 4px;
-  color: #5f5668;
+  color: var(--text-2);
   font-size: 10px;
   line-height: 1;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(111, 93, 128, 0.2);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 9px;
-  box-shadow: 0 2px 8px rgba(40, 27, 52, 0.18);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   opacity: 1;
   transition: opacity 160ms ease, transform 160ms ease, visibility 0s;
 }
@@ -276,11 +278,12 @@
   border-radius: 50%;
 }
 
-.pet-speech-bubble .bubble-activity.idle .bubble-activity-dot { background: #aaa2b1; }
-.pet-speech-bubble .bubble-activity.working .bubble-activity-dot { background: #6d8fff; }
-.pet-speech-bubble .bubble-activity.approval .bubble-activity-dot { background: #f0a43c; }
-.pet-speech-bubble .bubble-activity.done .bubble-activity-dot { background: #45b978; }
-.pet-speech-bubble .bubble-activity.error .bubble-activity-dot { background: #d95763; }
+/* 狀態色與中控面板對齊:working=綠、done=藍、approval=黃、error=紅 */
+.pet-speech-bubble .bubble-activity.idle .bubble-activity-dot { background: var(--text-3); }
+.pet-speech-bubble .bubble-activity.working .bubble-activity-dot { background: var(--ok); }
+.pet-speech-bubble .bubble-activity.approval .bubble-activity-dot { background: var(--warn); }
+.pet-speech-bubble .bubble-activity.done .bubble-activity-dot { background: var(--info); }
+.pet-speech-bubble .bubble-activity.error .bubble-activity-dot { background: var(--err); }
 
 .pet-speech-bubble .bubble-activity.working .bubble-activity-dot,
 .pet-speech-bubble .bubble-activity.approval .bubble-activity-dot {
@@ -307,12 +310,12 @@
   max-height: 108px; /* 約 5 行,超過轉捲動(autosize 以此封頂) */
   padding: 10px 12px;
   overflow-y: auto;
-  color: #2f2a38;
+  color: var(--text-1);
   font: inherit;
   font-size: 14px;
   line-height: 1.4;
-  background: rgba(248, 246, 251, 0.96);
-  border: 1px solid rgba(111, 93, 128, 0.28);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 11px;
   outline: none;
   resize: none;
@@ -322,17 +325,17 @@
 }
 
 .pet-speech-bubble textarea::placeholder {
-  color: #8d8496;
+  color: var(--text-3);
 }
 
 .pet-speech-bubble textarea:focus {
-  border-color: #9272b0;
-  box-shadow: 0 0 0 3px rgba(146, 114, 176, 0.18);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .pet-speech-bubble textarea:disabled {
-  color: #8d8496;
-  background: rgba(240, 238, 244, 0.9);
+  color: var(--text-3);
+  background: var(--bg-inset);
 }
 
 .pet-speech-bubble .bubble-images {
@@ -341,7 +344,7 @@
   justify-content: space-between;
   gap: 8px;
   margin: 0 2px 7px;
-  color: #6f5d80;
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -351,7 +354,7 @@
 
 .pet-speech-bubble .bubble-images button {
   padding: 2px 7px;
-  color: #806c91;
+  color: var(--text-2);
   font: inherit;
   background: transparent;
   border: 0;
@@ -359,18 +362,18 @@
 }
 
 /* 回覆區:內容只往下長、可捲動;預設收合 */
-/* 交辦列:這一輪送出的原話，釘在回覆上方（多寵同跑時用來認人）。
-   最多兩行，超出以 … 收尾，完整內容在 title。 */
+/* 交辦列:這一輪送出的原話,釘在回覆上方(多寵同跑時用來認人)。
+   最多兩行,超出以 … 收尾,完整內容在 title。 */
 .pet-speech-bubble .bubble-task {
   display: none;
   margin: 0 2px 6px;
   padding-left: 8px;
   overflow: hidden;
-  color: #6f6780;
+  color: var(--text-2);
   font-size: 11.5px;
   line-height: 1.45;
   overflow-wrap: anywhere;
-  border-left: 3px solid rgba(111, 93, 128, 0.3);
+  border-left: 3px solid var(--border-strong);
 }
 
 .pet-speech-bubble .bubble-task.open {
@@ -380,7 +383,7 @@
 }
 
 .pet-speech-bubble .bubble-task-label {
-  color: #8d8496;
+  color: var(--text-3);
   font-weight: 650;
 }
 
@@ -395,8 +398,8 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
-  background: rgba(248, 246, 251, 0.96);
-  border: 1px solid rgba(111, 93, 128, 0.2);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 11px;
 }
 
@@ -405,7 +408,7 @@
 }
 
 .pet-speech-bubble .bubble-reply .reply-error {
-  color: #c03b45;
+  color: var(--err);
 }
 
 /* 狀態列 + 停止鈕(running 中才顯示) */
@@ -424,7 +427,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: #8d8496;
+  color: var(--text-3);
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -433,17 +436,17 @@
 .pet-speech-bubble .bubble-stop {
   flex: none;
   padding: 3px 10px;
-  color: #6f5d80;
+  color: var(--text-2);
   font: inherit;
   font-size: 12px;
-  background: rgba(146, 114, 176, 0.12);
-  border: 1px solid rgba(111, 93, 128, 0.28);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
   border-radius: 9px;
   cursor: pointer;
 }
 
 .pet-speech-bubble .bubble-stop:hover {
-  background: rgba(146, 114, 176, 0.22);
+  background: var(--bg-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -462,8 +465,8 @@
   display: none;
   margin: 0 2px 8px;
   padding: 9px 11px;
-  background: rgba(255, 244, 214, 0.95);
-  border: 1px solid rgba(198, 149, 55, 0.45);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
   border-radius: 11px;
 }
 
@@ -481,7 +484,7 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #5d4a1e;
+  color: var(--warn);
 }
 
 .pet-speech-bubble .approval-buttons {
@@ -498,9 +501,9 @@
   padding: 7px 9px;
   overflow-y: auto;
   resize: vertical;
-  color: #4f4120;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(198, 149, 55, 0.4);
+  color: var(--text-1);
+  background: var(--bg-card);
+  border: 1px solid var(--warn);
   border-radius: 8px;
   font: inherit;
   font-size: 12px;
@@ -517,21 +520,21 @@
 }
 
 .pet-speech-bubble .approval-allow {
-  color: #fff;
-  background: #4c9e62;
-  border: 1px solid #3f8452;
+  color: var(--on-accent);
+  background: var(--ok);
+  border: 1px solid var(--ok);
 }
 
 .pet-speech-bubble .approval-deny {
-  color: #6f5d80;
-  background: rgba(146, 114, 176, 0.12);
-  border: 1px solid rgba(111, 93, 128, 0.28);
+  color: var(--text-2);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
 }
 
-/* 工作目錄：徽章列的第一顆 chip，只顯示最後一層資料夾，完整路徑放在 title。 */
+/* 工作目錄:徽章列的第一顆 chip,只顯示最後一層資料夾,完整路徑放在 title。 */
 .pet-speech-bubble .bubble-workspace {
   max-width: 150px;
-  color: #70677b;
+  color: var(--text-2);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -540,12 +543,12 @@
 .pet-speech-bubble .bubble-agent-info {
   display: none;
   margin: -4px 2px 8px;
-  color: #8d8496;
+  color: var(--text-3);
   font-size: 11px;
   letter-spacing: 0.02em;
 }
 
-/* 徽章一律靠左；chip 從 4 顆變 5 顆，窄泡泡要能換行不被裁掉 */
+/* 徽章一律靠左;chip 從 4 顆變 5 顆,窄泡泡要能換行不被裁掉 */
 .pet-speech-bubble .bubble-agent-info.open {
   display: flex;
   align-items: center;
@@ -555,7 +558,7 @@
   justify-content: flex-start;
 }
 
-/* 有可點 chip 時 agentInfoText 會被清空——空的 span 不該再吃掉一份 gap，
+/* 有可點 chip 時 agentInfoText 會被清空——空的 span 不該再吃掉一份 gap,
    否則 chip 就貼不齊左緣 */
 .pet-speech-bubble .bubble-agent-info > span:empty { display: none; }
 
@@ -564,18 +567,18 @@
   flex: none;
   margin-left: auto;
   padding: 2px 8px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.04);
-  color: #6f6780;
+  background: var(--bg-hover);
+  color: var(--text-2);
   font: inherit;
   font-size: 10.5px;
   cursor: pointer;
 }
 
 .pet-speech-bubble .bubble-new-session:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #4b4458;
+  background: var(--bg-hover);
+  color: var(--text-1);
 }
 
 /* 排隊中的訊息清單(輸入框上方) */
@@ -585,7 +588,7 @@
   max-height: 110px;
   overflow-y: auto;
   font-size: 11px;
-  color: #5d5470;
+  color: var(--text-2);
 }
 
 .pet-speech-bubble .bubble-queue.open {
@@ -599,8 +602,8 @@
   gap: 6px;
   padding: 3px 6px;
   border-radius: 6px;
-  border-left: 2px solid #b9aed6;
-  background: rgba(128, 96, 160, 0.07);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
   margin-top: 3px;
 }
 
@@ -616,7 +619,7 @@
   flex: none;
   border: none;
   background: none;
-  color: #a49bb0;
+  color: var(--text-3);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -624,7 +627,7 @@
 }
 
 .pet-speech-bubble .queue-remove:hover {
-  color: #d3455b;
+  color: var(--err);
 }
 
 /* 參考檔案清單(泡泡最下方) */
@@ -634,7 +637,7 @@
   max-height: 90px;
   overflow-y: auto;
   font-size: 11px;
-  color: #6f6780;
+  color: var(--text-2);
 }
 
 .pet-speech-bubble .bubble-refs.open {
@@ -648,7 +651,7 @@
   gap: 6px;
   padding: 3px 6px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--bg-hover);
   margin-top: 3px;
 }
 
@@ -664,7 +667,7 @@
   flex: none;
   border: none;
   background: none;
-  color: #a49bb0;
+  color: var(--text-3);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -672,7 +675,7 @@
 }
 
 .pet-speech-bubble .ref-remove:hover {
-  color: #d3455b;
+  color: var(--err);
 }
 
 /* Markdown 渲染(回覆區) */
@@ -701,15 +704,16 @@
   padding: 1px 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11.5px;
-  background: rgba(111, 93, 128, 0.12);
+  background: var(--accent-soft);
   border-radius: 4px;
 }
 
+/* 程式碼區塊兩主題皆維持深底(深色系 IDE 慣例),不跟 token 走 */
 .pet-speech-bubble .reply-md pre {
   margin: 6px 0;
   padding: 8px 10px;
   overflow-x: auto;
-  background: rgba(47, 42, 56, 0.94);
+  background: rgba(30, 27, 38, 0.96);
   border-radius: 8px;
 }
 
@@ -723,12 +727,12 @@
 .pet-speech-bubble .reply-md blockquote {
   margin: 6px 0;
   padding: 2px 10px;
-  color: #6f6879;
-  border-left: 3px solid rgba(146, 114, 176, 0.4);
+  color: var(--text-2);
+  border-left: 3px solid var(--border-strong);
 }
 
 .pet-speech-bubble .reply-md a {
-  color: #6d64d8;
+  color: var(--accent);
   text-decoration: underline;
 }
 
@@ -741,13 +745,13 @@
 .pet-speech-bubble .reply-md th,
 .pet-speech-bubble .reply-md td {
   padding: 3px 8px;
-  border: 1px solid rgba(111, 93, 128, 0.25);
+  border: 1px solid var(--border);
 }
 
 .pet-speech-bubble .reply-md hr {
   margin: 8px 0;
   border: 0;
-  border-top: 1px solid rgba(111, 93, 128, 0.2);
+  border-top: 1px solid var(--border);
 }
 
 /* 徽章列的可調控制項:模型 / 力度 / 運行模式。
@@ -767,7 +771,7 @@
   max-width: 120px;
   padding: 1px 5px;
   overflow: hidden;
-  color: #8d8496;
+  color: var(--text-3);
   font: inherit;
   font-size: 11px;
   white-space: nowrap;
@@ -779,14 +783,14 @@
 }
 
 .pet-speech-bubble .bubble-agent-chip:hover {
-  color: #4b4458;
-  background: rgba(111, 93, 128, 0.12);
+  color: var(--text-1);
+  background: var(--bg-hover);
 }
 
 /* 運行模式用顏色暗示風險程度(唯讀最安全 → 全自動最放權) */
-.pet-speech-bubble .bubble-agent-chip.perm-plan { color: #5b7fb5; }
-.pet-speech-bubble .bubble-agent-chip.perm-ask { color: #b5883f; }
-.pet-speech-bubble .bubble-agent-chip.perm-auto { color: #c0524f; }
+.pet-speech-bubble .bubble-agent-chip.perm-plan { color: var(--info); }
+.pet-speech-bubble .bubble-agent-chip.perm-ask { color: var(--warn); }
+.pet-speech-bubble .bubble-agent-chip.perm-auto { color: var(--err); }
 
 /* 自繪選單:疊層視窗不可聚焦,原生 select 的下拉不可靠(見 CLAUDE.md 平台實證) */
 .pet-speech-bubble .bubble-agent-menu {
@@ -796,17 +800,17 @@
   min-width: 120px;
   padding: 4px;
   overflow-y: auto;
-  background: rgba(255, 255, 255, 0.99);
-  border: 1px solid rgba(111, 93, 128, 0.28);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 6px 20px rgba(40, 27, 52, 0.22);
+  box-shadow: var(--shadow);
 }
 
 .pet-speech-bubble .bubble-agent-option {
   display: block;
   width: 100%;
   padding: 4px 8px;
-  color: #2f2a38;
+  color: var(--text-1);
   font: inherit;
   font-size: 12px;
   text-align: left;
@@ -818,10 +822,10 @@
 }
 
 .pet-speech-bubble .bubble-agent-option:hover {
-  background: rgba(111, 93, 128, 0.12);
+  background: var(--bg-hover);
 }
 
 .pet-speech-bubble .bubble-agent-option.active {
-  color: #6d64d8;
+  color: var(--accent);
   font-weight: 650;
 }

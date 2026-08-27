@@ -1,0 +1,63 @@
+/* ════════════════════════════════════════════════════════════
+   設計語言 token(定案見 docs/design/redesign-v1.html 與 DESIGN-TODO.md)
+   三個介面(泡泡/設定/中控)共用這一份;只放變數,不放元件樣式。
+   淺色為預設值;深色經 prefers-color-scheme 跟隨系統,
+   data-theme 覆寫僅供 bubbletest 等自驗頁強制切換用,app 內不設定。
+   注意:疊層視窗(index.html)背景必須保持透明,此檔不得畫任何背景。
+   ════════════════════════════════════════════════════════════ */
+:root {
+  color-scheme: light;
+  /* 色票 — 淺色 */
+  --bg-app: #f4f2f8;
+  --bg-card: #ffffff;
+  --bg-inset: #edeaf3;
+  --bg-hover: rgba(47, 42, 56, 0.06);
+  --border: rgba(47, 42, 56, 0.14);
+  --border-strong: rgba(47, 42, 56, 0.28);
+  --text-1: #2f2a38;
+  --text-2: #6f6780;
+  --text-3: #9a92a6;
+  --accent: #6d5bd0;
+  --accent-hover: #5f4dc4;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(109, 91, 208, 0.12);
+  --ok: #2f9e63;   --ok-soft: rgba(69, 185, 120, 0.16);
+  --warn: #b47714; --warn-soft: rgba(240, 164, 60, 0.18);
+  --err: #c74854;  --err-soft: rgba(217, 87, 99, 0.14);
+  --info: #4a6fd8; --info-soft: rgba(109, 143, 255, 0.16);
+  --shadow: 0 10px 28px rgba(40, 30, 60, 0.18);
+  /* 尺寸 — 兩主題共用 */
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg-app: #17171c; --bg-card: #202027; --bg-inset: #141419;
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.12); --border-strong: rgba(255, 255, 255, 0.26);
+    --text-1: #efeff4; --text-2: #aaaab5; --text-3: #7c7c88;
+    --accent: #7b6ce0; --accent-hover: #8a7ce8; --on-accent: #ffffff;
+    --accent-soft: rgba(123, 108, 224, 0.22);
+    --ok: #58c98a;   --ok-soft: rgba(88, 201, 138, 0.18);
+    --warn: #f0c04a; --warn-soft: rgba(240, 192, 74, 0.16);
+    --err: #ff8c96;  --err-soft: rgba(220, 90, 100, 0.18);
+    --info: #6d8fff; --info-soft: rgba(109, 143, 255, 0.18);
+    --shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-app: #17171c; --bg-card: #202027; --bg-inset: #141419;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.12); --border-strong: rgba(255, 255, 255, 0.26);
+  --text-1: #efeff4; --text-2: #aaaab5; --text-3: #7c7c88;
+  --accent: #7b6ce0; --accent-hover: #8a7ce8; --on-accent: #ffffff;
+  --accent-soft: rgba(123, 108, 224, 0.22);
+  --ok: #58c98a;   --ok-soft: rgba(88, 201, 138, 0.18);
+  --warn: #f0c04a; --warn-soft: rgba(240, 192, 74, 0.16);
+  --err: #ff8c96;  --err-soft: rgba(220, 90, 100, 0.18);
+  --info: #6d8fff; --info-soft: rgba(109, 143, 255, 0.18);
+  --shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
