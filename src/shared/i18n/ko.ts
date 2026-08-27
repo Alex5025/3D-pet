@@ -83,6 +83,7 @@ export const ko = {
   'overlay.modelDefault': '기본 모델',
 
   'menu.back': '‹ 뒤로',
+  'menu.more': '더 보기',
   'bubble.aria': '캐릭터 대화',
   'bubble.promptLabel': '{name}: 무슨 말을 하고 싶나요?',
   'bubble.pinAriaOn': '말풍선 고정 해제',

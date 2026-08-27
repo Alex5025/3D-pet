@@ -37,10 +37,25 @@ setLocale('zh-Hant');
 // stub 就緒後才載入選單模組(模組本身不碰 window.pet,保險起見仍後載)
 const { showPetMenu, closePetMenu, isPetMenuOpen } = await import('./petMenu');
 
+/** 佔位大頭照:32px 淡紫圓底 canvas,不依賴外部資源。 */
+function placeholderAvatar(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 32;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#b7a8e8';
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = '#fff';
+  ctx.font = '20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🦊', 16, 18);
+  return canvas.toDataURL('image/png');
+}
+
 declare global {
   interface Window {
     __menu: {
-      show: (x: number, y: number, petId?: string) => Promise<void>;
+      show: (x: number, y: number, petId?: string, avatar?: boolean) => Promise<void>;
       close: () => void;
       isOpen: () => boolean;
       actions: () => unknown[][];
@@ -49,10 +64,11 @@ declare global {
 }
 
 window.__menu = {
-  show: (x, y, petId = 'p1') => showPetMenu(x, y, petId),
+  show: (x, y, petId = 'p1', avatar = true) =>
+    showPetMenu(x, y, petId, avatar ? { avatar: placeholderAvatar() } : {}),
   close: closePetMenu,
   isOpen: isPetMenuOpen,
   actions: () => actions,
 };
 
-void showPetMenu(80, 80, 'p1');
+void showPetMenu(80, 80, 'p1', { avatar: placeholderAvatar() });

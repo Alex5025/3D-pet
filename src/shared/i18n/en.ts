@@ -83,6 +83,7 @@ export const en = {
   'overlay.modelDefault': 'default model',
 
   'menu.back': '‹ Back',
+  'menu.more': 'More',
   'bubble.aria': 'Character chat',
   'bubble.promptLabel': '{name}: What would you like to say?',
   'bubble.pinAriaOn': 'Stop keeping the chat bubble open',

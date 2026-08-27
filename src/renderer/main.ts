@@ -799,7 +799,16 @@ addEventListener('mouseup', (event) => {
     const moved = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 4;
     if (runtime) {
       if (moved) scheduleSave(runtime);
-      else void showPetMenu(event.clientX, event.clientY, runtime.profile.id);
+      else {
+        // 標頭大頭照:右鍵當下即時截一張;截不到(模型載入中等)退回狀態點
+        let avatar: string | undefined;
+        try {
+          avatar = runtime.viewer.snapshot(false);
+        } catch (error) {
+          console.log('[overlay] menu avatar snapshot failed', error);
+        }
+        void showPetMenu(event.clientX, event.clientY, runtime.profile.id, { avatar });
+      }
     }
   }
   interactionRuntime = null;

@@ -83,6 +83,7 @@ export const ja = {
   'overlay.modelDefault': 'デフォルトモデル',
 
   'menu.back': '‹ 戻る',
+  'menu.more': 'その他',
   'bubble.aria': 'キャラクターチャット',
   'bubble.promptLabel': '{name}:何か話しかけますか?',
   'bubble.pinAriaOn': '吹き出しの固定表示を解除',
