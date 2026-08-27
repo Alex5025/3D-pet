@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D-pet 介面重設計 v1</title>
+<style>
+/* ════════════════════════════════════════════════
+   設計語言 token(草案 v1)
+   淺色為預設;深色經 prefers-color-scheme 或 data-theme 覆寫
+   ════════════════════════════════════════════════ */
+:root {
+  color-scheme: light dark;
+  /* 色票 — 淺色 */
+  --bg-app: #f4f2f8;
+  --bg-card: #ffffff;
+  --bg-inset: #edeaf3;
+  --bg-hover: rgba(47, 42, 56, 0.06);
+  --border: rgba(47, 42, 56, 0.14);
+  --border-strong: rgba(47, 42, 56, 0.28);
+  --text-1: #2f2a38;
+  --text-2: #6f6780;
+  --text-3: #9a92a6;
+  --accent: #6d5bd0;
+  --accent-hover: #5f4dc4;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(109, 91, 208, 0.12);
+  --ok: #2f9e63;   --ok-soft: rgba(69, 185, 120, 0.16);
+  --warn: #b47714; --warn-soft: rgba(240, 164, 60, 0.18);
+  --err: #c74854;  --err-soft: rgba(217, 87, 99, 0.14);
+  --info: #4a6fd8; --info-soft: rgba(109, 143, 255, 0.16);
+  --shadow: 0 10px 30px rgba(40, 30, 60, 0.16);
+  /* 尺寸 — 兩主題共用 */
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-app: #17171c; --bg-card: #202027; --bg-inset: #141419;
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.12); --border-strong: rgba(255, 255, 255, 0.26);
+    --text-1: #efeff4; --text-2: #aaaab5; --text-3: #7c7c88;
+    --accent: #7b6ce0; --accent-hover: #8a7ce8; --on-accent: #ffffff;
+    --accent-soft: rgba(123, 108, 224, 0.22);
+    --ok: #58c98a;   --ok-soft: rgba(88, 201, 138, 0.18);
+    --warn: #f0c04a; --warn-soft: rgba(240, 192, 74, 0.16);
+    --err: #ff8c96;  --err-soft: rgba(220, 90, 100, 0.18);
+    --info: #6d8fff; --info-soft: rgba(109, 143, 255, 0.18);
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  --bg-app: #17171c; --bg-card: #202027; --bg-inset: #141419;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.12); --border-strong: rgba(255, 255, 255, 0.26);
+  --text-1: #efeff4; --text-2: #aaaab5; --text-3: #7c7c88;
+  --accent: #7b6ce0; --accent-hover: #8a7ce8; --on-accent: #ffffff;
+  --accent-soft: rgba(123, 108, 224, 0.22);
+  --ok: #58c98a;   --ok-soft: rgba(88, 201, 138, 0.18);
+  --warn: #f0c04a; --warn-soft: rgba(240, 192, 74, 0.16);
+  --err: #ff8c96;  --err-soft: rgba(220, 90, 100, 0.18);
+  --info: #6d8fff; --info-soft: rgba(109, 143, 255, 0.18);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ── 基礎 ── */
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg-app); color: var(--text-1);
+  font: 400 var(--fs-md)/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+}
+.page { max-width: 1060px; margin: 0 auto; padding: var(--s-6); }
+.page-head { display: flex; align-items: center; gap: var(--s-3); position: sticky; top: 0; z-index: 10;
+  background: var(--bg-app); padding: var(--s-4) 0; border-bottom: 1px solid var(--border); }
+.page-head h1 { margin: 0; font-size: var(--fs-xl); flex: 1; }
+section { margin-top: var(--s-6); }
+section > h2 { font-size: var(--fs-lg); margin: 0 0 var(--s-2); }
+section > .desc { color: var(--text-2); font-size: var(--fs-sm); margin: 0 0 var(--s-4); }
+
+/* ── 共用元件(即為新設計語言的元件規範)── */
+.btn {
+  min-height: 30px; padding: 0 var(--s-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); background: var(--bg-card); color: var(--text-1);
+  font: inherit; font-size: var(--fs-md); cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.danger { color: var(--err); border-color: var(--err); background: transparent; }
+.btn.danger:hover { background: var(--err-soft); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--text-2); }
+.btn.ghost:hover { background: var(--bg-hover); color: var(--text-1); }
+.btn.sm { min-height: 24px; padding: 0 var(--s-2); font-size: var(--fs-xs); border-radius: var(--r-sm); }
+.input, .select, textarea.input {
+  min-height: 30px; padding: 4px var(--s-2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); background: var(--bg-inset); color: var(--text-1);
+  font: inherit; font-size: var(--fs-md); outline: none;
+}
+.input:focus, .select:focus, textarea.input:focus { border-color: var(--accent); }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-4); }
+.badge { display: inline-block; padding: 1px var(--s-2); border-radius: var(--r-full); font-size: var(--fs-xs); }
+.badge.ok { color: var(--ok); background: var(--ok-soft); }
+.badge.warn { color: var(--warn); background: var(--warn-soft); }
+.badge.err { color: var(--err); background: var(--err-soft); }
+.badge.info { color: var(--info); background: var(--info-soft); }
+.badge.neutral { color: var(--text-2); background: var(--bg-hover); }
+.seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--bg-inset); border-radius: var(--r-md); }
+.seg button {
+  min-height: 26px; padding: 0 var(--s-3); border: 0; border-radius: calc(var(--r-md) - 2px);
+  background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-md); cursor: pointer;
+}
+.seg button:hover { color: var(--text-1); }
+.seg button.active { background: var(--bg-card); color: var(--text-1); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.idle { background: var(--text-3); }
+.dot.working { background: var(--ok); box-shadow: 0 0 6px var(--ok-soft); }
+.dot.approval { background: var(--warn); box-shadow: 0 0 6px var(--warn-soft); }
+.dot.resting { background: var(--border-strong); }
+.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 1px var(--s-2); border-radius: var(--r-full); background: var(--bg-inset);
+  color: var(--text-2); font-size: var(--fs-xs);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 規範頁展示用 ── */
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-3); }
+.swatch { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--bg-card); }
+.swatch .c { height: 44px; }
+.swatch .m { padding: 6px var(--s-2); font-size: var(--fs-xs); color: var(--text-2); }
+.swatch .m b { display: block; color: var(--text-1); font-weight: 600; }
+.spec-row { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; margin-bottom: var(--s-3); }
+.radius-demo { width: 72px; height: 44px; background: var(--accent-soft); border: 1px solid var(--accent); }
+.space-demo { background: var(--accent-soft); height: 20px; }
+.type-demo div { margin-bottom: 2px; }
+
+/* ── 模擬稿外框 ── */
+.frame { border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow);
+  background: var(--bg-app); overflow: hidden; }
+.notes { margin: var(--s-3) 0 0; padding-left: 1.4em; color: var(--text-2); font-size: var(--fs-sm); }
+.notes b { color: var(--text-1); }
+
+/* ── 設定面板模擬 ── */
+.mock-settings { width: 372px; padding: var(--s-3) var(--s-4) var(--s-4); }
+.mock-settings .toolbar { display: flex; gap: var(--s-2); margin-bottom: var(--s-3); }
+.mock-settings .toolbar .select { flex: 1; }
+.mock-settings .icon-btn { width: 32px; font-size: 15px; font-weight: 600; }
+.mock-settings .seg { display: flex; width: 100%; margin-bottom: var(--s-3); }
+.mock-settings .seg button { flex: 1; }
+.sec-head { display: flex; align-items: baseline; gap: var(--s-2); margin: var(--s-4) 0 var(--s-2); }
+.sec-head h4 { margin: 0; font-size: var(--fs-md); font-weight: 600; flex: 1; }
+.sec-head .btn { color: var(--text-3); }
+.slider-row { margin-bottom: var(--s-2); }
+.slider-row label { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1px;
+  color: var(--text-2); font-size: var(--fs-sm); }
+.slider-row .val { font-variant-numeric: tabular-nums; color: var(--accent); font-size: var(--fs-sm); }
+input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.temp-range { height: 12px; border-radius: var(--r-sm); -webkit-appearance: none; appearance: none;
+  background: linear-gradient(90deg, #9dc0ff 0%, #cfe3ff 25%, #ffffff 50%, #ffd6a5 75%, #ff9a3c 100%); }
+.temp-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--bg-card); border: 2px solid var(--text-1); cursor: pointer; }
+.pads { display: flex; gap: var(--s-3); }
+.pad-box { flex: 1; }
+.pad-box .cap { display: flex; justify-content: space-between; color: var(--text-2); font-size: var(--fs-xs); margin-bottom: 3px; }
+.pad { position: relative; aspect-ratio: 1; background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--r-md); cursor: crosshair; }
+.pad::before, .pad::after { content: ''; position: absolute; background: var(--border); }
+.pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+.pad::after { top: 50%; left: 0; right: 0; height: 1px; }
+.pad .hint { position: absolute; font-size: 10px; color: var(--text-3); }
+.pad .hint.t { top: 4px; left: 50%; transform: translateX(-50%); }
+.pad .hint.b { bottom: 4px; left: 50%; transform: translateX(-50%); }
+.pad .hint.l { left: 5px; top: 50%; transform: translateY(-50%); }
+.pad .hint.r { right: 5px; top: 50%; transform: translateY(-50%); }
+.pad .figure { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-size: 30px; opacity: .85; pointer-events: none; }
+.pad .knob { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ── 中控面板模擬 ── */
+.mock-control { padding: var(--s-4) var(--s-5) var(--s-5); }
+.mock-control .topbar { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-3); }
+.mock-control .topbar h3 { margin: 0; font-size: var(--fs-lg); flex: 1; }
+.mock-control h5 { margin: var(--s-4) 0 var(--s-2); font-size: var(--fs-md); color: var(--text-2); font-weight: 600; }
+.mock-control h5 .count { color: var(--text-3); font-weight: 400; }
+.pet-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--s-3); }
+.pet-card { display: flex; flex-direction: column; gap: var(--s-2); }
+.pet-card .head { display: flex; align-items: center; gap: var(--s-2); }
+.pet-card .name { font-weight: 600; flex: none; }
+.pet-card .head .chip { flex: 1; min-width: 0; justify-content: flex-start; }
+.pet-card .status-line { display: flex; align-items: center; gap: var(--s-2); color: var(--text-2); font-size: var(--fs-sm); }
+.pet-card .input-line { display: flex; gap: var(--s-2); }
+.pet-card .input-line .input { flex: 1; }
+.approval-banner { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--warn); border-radius: var(--r-md); background: var(--warn-soft); }
+.approval-banner .desc { flex: 1; color: var(--warn); font-size: var(--fs-sm);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resting-list { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.resting-item { display: inline-flex; align-items: center; gap: var(--s-2); padding: 5px var(--s-3);
+  border: 1px solid var(--border); border-radius: var(--r-full); background: var(--bg-card);
+  color: var(--text-2); font-size: var(--fs-sm); }
+.task-table { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--bg-card); }
+.task-row { display: grid; grid-template-columns: 80px minmax(160px, 1fr) 120px 120px 70px 32px;
+  gap: var(--s-2); align-items: center; padding: 7px var(--s-3); border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.task-row:first-child { border-top: 0; }
+.task-row.header { color: var(--text-3); font-size: var(--fs-xs); background: var(--bg-inset); }
+.task-row.failed { box-shadow: inset 3px 0 0 var(--err); }
+.task-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-row .time { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.danger-zone { border: 1px solid var(--err); border-radius: var(--r-lg); overflow: hidden; }
+.danger-zone .dz-head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-4);
+  background: var(--err-soft); color: var(--err); font-size: var(--fs-sm); font-weight: 600; }
+.danger-zone .dz-body { padding: var(--s-3) var(--s-4); color: var(--text-2); font-size: var(--fs-sm); }
+
+/* ── 泡泡模擬 ── */
+.desktop-sim { position: relative; height: 460px; border-radius: var(--r-lg); overflow: hidden;
+  background: linear-gradient(135deg, #7f95c9 0%, #a58bbd 55%, #d09a9a 100%); }
+.desktop-sim .pet-placeholder { position: absolute; right: 56px; bottom: 0; font-size: 120px; line-height: 1;
+  filter: drop-shadow(0 6px 12px rgba(0,0,0,.3)); }
+.bubble { position: absolute; right: 190px; bottom: 40px; width: 340px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow); padding: var(--s-3) var(--s-4); }
+.bubble .grip { position: absolute; top: 50%; transform: translateY(-50%); width: 4px; height: 40px;
+  border-radius: var(--r-full); background: var(--border-strong); cursor: ew-resize; }
+.bubble .grip.l { left: 3px; } .bubble .grip.r { right: 3px; }
+.bubble .head { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-2); }
+.bubble .head .name { font-weight: 650; font-size: var(--fs-md); }
+.bubble .head .capsule { display: inline-flex; align-items: center; gap: 5px; padding: 1px var(--s-2);
+  border-radius: var(--r-full); background: var(--bg-inset); color: var(--text-2); font-size: var(--fs-xs); }
+.bubble .head .spacer { flex: 1; }
+.bubble .tool { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: var(--r-sm); }
+.bubble .tool:hover { background: var(--bg-hover); color: var(--text-1); }
+.bubble .tool.pinned { color: var(--accent); }
+.bubble .reply { max-height: 150px; overflow-y: auto; color: var(--text-1); font-size: var(--fs-md);
+  line-height: 1.65; padding-bottom: var(--s-2); }
+.bubble .sect { border-top: 1px solid var(--border); padding: var(--s-2) 0; }
+.bubble .sect .sect-head { display: flex; align-items: center; gap: var(--s-2); color: var(--text-3);
+  font-size: var(--fs-xs); margin-bottom: 4px; }
+.bubble .queue-item { display: flex; align-items: center; gap: var(--s-2); padding: 3px 0;
+  color: var(--text-2); font-size: var(--fs-sm); }
+.bubble .queue-item .no { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.bubble .queue-item .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bubble .attach-chips { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+.bubble .input-row { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
+.bubble .input-row textarea { flex: 1; resize: none; height: 34px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <h1>3D-pet 介面重設計 v1</h1>
+    <div class="seg" id="theme-seg">
+      <button data-t="" class="active">跟隨系統</button>
+      <button data-t="light">淺色</button>
+      <button data-t="dark">深色</button>
+    </div>
+  </header>
+
+  <!-- ═══════════ 1. 設計語言規範 ═══════════ -->
+  <section>
+    <h2>1・設計語言規範</h2>
+    <p class="desc">單一語意色票,深淺兩套值(此頁右上角可即時切換)。所有介面共用同一組 CSS 變數;泡泡從淺色專屬改為跟隨主題。</p>
+    <div class="swatches">
+      <div class="swatch"><div class="c" style="background:var(--bg-app)"></div><div class="m"><b>--bg-app</b>視窗底</div></div>
+      <div class="swatch"><div class="c" style="background:var(--bg-card)"></div><div class="m"><b>--bg-card</b>卡片</div></div>
+      <div class="swatch"><div class="c" style="background:var(--bg-inset)"></div><div class="m"><b>--bg-inset</b>輸入框/內凹區</div></div>
+      <div class="swatch"><div class="c" style="background:var(--accent)"></div><div class="m"><b>--accent</b>主色(薰衣草紫系)</div></div>
+      <div class="swatch"><div class="c" style="background:var(--ok)"></div><div class="m"><b>--ok</b>工作中/成功</div></div>
+      <div class="swatch"><div class="c" style="background:var(--warn)"></div><div class="m"><b>--warn</b>等審批/注意</div></div>
+      <div class="swatch"><div class="c" style="background:var(--err)"></div><div class="m"><b>--err</b>失敗/危險</div></div>
+      <div class="swatch"><div class="c" style="background:var(--info)"></div><div class="m"><b>--info</b>資訊/連結</div></div>
+    </div>
+
+    <div class="spec-row" style="margin-top:var(--s-4)">
+      <div class="type-demo card" style="flex:1;min-width:240px">
+        <div style="font-size:var(--fs-xl);font-weight:600">18px 視窗標題</div>
+        <div style="font-size:var(--fs-lg);font-weight:600">15px 區塊標題</div>
+        <div style="font-size:var(--fs-md)">13px 內文/控制項</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-2)">12px 次要說明</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-3)">11px 標籤/徽章</div>
+      </div>
+      <div class="card" style="flex:1;min-width:240px">
+        <div class="spec-row">
+          <div><div class="radius-demo" style="border-radius:var(--r-sm)"></div><small style="color:var(--text-3)">r-sm 6 按鈕/輸入</small></div>
+          <div><div class="radius-demo" style="border-radius:var(--r-md)"></div><small style="color:var(--text-3)">r-md 10 內卡片</small></div>
+          <div><div class="radius-demo" style="border-radius:var(--r-lg)"></div><small style="color:var(--text-3)">r-lg 14 外卡片/泡泡</small></div>
+        </div>
+        <div class="spec-row" style="margin:0">
+          <div class="space-demo" style="width:4px"></div><div class="space-demo" style="width:8px"></div>
+          <div class="space-demo" style="width:12px"></div><div class="space-demo" style="width:16px"></div>
+          <div class="space-demo" style="width:20px"></div><div class="space-demo" style="width:24px"></div>
+          <small style="color:var(--text-3)">間距 4 的倍數:4/8/12/16/20/24</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:var(--s-3)">
+      <div class="spec-row">
+        <button class="btn">一般按鈕</button>
+        <button class="btn primary">主要動作</button>
+        <button class="btn danger">危險動作</button>
+        <button class="btn ghost">Ghost</button>
+        <button class="btn" disabled>停用</button>
+        <input class="input" placeholder="輸入框" style="width:130px" />
+        <select class="select"><option>下拉選單</option></select>
+      </div>
+      <div class="spec-row" style="margin:0">
+        <span class="badge ok">執行中</span>
+        <span class="badge warn">等待審批</span>
+        <span class="badge err">失敗</span>
+        <span class="badge info">已完成</span>
+        <span class="badge neutral">排隊中</span>
+        <span class="dot working"></span><span class="dot approval"></span><span class="dot idle"></span><span class="dot resting"></span>
+        <span class="chip">📁 ~/project/3D-pet</span>
+        <div class="seg"><button class="active">分頁一</button><button>分頁二</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 2. 設定面板 ═══════════ -->
+  <section>
+    <h2>2・設定面板(顯示「光影」分頁)</h2>
+    <div class="frame mock-settings">
+      <div class="toolbar">
+        <select class="select"><option>🦊 小狐狸 — 工作中</option></select>
+        <button class="btn icon-btn">＋</button>
+        <button class="btn icon-btn">−</button>
+      </div>
+      <div class="seg">
+        <button class="active">光影</button><button>角色</button><button>動作</button><button>工作</button>
+      </div>
+
+      <div class="sec-head"><h4>光源</h4><button class="btn ghost sm">還原預設</button></div>
+      <div class="seg" style="display:flex;margin-bottom:var(--s-2)">
+        <button class="active" style="flex:1">☀️ 平行光</button><button style="flex:1">💡 點光源</button>
+      </div>
+      <div class="slider-row">
+        <label><span>環境光</span><span class="val">1.26</span></label>
+        <input type="range" min="0" max="100" value="40" />
+      </div>
+      <div class="slider-row">
+        <label><span>方向光</span><span class="val">2.51</span></label>
+        <input type="range" min="0" max="100" value="55" />
+      </div>
+      <div class="slider-row">
+        <label><span>陰影濃度</span><span class="val">0.35</span></label>
+        <input type="range" min="0" max="100" value="35" />
+      </div>
+      <div class="slider-row">
+        <label><span>色溫</span><span class="val">5600K</span></label>
+        <input type="range" class="temp-range" min="0" max="100" value="50" />
+      </div>
+
+      <div class="sec-head"><h4>光源位置</h4><button class="btn ghost sm">還原預設</button></div>
+      <div class="pads">
+        <div class="pad-box">
+          <div class="cap"><span>正面視角</span><span style="font-variant-numeric:tabular-nums">32, 58</span></div>
+          <div class="pad">
+            <span class="hint t">上</span><span class="hint b">下</span><span class="hint l">左</span><span class="hint r">右</span>
+            <span class="figure">🧍‍♀️</span>
+            <div class="knob" style="left:66%;top:29%"></div>
+          </div>
+        </div>
+        <div class="pad-box">
+          <div class="cap"><span>側面視角</span><span style="font-variant-numeric:tabular-nums">58, 40</span></div>
+          <div class="pad">
+            <span class="hint t">上</span><span class="hint b">下</span><span class="hint l">身後</span><span class="hint r">朝你</span>
+            <span class="figure">🚶‍♀️</span>
+            <div class="knob" style="left:70%;top:40%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>分頁改 segmented control</b>:選中態更明確,與中控面板同一元件。</li>
+      <li><b>每區塊右上角「還原預設」</b>:解決「調壞了沒有回頭路」(DESIGN-TODO §2)。</li>
+      <li><b>拖曳墊加方位文字提示</b>(上/下/左/右、身後/朝你),取代只靠軸色理解空間。</li>
+      <li>寵物下拉直接顯示狀態(「— 工作中」),不用切去中控看。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════ 3. 中控面板 ═══════════ -->
+  <section>
+    <h2>3・中控面板(總覽分頁 + 沙盒危險區示意)</h2>
+    <div class="frame mock-control">
+      <div class="topbar">
+        <h3>中控面板</h3>
+        <select class="select"><option>繁體中文</option></select>
+        <button class="btn">重啟寵物系統</button>
+        <button class="btn danger">結束</button>
+      </div>
+      <div class="seg"><button class="active">總覽</button><button>全域設定</button><button>沙盒設定</button></div>
+
+      <h5>清醒的寵物 <span class="count">(2)</span></h5>
+      <div class="pet-cards">
+        <div class="card pet-card">
+          <div class="head">
+            <span class="dot working"></span><span class="name">小狐狸</span>
+            <span class="chip">📁 ~/project/3D-pet</span>
+            <button class="btn sm">休息</button>
+          </div>
+          <div class="status-line"><span class="badge ok">執行中</span><span>整理 DEVLOG 章節結構…</span><span style="color:var(--text-3)">佇列 2</span></div>
+          <div class="input-line">
+            <input class="input" placeholder="交辦任務給小狐狸…" />
+            <button class="btn primary">送出</button>
+          </div>
+        </div>
+        <div class="card pet-card">
+          <div class="head">
+            <span class="dot approval"></span><span class="name">小粉</span>
+            <span class="chip">📁 ~/work/site</span>
+            <button class="btn sm">休息</button>
+          </div>
+          <div class="approval-banner">
+            <span class="desc">rm -rf node_modules && npm ci</span>
+            <button class="btn sm" style="color:var(--ok);border-color:var(--ok)">允許</button>
+            <button class="btn sm danger">拒絕</button>
+          </div>
+          <div class="input-line">
+            <input class="input" placeholder="交辦任務給小粉…" />
+            <button class="btn primary">送出</button>
+          </div>
+        </div>
+      </div>
+
+      <h5>休息的寵物 <span class="count">(2)</span></h5>
+      <div class="resting-list">
+        <span class="resting-item"><span class="dot resting"></span>阿黑 <button class="btn sm">喚醒</button></span>
+        <span class="resting-item"><span class="dot resting"></span>咪咪 <button class="btn sm">喚醒</button></span>
+      </div>
+
+      <h5>任務佇列與狀態</h5>
+      <div class="task-table">
+        <div class="task-row header"><span>狀態</span><span>任務</span><span>寵物</span><span>工作區</span><span>時間</span><span></span></div>
+        <div class="task-row"><span class="badge ok">執行中</span><span class="t">整理 DEVLOG 章節結構</span><span class="t">小狐狸</span><span class="t">3D-pet</span><span class="time">14:02</span><button class="btn sm ghost">✕</button></div>
+        <div class="task-row failed"><span class="badge err">失敗</span><span class="t">部署到測試機(SSH 逾時)</span><span class="t">小粉</span><span class="t">site</span><span class="time">13:40</span><button class="btn sm ghost">✕</button></div>
+        <div class="task-row"><span class="badge neutral">排隊中</span><span class="t">翻譯 README 韓文版</span><span class="t">—</span><span class="t">公用</span><span class="time">13:22</span><button class="btn sm ghost">✕</button></div>
+        <div class="task-row"><span class="badge info">已完成</span><span class="t">修 bubbletest 的寬度把手</span><span class="t">小狐狸</span><span class="t">3D-pet</span><span class="time">12:57</span><button class="btn sm ghost">✕</button></div>
+      </div>
+
+      <h5>沙盒設定分頁的危險區樣式(示意)</h5>
+      <div class="danger-zone">
+        <div class="dz-head">⚠ 進階・高風險設定</div>
+        <div class="dz-body">沙盒設定與一般設定明確區隔:紅框 + 紅底標頭,套用按鈕一律紅色系,與其他分頁的紫色主色不混用。</div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>寵物列 6 欄 grid → 卡片</b>:窄視窗自動由雙欄降單欄,不再擠成一團(DESIGN-TODO §3)。</li>
+      <li><b>審批改醒目橫幅</b>嵌在該寵卡片內,黃色系 + 等寬指令文字。</li>
+      <li><b>休息中寵物收成膠囊列</b>:不佔整列高度,要喚醒時才展開。</li>
+      <li><b>失敗任務左側紅條</b> + 紅徽章,一眼可辨(DESIGN-TODO §3)。</li>
+      <li><b>沙盒 = 危險區</b>:紅框隔離,視覺上跟一般設定不可能搞混。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════ 4. 對話泡泡 ═══════════ -->
+  <section>
+    <h2>4・對話泡泡(深淺主題皆適用)</h2>
+    <div class="desktop-sim">
+      <div class="pet-placeholder">🦊</div>
+      <div class="bubble">
+        <div class="grip l"></div><div class="grip r"></div>
+        <div class="head">
+          <span class="name">小狐狸</span>
+          <span class="capsule"><span class="dot working"></span>工作中 · 佇列 2</span>
+          <span class="spacer"></span>
+          <button class="tool pinned" title="釘選">📌</button>
+          <button class="tool" title="收合">▾</button>
+        </div>
+        <div class="reply">DEVLOG 的章節我整理好了:§47 拆成「亂碼修復」與「模型切換」兩節,§48 的六個坑各補了一行結論。要我接著把 README 的連結也對齊嗎?</div>
+        <div class="sect">
+          <div class="sect-head">佇列(2)</div>
+          <div class="queue-item"><span class="no">1.</span><span class="txt">翻譯 README 韓文版</span><button class="tool">✕</button></div>
+          <div class="queue-item"><span class="no">2.</span><span class="txt">檢查 extract-yourmom 的 venv 說明</span><button class="tool">✕</button></div>
+        </div>
+        <div class="sect">
+          <div class="sect-head">參考檔案</div>
+          <div class="attach-chips"><span class="chip">📄 DEVLOG.md</span><span class="chip">🖼 screenshot.png</span></div>
+        </div>
+        <div class="input-row">
+          <textarea class="input" placeholder="回覆小狐狸…(⏎ 送出)"></textarea>
+          <button class="btn primary">送出</button>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>隱藏功能常駐可見</b>:圖釘、狀態膠囊、寬度把手(左右直條)不再 hover 才出現(DESIGN-TODO §1 發現性)。</li>
+      <li><b>區塊分節</b>:回覆/佇列/參考檔案/輸入以分隔線分開,各節有小標,不再擠成一團。</li>
+      <li><b>泡泡跟隨主題</b>:深色桌面下自動轉深色卡片(此頁右上角切「深色」預覽)。</li>
+      <li>回覆區上限從 200px 放寬(實作時依螢幕高度百分比)。</li>
+    </ul>
+  </section>
+
+  <section style="margin-bottom:var(--s-6)">
+    <h2>下一步(確認後逐頁實作)</h2>
+    <p class="desc">確認方向後,建議實作順序:① 抽出 tokens.css 共用檔並讓三個介面接上變數(不改版面,先統一色票)→ ② 中控面板卡片化 → ③ 設定面板 → ④ 泡泡改版(結構最複雜,放最後)。每步都可獨立驗證、獨立 commit。</p>
+  </section>
+</div>
+<script>
+  document.getElementById('theme-seg').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    document.querySelectorAll('#theme-seg button').forEach(x => x.classList.toggle('active', x === b));
+    if (b.dataset.t) document.documentElement.dataset.theme = b.dataset.t;
+    else delete document.documentElement.dataset.theme;
+  });
+</script>
+</body>
+</html>
