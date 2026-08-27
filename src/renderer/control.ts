@@ -80,16 +80,16 @@ function renameField(pet: ControlPetStatus): HTMLElement {
   field.addEventListener('blur', () => finish(true));
   return field;
 }
-function petRow(pet: ControlPetStatus): HTMLElement {
-  const row = document.createElement('div');
-  row.className = `pet-row${pet.enabled ? '' : ' resting'}`;
+/** 清醒寵物卡片:標頭(狀態點/名稱/工作區膠囊/休息鈕)+ 狀態列 + 審批橫幅 + 輸入列。 */
+function petCard(pet: ControlPetStatus): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'pet-card';
 
-  // 名稱(前置狀態燈點)
-  const nameCell = document.createElement('div');
-  nameCell.className = 'pet-name-cell';
+  // 標頭:狀態燈點 + 名稱(可就地改名)+ 工作區膠囊 + 休息鈕
+  const head = document.createElement('div');
+  head.className = 'pet-head';
   const dot = document.createElement('span');
   dot.className = `dot ${pet.phase}`;
-  nameCell.append(dot, renamingPetId === pet.petId ? renameField(pet) : nameLabel(pet));
 
   // 工作區
   const workspace = document.createElement('div');
@@ -104,7 +104,11 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   toggle.textContent = pet.enabled ? t('control.rest') : t('control.wake');
   toggle.addEventListener('click', () => void window.pet.updatePetMeta(pet.petId, { enabled: !pet.enabled }));
 
-  // 狀態區:phase + 排隊則數
+  head.append(dot, renamingPetId === pet.petId ? renameField(pet) : nameLabel(pet), workspace, toggle);
+
+  // 狀態列:phase + 排隊則數,次要操作靠右
+  const statusLine = document.createElement('div');
+  statusLine.className = 'pet-status-line';
   const status = document.createElement('div');
   status.className = 'pet-status';
   status.textContent = phaseLabel(pet.phase);
@@ -117,8 +121,6 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   }
 
   // 輸入指令區
-  const inputCell = document.createElement('div');
-  inputCell.className = 'pet-input-cell';
   const inputLine = document.createElement('div');
   inputLine.className = 'pet-input-line';
   const input = document.createElement('input');
@@ -170,9 +172,8 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   });
   send.addEventListener('click', () => void submit());
   inputLine.append(input, send);
-  inputCell.append(inputLine, feedback);
 
-  // 次要操作(靠左,緊鄰喚醒/休息鈕;沙盒設定仍走 Tray,不放中控)
+  // 次要操作(狀態列右側小字鈕;沙盒設定仍走 Tray,不放中控)
   const more = document.createElement('div');
   more.className = 'pet-more';
   const fresh = document.createElement('button');
@@ -186,13 +187,14 @@ function petRow(pet: ControlPetStatus): HTMLElement {
   chooseDir.title = t('control.chooseDirTitle');
   chooseDir.addEventListener('click', () => void window.pet.chooseWorkspace(pet.petId));
   more.append(fresh, chooseDir);
+  statusLine.append(status, more);
 
-  row.append(nameCell, workspace, toggle, more, status, inputCell);
+  card.append(head, statusLine);
 
-  // 等審批:整列下方展開描述 + 允許/拒絕
+  // 等審批:醒目橫幅嵌在輸入列上方(描述 + 允許/拒絕)
   if (pet.pendingApproval) {
     const approval = document.createElement('div');
-    approval.className = 'approval-row';
+    approval.className = 'approval-banner';
     const desc = document.createElement('p');
     desc.className = 'approval-desc';
     desc.textContent = pet.pendingApproval.description;
@@ -207,9 +209,29 @@ function petRow(pet: ControlPetStatus): HTMLElement {
     deny.textContent = t('common.deny');
     deny.addEventListener('click', () => window.pet.chatApproval(pet.petId, requestId, false));
     approval.append(desc, allow, deny);
-    row.append(approval);
+    card.append(approval);
   }
-  return row;
+
+  card.append(inputLine, feedback);
+  return card;
+}
+
+/** 休息中寵物收成膠囊:狀態點 + 名稱 + 喚醒鈕;完整工作區路徑放 title。 */
+function restingItem(pet: ControlPetStatus): HTMLElement {
+  const item = document.createElement('span');
+  item.className = 'resting-item';
+  const dot = document.createElement('span');
+  dot.className = `dot ${pet.phase}`;
+  const name = document.createElement('span');
+  name.className = 'resting-name';
+  name.textContent = pet.name;
+  const folder = workspaceFolderName(pet.workspacePath);
+  name.title = folder ? `${pet.name} — 📁 ${pet.workspacePath}` : pet.name;
+  const wake = document.createElement('button');
+  wake.textContent = t('control.wake');
+  wake.addEventListener('click', () => void window.pet.updatePetMeta(pet.petId, { enabled: true }));
+  item.append(dot, name, wake);
+  return item;
 }
 
 /** 最後回報新→舊;從未對話(0)排最後,同分依名稱穩定排序。 */
@@ -223,7 +245,12 @@ function renderPetRows(): void {
   const resting = snapshot.pets.filter((pet) => !pet.enabled).sort(byLastActivity);
   el('awake-count').textContent = awake.length ? `(${awake.length})` : '';
   el('resting-count').textContent = resting.length ? `(${resting.length})` : '';
-  const renderInto = (containerId: string, pets: ControlPetStatus[], emptyText: string): void => {
+  const renderInto = (
+    containerId: string,
+    pets: ControlPetStatus[],
+    emptyText: string,
+    build: (pet: ControlPetStatus) => HTMLElement
+  ): void => {
     const container = el(containerId);
     container.innerHTML = '';
     if (!pets.length) {
@@ -233,10 +260,10 @@ function renderPetRows(): void {
       container.append(note);
       return;
     }
-    for (const pet of pets) container.append(petRow(pet));
+    for (const pet of pets) container.append(build(pet));
   };
-  renderInto('awake-rows', awake, t('control.noAwake'));
-  renderInto('resting-rows', resting, t('control.noResting'));
+  renderInto('awake-rows', awake, t('control.noAwake'), petCard);
+  renderInto('resting-rows', resting, t('control.noResting'), restingItem);
   // 改名中的輸入框是重繪後才生出來的新元素,焦點與游標位置要補回去
   if (renamingPetId) {
     const field = document.querySelector<HTMLInputElement>('.pet-name-edit');
@@ -245,13 +272,12 @@ function renderPetRows(): void {
       field.setSelectionRange(field.value.length, field.value.length);
     }
   }
-  // 重繪清掉了焦點:把游標還給重繪前正在打字的輸入框
+  // 重繪清掉了焦點:把游標還給重繪前正在打字的輸入框(輸入框只在清醒卡片上)
   if (focusedPetInput) {
     const target = focusedPetInput;
-    const inputs = document.querySelectorAll<HTMLInputElement>('.pet-row input[type="text"]');
-    const pets = [...awake, ...resting];
+    const inputs = document.querySelectorAll<HTMLInputElement>('.pet-card input[type="text"]');
     inputs.forEach((input, index) => {
-      if (pets[index]?.petId === target) {
+      if (awake[index]?.petId === target) {
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
       }
@@ -309,7 +335,8 @@ el('publish-send').addEventListener('click', async () => {
 /* ---------- 任務帳本 ---------- */
 function taskRow(task: ControlTaskRecord): HTMLElement {
   const row = document.createElement('div');
-  row.className = 'task-row';
+  // 失敗任務要一眼可辨:左緣紅條(DESIGN-TODO §3)
+  row.className = `task-row${task.status === 'failed' ? ' failed' : ''}`;
   const badge = document.createElement('span');
   badge.className = `status-badge ${task.status}`;
   badge.textContent = statusLabel(task.status);

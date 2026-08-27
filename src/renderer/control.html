@@ -28,13 +28,13 @@
       select { min-height: 32px; padding: 0 8px; }
       .empty-note { color: var(--text-3); font-size: 12px; padding: 8px 0; }
 
-      /* ── 寵物列 ── */
-      .pet-rows { display: flex; flex-direction: column; gap: 6px; }
-      .pet-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) auto auto minmax(100px, 1fr) minmax(200px, 280px); gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); }
-      .pet-row.resting { opacity: 0.55; }
-      .pet-name-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      /* ── 寵物卡片(清醒):窄視窗自動由多欄降單欄 ── */
+      .pet-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+      .pet-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); }
+      .pet-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
       /* 名稱本身是按鈕(點一下就地改名),外觀維持純文字 */
       .pet-name {
+        flex: none; max-width: 40%;
         padding: 2px 4px; margin: -2px -4px; font-weight: 600; font-size: 13px;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         color: inherit; font-family: inherit; text-align: left;
@@ -42,7 +42,7 @@
       }
       .pet-name:hover { background: var(--bg-hover); }
       .pet-name-edit {
-        padding: 2px 4px; margin: -2px -4px; min-width: 0; width: 100%;
+        flex: 1; padding: 2px 4px; margin: -2px -4px; min-width: 0;
         font: inherit; font-weight: 600; font-size: 13px; color: var(--text-1);
         background: var(--bg-inset); border: 1px solid var(--accent); border-radius: 6px; outline: none;
       }
@@ -51,25 +51,40 @@
       .dot.idle { background: var(--text-3); }
       .dot.working { background: var(--ok); box-shadow: 0 0 6px var(--ok-soft); }
       .dot.awaitingApproval { background: var(--warn); box-shadow: 0 0 6px var(--warn-soft); }
-      .pet-workspace { color: var(--text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .pet-toggle { min-height: 26px; padding: 0 10px; font-size: 12px; }
-      .pet-status { min-width: 0; font-size: 12px; color: var(--text-2); }
+      /* 工作區膠囊:佔掉名稱與休息鈕之間的空間,長路徑以 … 收尾 */
+      .pet-workspace {
+        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        padding: 1px 8px; border-radius: 999px; background: var(--bg-inset);
+        color: var(--text-2); font-size: 11px;
+      }
+      .pet-toggle { min-height: 26px; padding: 0 10px; font-size: 12px; flex: none; }
+      .pet-status-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .pet-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); }
       .pet-status .queue-count { color: var(--text-3); margin-left: 6px; }
-      .pet-input-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
       .pet-input-line { display: flex; gap: 6px; }
       .pet-input-line button { min-height: 30px; padding: 0 10px; font-size: 12px; flex: none; }
       .pet-feedback { min-height: 0; font-size: 11px; color: var(--text-2); }
       .pet-feedback.error { color: var(--err); }
       .pet-feedback.success { color: var(--ok); }
-      .pet-more { display: flex; gap: 4px; }
-      .pet-more button { min-height: 26px; padding: 0 8px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
-      /* 審批列(等審批時出現在該寵列下方) */
-      .approval-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--warn); border-radius: 8px; background: var(--warn-soft); }
+      .pet-more { display: flex; gap: 4px; margin-left: auto; }
+      .pet-more button { min-height: 24px; padding: 0 8px; font-size: 11px; color: var(--text-2); border-color: transparent; background: transparent; white-space: nowrap; }
+      .pet-more button:hover { background: var(--bg-hover); color: var(--text-1); }
+      /* 審批橫幅(等審批時嵌在該寵卡片內) */
+      .approval-banner { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--warn); border-radius: 10px; background: var(--warn-soft); }
       .approval-desc { flex: 1; margin: 0; color: var(--warn); font-size: 12px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
-      .approval-row .allow { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); min-height: 26px; font-size: 12px; }
-      .approval-row .allow:hover { background: var(--bg-hover); }
-      .approval-row .deny { border-color: var(--err); color: var(--err); background: transparent; min-height: 26px; font-size: 12px; }
-      .approval-row .deny:hover { background: var(--err-soft); }
+      .approval-banner .allow { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); min-height: 26px; font-size: 12px; }
+      .approval-banner .allow:hover { background: var(--bg-hover); }
+      .approval-banner .deny { border-color: var(--err); color: var(--err); background: transparent; min-height: 26px; font-size: 12px; }
+      .approval-banner .deny:hover { background: var(--err-soft); }
+      /* 休息中寵物:收成膠囊列,不佔整卡高度 */
+      .resting-list { display: flex; flex-wrap: wrap; gap: 8px; }
+      .resting-item {
+        display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px;
+        border: 1px solid var(--border); border-radius: 999px; background: var(--bg-card);
+        color: var(--text-2); font-size: 12px;
+      }
+      .resting-item .resting-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .resting-item button { min-height: 24px; padding: 0 10px; font-size: 11px; }
 
       /* ── 公用任務發佈 ── */
       .publish-card { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
@@ -88,6 +103,7 @@
       .task-row { display: grid; grid-template-columns: 76px minmax(160px, 1fr) minmax(90px, 130px) minmax(90px, 130px) 64px 30px; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--border); font-size: 12px; }
       .task-row:first-child { border-top: 0; }
       .task-row.header { color: var(--text-3); font-size: 11px; background: var(--bg-inset); }
+      .task-row.failed { box-shadow: inset 3px 0 0 var(--err); }
       .task-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); user-select: text; }
       .task-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
       .task-time { color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -107,21 +123,27 @@
       .tab { display: none; }
       .tab.active { display: block; }
 
-      /* ── 沙盒設定分頁(逐寵直列,不折疊) ── */
+      /* ── 沙盒設定分頁(逐寵直列,不折疊):整區用紅框危險區與一般設定隔開 ── */
+      .danger-zone { border: 1px solid var(--err); border-radius: 14px; overflow: hidden; }
+      .danger-zone .dz-head { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--err-soft); color: var(--err); font-size: 12px; font-weight: 600; }
+      .danger-zone .dz-body { padding: 12px 16px 14px; }
+      .pet-name-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .pet-name-cell .pet-name { max-width: 100%; cursor: default; }
       .sandbox-rows { display: flex; flex-direction: column; gap: 6px; }
       .sandbox-row { display: grid; grid-template-columns: minmax(110px, 150px) minmax(84px, 110px) minmax(150px, 1fr) minmax(140px, 1fr) auto auto; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); }
       .sandbox-row.no-workspace { opacity: 0.55; }
+      .sandbox-row .pet-workspace { flex: none; }
       .sandbox-row select { min-height: 30px; font-size: 12px; }
       .toggle { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; white-space: nowrap; }
       .toggle input { accent-color: var(--accent); }
-      .sandbox-apply { border-color: var(--accent); background: var(--accent); color: var(--on-accent); min-height: 28px; font-size: 12px; }
-      .sandbox-apply:hover { background: var(--accent-hover); }
+      /* 危險區內的套用鈕一律紅色系,不與其他分頁的主色混用 */
+      .sandbox-apply { border-color: var(--err); color: var(--err); background: transparent; min-height: 28px; font-size: 12px; }
+      .sandbox-apply:hover { background: var(--err-soft); }
       .sandbox-status { grid-column: 1 / -1; min-height: 0; color: var(--text-2); font-size: 11px; user-select: text; overflow-wrap: anywhere; }
       .sandbox-status.success { color: var(--ok); }
       .sandbox-status.error { color: var(--err); }
       .sandbox-status.warning { color: var(--warn); }
-      .risk-label { display: inline-block; margin: 0 0 10px; padding: 3px 8px; border: 1px solid var(--warn); border-radius: 999px; color: var(--warn); font-size: 11px; }
-      .sandbox-note { margin: 0 0 14px; color: var(--text-2); font-size: 12px; line-height: 1.55; }
+      .sandbox-note { margin: 0 0 12px; color: var(--text-2); font-size: 12px; line-height: 1.55; }
       .sandbox-note code { padding: 1px 5px; border-radius: 5px; color: var(--accent); background: var(--bg-inset); }
     </style>
   </head>
@@ -149,10 +171,10 @@
 
       <div class="tab active" id="tab-overview">
       <h2><span data-i18n="control.awakePets">清醒的寵物</span> <span class="count" id="awake-count"></span></h2>
-      <div class="pet-rows" id="awake-rows"></div>
+      <div class="pet-cards" id="awake-rows"></div>
 
       <h2><span data-i18n="control.restingPets">休息的寵物</span> <span class="count" id="resting-count"></span></h2>
-      <div class="pet-rows" id="resting-rows"></div>
+      <div class="resting-list" id="resting-rows"></div>
 
       <h2 data-i18n="control.publish">公用任務發佈</h2>
       <div class="publish-card">
@@ -183,9 +205,13 @@
 
       <div class="tab" id="tab-sandbox">
         <h2 data-i18n="control.sandboxHeading">沙盒設定（逐寵）</h2>
-        <span class="risk-label" data-i18n="control.riskLabel">進階・高風險設定</span>
-        <p class="sandbox-note" data-i18n="control.sandboxNote">這是進階的安全設定，不屬於一般桌寵設定。套用時由桌寵主程序直接修改該寵工作目錄中的 .codex/config.toml，不會交給 AI 或執行任意腳本。完整存取會移除一般檔案與網路沙盒限制，只應用於你完全信任的專案。</p>
-        <div class="sandbox-rows" id="sandbox-rows"></div>
+        <div class="danger-zone">
+          <div class="dz-head">⚠ <span data-i18n="control.riskLabel">進階・高風險設定</span></div>
+          <div class="dz-body">
+            <p class="sandbox-note" data-i18n="control.sandboxNote">這是進階的安全設定，不屬於一般桌寵設定。套用時由桌寵主程序直接修改該寵工作目錄中的 .codex/config.toml，不會交給 AI 或執行任意腳本。完整存取會移除一般檔案與網路沙盒限制，只應用於你完全信任的專案。</p>
+            <div class="sandbox-rows" id="sandbox-rows"></div>
+          </div>
+        </div>
       </div>
     </main>
     <script type="module" src="./control.ts"></script>

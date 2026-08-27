@@ -963,3 +963,11 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **做法**:新增 `src/renderer/tokens.css`——只放 CSS 變數不放元件樣式(疊層視窗背景必須保持透明,此檔不畫任何背景)。淺色為 `:root` 預設,深色走 `prefers-color-scheme` 跟隨系統;`data-theme` 覆寫僅供自驗頁強制切換。三個介面接上:control.html 與 settings.html 各加 `<link>`,speechBubble.css 檔首 `@import`(由 speechBubble.ts 的 CSS import 鏈帶進 overlay)。版面完全不動,只把硬編碼色票換成變數;色溫漸層與 XYZ 軸色是語意色,保留字面值。狀態色順帶對齊:泡泡狀態點 working 由藍改綠、done 由綠改藍,與中控任務徽章(執行中=綠、已完成=藍)一致。
 
 **驗證**:typecheck/build 過;因寵物系統正在跑,不用 `npm run dev`(predev 會 pkill Electron 誤殺寵物),改起獨立 `npx vite src/renderer` + headless Chrome CDP(`Emulation.setEmulatedMedia` 模擬 prefers-color-scheme)截 bubbletest/control/settings 三頁深淺共六張,泡泡尾巴與卡片同色、深色下輸入框/徽章/佇列列對比正常。
+
+## 52. 介面重設計②:中控面板卡片化(2026-08-27)
+
+**改動**:清醒寵物由 6 欄 grid 列改為卡片(`repeat(auto-fill, minmax(360px, 1fr))`,窄視窗自動降單欄):標頭=狀態點+可改名名稱+工作區膠囊+休息鈕,狀態列右側掛新對話/目錄小字鈕,審批改為嵌在輸入列上方的黃色橫幅。休息寵物收成膠囊列(狀態點+名稱+喚醒),不再佔整列高度——代價是休息中不能就地改名/選目錄,喚醒後即可。任務帳本失敗列加左緣紅條(`inset box-shadow`)。沙盒分頁整區包進紅框危險區(紅底標頭+紅色系套用鈕),與一般設定視覺隔離。焦點回復選擇器同步改 `.pet-card`、對象縮為清醒清單(輸入框只在清醒卡片上)。
+
+**驗證**:中控沒有獨立驗證頁,但 control.ts 檔尾掛著 `window.__applySnapshot`;瀏覽器下模組頂層會碰 `window.pet`,用 CDP `Page.addScriptToEvaluateOnNewDocument` 先注入 stub 再開頁即可灌假快照。截深淺+沙盒+任務表四張;互動回歸(灌快照→打草稿→再灌快照)確認草稿保留、改名狀態跨重繪保留、喚醒鈕存在。
+
+**驗證環境的坑**:headless 頁面沒有焦點時 `focus` 事件不發(`activeElement` 有設但 listener 不觸發);開 CDP `Emulation.setFocusEmulationEnabled` 後又出現「移除聚焦元素會發 blur」的模擬行為(實測 `input.remove()` → blur fired),真實 Chrome/Electron 移除聚焦元素不發 blur——所以焦點回復與改名保留在焦點模擬下會誤判失敗,屬環境假象。要在 headless 驗這兩條路徑,只能各驗一半:不開模擬驗「狀態跨重繪」,開模擬驗「事件有掛上」。
