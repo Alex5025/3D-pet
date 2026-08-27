@@ -42,35 +42,41 @@
       #pet-toolbar button:hover { background: var(--bg-hover); }
       #pet-toolbar button[disabled] { opacity: 0.45; cursor: default; }
 
-      /* 分頁 */
-      #tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-      #tabs button {
-        flex: 1;
-        padding: 7px;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--bg-card);
-        color: var(--text-2);
-        font: inherit;
-        cursor: pointer;
-      }
-      #tabs button.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-      #ltype { display: flex; gap: 6px; }
-      #ltype button {
+      /* 分頁:segmented control(內凹槽 + 浮起的選中鈕),與中控/泡泡同一語彙 */
+      #tabs, #ltype { display: flex; gap: 2px; padding: 2px; background: var(--bg-inset); border-radius: 10px; }
+      #tabs { margin-bottom: 12px; }
+      #tabs button, #ltype button {
         flex: 1;
         padding: 6px;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--bg-card);
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
         color: var(--text-2);
         font: inherit;
         cursor: pointer;
       }
-      #ltype button.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+      #tabs button.active, #ltype button.active {
+        background: var(--bg-card);
+        color: var(--text-1);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+      }
       .tab { display: none; }
       .tab.active { display: block; }
 
-      h3 { margin: 10px 0 6px; font-size: 13px; color: var(--accent); font-weight: 600; }
+      h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 10px 0 6px; font-size: 13px; color: var(--accent); font-weight: 600; }
+      /* 區塊右上角的「還原預設」小字鈕:調壞了不用全部重來 */
+      .sec-reset {
+        padding: 1px 6px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-3);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 400;
+        cursor: pointer;
+      }
+      .sec-reset:hover { background: var(--bg-hover); color: var(--text-1); }
       .row { margin-bottom: 10px; }
       .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: var(--text-2); }
       .val { font-variant-numeric: tabular-nums; color: var(--accent); }
@@ -120,6 +126,12 @@
         touch-action: none;
       }
       .pad::before, .pad::after { content: ''; position: absolute; background: var(--border); }
+      /* 方位文字提示:不用只靠軸色理解空間(DESIGN-TODO §2) */
+      .pad .hint { position: absolute; font-size: 10px; color: var(--text-3); pointer-events: none; }
+      .pad .hint.t { top: 3px; left: 50%; transform: translateX(-50%); }
+      .pad .hint.b { bottom: 3px; left: 50%; transform: translateX(-50%); }
+      .pad .hint.l { left: 5px; top: 50%; transform: translateY(-50%); }
+      .pad .hint.r { right: 5px; top: 50%; transform: translateY(-50%); }
       .pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
       .pad::after { top: 50%; left: 0; right: 0; height: 1px; }
       .pad.hx::after { background: rgba(255, 99, 99, 0.55); }
@@ -232,7 +244,7 @@
 
       <!-- ── 光影 ── -->
       <div class="tab active" id="tab-light">
-        <h3 data-i18n="settings.lightType">光源類型</h3>
+        <h3><span data-i18n="settings.lightType">光源類型</span><button class="sec-reset" id="reset-light" data-i18n="settings.resetSection">還原預設</button></h3>
         <div id="ltype">
           <button data-t="directional" class="active" data-i18n="settings.lightDirectional">平行光(太陽)</button>
           <button data-t="point" data-i18n="settings.lightPoint">點光源(燈泡)</button>
@@ -256,15 +268,23 @@
           <input type="range" id="temperature" class="temp-range" min="1800" max="12000" step="50" />
         </div>
 
-        <h3 data-i18n="settings.lightPosition">光源位置(相對角色)</h3>
+        <h3><span data-i18n="settings.lightPosition">光源位置(相對角色)</span><button class="sec-reset" id="reset-light-pos" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="pads">
           <div class="pad-box">
             <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span><span class="val" id="lxy-val"></span></div>
-            <div class="pad hx vy" id="light-xy"><span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div></div>
+            <div class="pad hx vy" id="light-xy">
+              <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
+              <span class="hint l" data-i18n="settings.hintLeft">左</span><span class="hint r" data-i18n="settings.hintRight">右</span>
+              <span class="origin" id="origin-xz">🧍‍♀️</span><div class="dot"></div>
+            </div>
           </div>
           <div class="pad-box">
             <div class="cap"><span><b class="ax-y">Y</b><b class="ax-z">Z</b><span data-i18n="settings.capSideLight">(側視,右=朝你)</span></span><span class="val" id="lyz-val"></span></div>
-            <div class="pad hz vy" id="light-yz"><span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div></div>
+            <div class="pad hz vy" id="light-yz">
+              <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
+              <span class="hint l" data-i18n="settings.hintBack">身後</span><span class="hint r" data-i18n="settings.hintFront">朝你</span>
+              <span class="origin origin-side" id="origin-yz">🚶‍♀️</span><div class="dot"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -284,7 +304,7 @@
           style="width: 100%; resize: vertical; min-height: 72px; line-height: 1.5;"
           placeholder="用自由文字定義這隻角色的個性與說話風格,例如:&#10;你是活潑的貓娘工程師,說話簡短俏皮,句尾偶爾加「喵」,回報問題時一針見血。&#10;會注入對話的 system prompt,存檔後下一句對話生效。"></textarea>
 
-        <h3 data-i18n="settings.sway">晃動強度(1 = 模型原廠)</h3>
+        <h3><span data-i18n="settings.sway">晃動強度(1 = 模型原廠)</span><button class="sec-reset" id="reset-sway" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="row">
           <label><span data-i18n="settings.hair">頭髮</span> <span class="val" id="hair-val"></span></label>
           <input type="range" id="hair" min="0" max="2" step="0.02" />
@@ -302,18 +322,26 @@
           <input type="range" id="tail" min="0" max="2" step="0.02" />
         </div>
 
-        <h3 data-i18n="settings.wardrobe">服裝顯示</h3>
+        <h3><span data-i18n="settings.wardrobe">服裝顯示</span><button class="sec-reset" id="reset-wardrobe" data-i18n="settings.resetSection">還原預設</button></h3>
         <div id="wardrobe"><span class="empty">載入中…</span></div>
 
-        <h3 data-i18n="settings.charPosition">角色位置</h3>
+        <h3><span data-i18n="settings.charPosition">角色位置</span><button class="sec-reset" id="reset-pet-pos" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="pads">
           <div class="pad-box">
             <div class="cap"><span><b class="ax-x">X</b><b class="ax-y">Y</b><span data-i18n="settings.capFront">(正面)</span></span><span class="val" id="pxy-val"></span></div>
-            <div class="pad hx vy" id="pet-xy"><div class="dot"></div></div>
+            <div class="pad hx vy" id="pet-xy">
+              <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
+              <span class="hint l" data-i18n="settings.hintLeft">左</span><span class="hint r" data-i18n="settings.hintRight">右</span>
+              <div class="dot"></div>
+            </div>
           </div>
           <div class="pad-box">
             <div class="cap"><span><b class="ax-z">Z</b><b class="ax-y">Y</b><span data-i18n="settings.capSideChar">(側面)</span></span><span class="val" id="pzy-val"></span></div>
-            <div class="pad hz vy" id="pet-zy"><div class="dot"></div></div>
+            <div class="pad hz vy" id="pet-zy">
+              <span class="hint t" data-i18n="settings.hintUp">上</span><span class="hint b" data-i18n="settings.hintDown">下</span>
+              <span class="hint l" data-i18n="settings.hintBack">身後</span><span class="hint r" data-i18n="settings.hintFront">朝你</span>
+              <div class="dot"></div>
+            </div>
           </div>
         </div>
       </div>

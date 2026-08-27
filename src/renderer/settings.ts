@@ -585,6 +585,40 @@ function renderNow(): void {
   el('pzy-val').textContent = `${petState.z.toFixed(1)}, ${petState.y.toFixed(1)}`;
 }
 
+/* 逐區塊還原:調壞了不用全部重來(DESIGN-TODO §2)。 */
+function wardrobeAllOn(): void {
+  for (const key of Object.keys(wardrobeStates)) {
+    if (wardrobeStates[key] === false) window.pet.setWardrobe(selectedPetId, key, true);
+    wardrobeStates[key] = true;
+  }
+  void window.pet.getWardrobe(selectedPetId).then(({ list }) => renderWardrobe(list));
+}
+function bindSectionReset(id: string, apply: () => void): void {
+  el(id).addEventListener('click', () => {
+    if (!selectedPetId) return;
+    apply();
+    render();
+  });
+}
+bindSectionReset('reset-light', () => {
+  const { type, ambient, directional, shade, temperature } = DEFAULT_LIGHTING;
+  lighting = { ...lighting, type, ambient, directional, shade, temperature };
+  window.pet.setLighting(selectedPetId, lighting);
+});
+bindSectionReset('reset-light-pos', () => {
+  lighting = { ...lighting, x: DEFAULT_LIGHTING.x, y: DEFAULT_LIGHTING.y, z: DEFAULT_LIGHTING.z };
+  window.pet.setLighting(selectedPetId, lighting);
+});
+bindSectionReset('reset-sway', () => {
+  sway = { ...DEFAULT_SWAY };
+  window.pet.setSway(selectedPetId, sway);
+});
+bindSectionReset('reset-pet-pos', () => {
+  petState = { ...DEFAULT_STATE };
+  window.pet.setPetState(selectedPetId, petState);
+});
+bindSectionReset('reset-wardrobe', wardrobeAllOn);
+
 el('reset').addEventListener('click', () => {
   if (!selectedPetId) return;
   lighting = { ...DEFAULT_LIGHTING };
@@ -593,11 +627,7 @@ el('reset').addEventListener('click', () => {
   window.pet.setLighting(selectedPetId, lighting);
   window.pet.setSway(selectedPetId, sway);
   window.pet.setPetState(selectedPetId, petState);
-  for (const key of Object.keys(wardrobeStates)) {
-    if (wardrobeStates[key] === false) window.pet.setWardrobe(selectedPetId, key, true);
-    wardrobeStates[key] = true;
-  }
-  void window.pet.getWardrobe(selectedPetId).then(({ list }) => renderWardrobe(list));
+  wardrobeAllOn();
   render();
 });
 

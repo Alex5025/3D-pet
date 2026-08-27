@@ -971,3 +971,9 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **驗證**:中控沒有獨立驗證頁,但 control.ts 檔尾掛著 `window.__applySnapshot`;瀏覽器下模組頂層會碰 `window.pet`,用 CDP `Page.addScriptToEvaluateOnNewDocument` 先注入 stub 再開頁即可灌假快照。截深淺+沙盒+任務表四張;互動回歸(灌快照→打草稿→再灌快照)確認草稿保留、改名狀態跨重繪保留、喚醒鈕存在。
 
 **驗證環境的坑**:headless 頁面沒有焦點時 `focus` 事件不發(`activeElement` 有設但 listener 不觸發);開 CDP `Emulation.setFocusEmulationEnabled` 後又出現「移除聚焦元素會發 blur」的模擬行為(實測 `input.remove()` → blur fired),真實 Chrome/Electron 移除聚焦元素不發 blur——所以焦點回復與改名保留在焦點模擬下會誤判失敗,屬環境假象。要在 headless 驗這兩條路徑,只能各驗一半:不開模擬驗「狀態跨重繪」,開模擬驗「事件有掛上」。
+
+## 53. 介面重設計③:設定面板(2026-08-27)
+
+**改動**:分頁與光源類型切換改 segmented control(內凹槽+浮起選中鈕,與新設計語言一致);光源/光源位置/晃動強度/服裝顯示/角色位置五個區塊右上角各加「還原預設」小字鈕——光源還原 type/強度/色溫但不動位置,位置反之,解決「調壞了沒有回頭路」;四個拖曳墊加方位文字提示(正面墊:上/下/左/右;側視墊:上/下/身後/朝你),不用只靠軸色理解空間。i18n 新增 settings.resetSection 與六個方位鍵(四語系)。注意:加了區塊鈕的 h3 要把 data-i18n 移到內層 span,否則 applyI18nDom 的 textContent 會把按鈕洗掉。
+
+**驗證**:CDP 注入 window.pet stub(settings.ts 需要的面比中控寬:getPetCollection/getWardrobe/getMotionList 等)開 settings.html;互動回歸:環境光滑桿調到 0.64π → 按光源區塊還原 → 回 0.80π(=DEFAULT_LIGHTING.ambient);深淺各截光影/角色分頁,服裝勾選狀態正確套用。
