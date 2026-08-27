@@ -114,6 +114,8 @@ export const en = {
   'bubble.removeImagesTitle': 'Remove all pasted images',
   'bubble.stop': 'Stop',
   'bubble.resizeTitle': 'Drag to adjust bubble width (double-click to restore auto)',
+  'bubble.queueHeader': 'Queue ({n})',
+  'bubble.refsHeader': 'Reference files',
   'bubble.removeQueuedTitle': 'Remove this message from the queue',
   'bubble.removeRefTitle': 'Remove this reference file',
   'bubble.addRefsTitle': 'Add reference files or folders',

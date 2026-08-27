@@ -977,3 +977,11 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **改動**:分頁與光源類型切換改 segmented control(內凹槽+浮起選中鈕,與新設計語言一致);光源/光源位置/晃動強度/服裝顯示/角色位置五個區塊右上角各加「還原預設」小字鈕——光源還原 type/強度/色溫但不動位置,位置反之,解決「調壞了沒有回頭路」;四個拖曳墊加方位文字提示(正面墊:上/下/左/右;側視墊:上/下/身後/朝你),不用只靠軸色理解空間。i18n 新增 settings.resetSection 與六個方位鍵(四語系)。注意:加了區塊鈕的 h3 要把 data-i18n 移到內層 span,否則 applyI18nDom 的 textContent 會把按鈕洗掉。
 
 **驗證**:CDP 注入 window.pet stub(settings.ts 需要的面比中控寬:getPetCollection/getWardrobe/getMotionList 等)開 settings.html;互動回歸:環境光滑桿調到 0.64π → 按光源區塊還原 → 回 0.80π(=DEFAULT_LIGHTING.ambient);深淺各截光影/角色分頁,服裝勾選狀態正確套用。
+
+## 54. 介面重設計④:泡泡發現性與分節排版(2026-08-27)
+
+**改動**:隱藏功能常駐微顯——圖釘從 hover 才出現改為常駐 55% 透明度(hover/釘選回全尺寸全不透明),寬度把手豎條常駐 35%(hover 全顯);佇列與參考檔案各加節標(佇列(n)/參考檔案,i18n 四語系新增 bubble.queueHeader/refsHeader)與上緣分隔線,四塊內容不再擠成一團;回覆區上限 200px 改 min(38vh, 440px)(疊層視窗全螢幕,vh=螢幕高)。節標在 setQueue/setRefFiles 重建清單時一併生成,換語言後下次重繪即更新(與既有列項 title 行為一致)。
+
+**驗證**:bubbletest.html 深淺各一張——節標與分隔線、常駐把手豎條、外角常駐圖釘皆可見;typecheck/build 過。
+
+**至此 DESIGN-TODO 四步實作順序全部完成**:tokens.css(§51)→ 中控卡片化(§52)→ 設定面板(§53)→ 泡泡(§54)。剩餘的深水區項目(對話歷史往上翻、服裝縮圖命名、模型選擇器、動作預覽)仍留在 DESIGN-TODO 待辦。

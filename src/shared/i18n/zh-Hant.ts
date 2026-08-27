@@ -119,6 +119,8 @@ export const zhHant = {
   'bubble.removeImagesTitle': '移除所有已貼上的圖片',
   'bubble.stop': '停止',
   'bubble.resizeTitle': '拖曳調整泡泡寬度（雙擊還原自動）',
+  'bubble.queueHeader': '佇列({n})',
+  'bubble.refsHeader': '參考檔案',
   'bubble.removeQueuedTitle': '從佇列移除這則訊息',
   'bubble.removeRefTitle': '移除這個參考檔案',
   'bubble.addRefsTitle': '加入參考檔案或資料夾',

@@ -114,6 +114,8 @@ export const ko = {
   'bubble.removeImagesTitle': '붙여넣은 이미지를 모두 삭제',
   'bubble.stop': '정지',
   'bubble.resizeTitle': '드래그로 말풍선 너비 조절(더블클릭으로 자동 복원)',
+  'bubble.queueHeader': '대기열({n})',
+  'bubble.refsHeader': '참고 파일',
   'bubble.removeQueuedTitle': '이 메시지를 큐에서 삭제',
   'bubble.removeRefTitle': '이 참조 파일을 삭제',
   'bubble.addRefsTitle': '참조 파일 또는 폴더 추가',

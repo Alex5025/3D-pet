@@ -173,8 +173,9 @@
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
   background: var(--border-strong);
   cursor: pointer;
-  opacity: 0;
-  transform: scale(0.72);
+  /* 常駐微顯(發現性):不再 hover 才出現,hover 放大到全尺寸 */
+  opacity: 0.55;
+  transform: scale(0.85);
   transition: background 120ms ease, opacity 120ms ease, transform 120ms ease;
 }
 
@@ -198,6 +199,8 @@
 
 .pet-speech-bubble .bubble-pin.active {
   background: var(--accent);
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* 寬度把手:左右邊緣拖曳手動調寬、雙擊還原自動;hover 浮出短豎條提示。
@@ -223,7 +226,8 @@
   content: '';
   border-radius: 2px;
   background: var(--border-strong);
-  opacity: 0;
+  /* 常駐微顯(發現性):看得到才知道能拖 */
+  opacity: 0.35;
   transform: translate(-50%, -50%);
   transition: opacity 120ms ease;
 }
@@ -389,7 +393,8 @@
 
 .pet-speech-bubble .bubble-reply {
   display: none;
-  max-height: 200px;
+  /* 長回覆的閱讀體驗:上限改依螢幕高度(疊層視窗全螢幕,vh = 螢幕高) */
+  max-height: min(38vh, 440px);
   margin: 0 2px 8px;
   padding: 9px 11px;
   overflow-y: auto;
@@ -581,7 +586,15 @@
   color: var(--text-1);
 }
 
-/* 排隊中的訊息清單(輸入框上方) */
+/* 分節小標(佇列/參考檔案):讓四塊內容不再擠成一團 */
+.pet-speech-bubble .sect-head {
+  margin-bottom: 2px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+/* 排隊中的訊息清單(輸入框上方):分隔線與節標把它跟回覆區隔開 */
 .pet-speech-bubble .bubble-queue {
   display: none;
   margin: 8px 0 6px;
@@ -589,6 +602,11 @@
   overflow-y: auto;
   font-size: 11px;
   color: var(--text-2);
+}
+
+.pet-speech-bubble .bubble-queue.open {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
 }
 
 .pet-speech-bubble .bubble-queue.open {
@@ -630,7 +648,7 @@
   color: var(--err);
 }
 
-/* 參考檔案清單(泡泡最下方) */
+/* 參考檔案清單(泡泡最下方):分隔線與節標把它跟輸入框隔開 */
 .pet-speech-bubble .bubble-refs {
   display: none;
   margin-top: 8px;
@@ -638,6 +656,11 @@
   overflow-y: auto;
   font-size: 11px;
   color: var(--text-2);
+}
+
+.pet-speech-bubble .bubble-refs.open {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
 }
 
 .pet-speech-bubble .bubble-refs.open {

@@ -890,6 +890,12 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     setQueue: (list) => {
       queueBox.replaceChildren();
       queueBox.classList.toggle('open', list.length > 0);
+      if (list.length) {
+        const head = document.createElement('div');
+        head.className = 'sect-head';
+        head.textContent = t('bubble.queueHeader', { n: list.length });
+        queueBox.append(head);
+      }
       list.forEach((item, index) => {
         const row = document.createElement('div');
         row.className = 'queue-row';
@@ -926,6 +932,12 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     setRefFiles: (list) => {
       refsBox.replaceChildren();
       refsBox.classList.toggle('open', list.length > 0);
+      if (list.length) {
+        const head = document.createElement('div');
+        head.className = 'sect-head';
+        head.textContent = t('bubble.refsHeader');
+        refsBox.append(head);
+      }
       for (const item of list) {
         const row = document.createElement('div');
         row.className = 'ref-row';

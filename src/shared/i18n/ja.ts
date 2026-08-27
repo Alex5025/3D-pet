@@ -114,6 +114,8 @@ export const ja = {
   'bubble.removeImagesTitle': '貼り付けた画像をすべて削除',
   'bubble.stop': '停止',
   'bubble.resizeTitle': 'ドラッグで吹き出しの幅を調整(ダブルクリックで自動に戻す)',
+  'bubble.queueHeader': 'キュー({n})',
+  'bubble.refsHeader': '参考ファイル',
   'bubble.removeQueuedTitle': 'このメッセージをキューから削除',
   'bubble.removeRefTitle': 'この参照ファイルを削除',
   'bubble.addRefsTitle': '参照ファイルまたはフォルダを追加',
