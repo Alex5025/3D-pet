@@ -40,6 +40,10 @@
     ],
     "extraResources": [
       {
+        "from": "models/AvatarSample_A.vrm",
+        "to": "models/AvatarSample_A.vrm"
+      },
+      {
         "from": "src/main/agent",
         "to": "agent-helpers",
         "filter": [

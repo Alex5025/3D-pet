@@ -943,3 +943,15 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 **驗證**:`typecheck`、production build、`git diff --check` 全過；macOS unpacked app 執行 MockProvider 全鏈 selftest 全 PASS；Windows x64 cross-package 與 NSIS 成功，helper/asar/預設 VRM 均在正確位置。實際 DMG 已安裝至 `/Applications/VRM Pet.app` 並正常啟動 main、GPU、renderer，運行資料正確建立在 `~/Library/Application Support/VRM Pet`。
 
 **仍需外部環境**:Windows 11 真機的透明視窗、DPI、多螢幕與 Explorer 重啟回歸；正式公開發行前的 Windows Authenticode、macOS Developer ID/notarization；Windows 原生全域拖曳 helper。未簽章產物只供內部測試。
+
+## 50. 安裝版預設模型備援與動作授權稽核(2026-08-26)
+
+**問題**:`electron-builder.files` 只收 `out/**` 與 `package.json`。Vite 雖會把 `AvatarSample_A.vrm` 輸出到 renderer 並收入 `app.asar`，但 `models/`、`motions/` 本身不會進安裝包；正式版又從系統 `userData/motions/` 掃描動作，乾淨安裝後因此沒有動作可選。預設模型若只依賴 asar 內的 renderer 資產，也缺少可寫資料目錄中的實體檔備援。
+
+**模型處理**:`models/AvatarSample_A.vrm` 另以 `extraResources` 放到 `Resources/models/AvatarSample_A.vrm`。正式版啟動時檢查 `userData/models/AvatarSample_A.vrm`，不存在才建立目錄並從 app resources 複製；既有檔案一律保留、不覆寫。renderer 內原有的 `/AvatarSample_A.vrm` 照常保留，形成「asar 內建載入 + userData 實體備援」兩條路徑。
+
+**動作授權結論**:現有動作不能因為「免費取得」就視為無著作權。pixiv 官方 7 個 VRMA 的著作權仍屬 pixiv，隨附條款禁止以可抽取形式再散布；另外 85 個中文動作來自遊戲資產抽取，`EXTRACT-GUIDE.md` 已明載僅限個人使用、不得散布。因此本次不把任何現有 `.vrma` 塞入安裝包；日後只可加入明確為 CC0、公有領域，或授權明文允許隨應用程式再散布的動作，並應連同授權與來源證明入版控。
+
+**驗證**:`npm run typecheck`、`npm run build`、`npm run pack` 全過；實際 macOS unpacked app 同時確認 `Resources/models/AvatarSample_A.vrm` 與 `app.asar/out/renderer/AvatarSample_A.vrm` 存在，沒有誤收任何 `.vrma`。
+
+**安裝實測補記(2026-08-27)**:資源雖已正確打包與複製，乾淨設定的預設寵物仍不可見。根因是 `get-boot-vrm` 對沒有自訂 `vrmPath` 的寵物回傳 `null`，renderer 隨後載入絕對網址 `/AvatarSample_A.vrm`；dev server 能解析這個網址，但 production 的 `file://` 會把它指到磁碟根目錄。修正為 main 在沒有自訂路徑時直接從 `userData/models/AvatarSample_A.vrm` 讀取 buffer，與自訂模型共用既有快取及 IPC 載入路徑，不再依賴 production URL 解析。

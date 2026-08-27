@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
 import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
 import { createChatDispatcher, createChatQueue } from './chatQueue';
@@ -124,6 +124,7 @@ function syncOverlayMouseEvents(): void {
 /* 開發模式預設將運行資料放專案根目錄；測試可用 VRM_PET_DATA_DIR 隔離資料。 */
 const dataDir = (): string =>
   process.env['VRM_PET_DATA_DIR'] || (app.isPackaged ? app.getPath('userData') : app.getAppPath());
+const defaultVrmPath = (): string => join(dataDir(), 'models', 'AvatarSample_A.vrm');
 const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
 const petsDir = (): string => join(runtimeDataDir(), 'pets');
 const registryPath = (): string => join(runtimeDataDir(), 'app.json');
@@ -133,6 +134,21 @@ const transcriptPath = (id: string): string => join(transcriptsDir(), `${id}.jso
 const legacyRuntimeConfigPath = (): string => join(runtimeDataDir(), 'config.json');
 const legacyRootConfigPath = (): string => join(dataDir(), 'config.json');
 const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
+
+/** 正式版把 app 資源內的預設模型複製到可寫的 userData；已存在時保留使用者那份。 */
+async function ensureDefaultVrm(): Promise<void> {
+  if (!app.isPackaged) return;
+  try {
+    await stat(defaultVrmPath());
+    return;
+  } catch { /* 尚未初始化 */ }
+  try {
+    await mkdir(join(dataDir(), 'models'), { recursive: true });
+    await copyFile(join(process.resourcesPath, 'models', 'AvatarSample_A.vrm'), defaultVrmPath());
+  } catch (error) {
+    console.error('[main] default VRM initialization failed', error);
+  }
+}
 /** 有效的新寵物預設工作根目錄:全域設定優先,否則 ~/Documents/PetWorkspaces。 */
 const workspaceRoot = (): string =>
   registry.defaultWorkspaceRoot ?? join(app.getPath('documents'), 'PetWorkspaces');
@@ -789,6 +805,7 @@ const TRAY_ICON =
 
 app.whenReady().then(async () => {
   writeSystemPidRecord();
+  await ensureDefaultVrm();
   // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)。
   // =1 → MockProvider 全鏈;=claude / =codex → 真 CLI e2e(耗額度,顯式觸發才跑)
   const selftestMode = process.env['VRM_PET_AGENT_SELFTEST'];
@@ -1435,6 +1452,7 @@ app.whenReady().then(async () => {
     avatarIcons,
     wardrobeLists,
     dataDir,
+    defaultVrmPath,
   });
 
   ipcMain.on('show-menu', (event, id: string) => {

@@ -21,6 +21,8 @@ export interface AppearanceIpcDeps<TProfile> {
   wardrobeLists: Map<string, { key: string; label: string }[]>;
   /** 運行資料根目錄(motions/ 在其下)。 */
   dataDir: () => string;
+  /** 預設模型的實體路徑；沒有自訂 vrmPath 時由 main 讀取，避免 file:// 絕對網址失效。 */
+  defaultVrmPath: () => string;
 }
 
 /** 註冊外觀 IPC;回傳 dispose 供測試或熱重載清理(正式流程 app 結束即釋放)。 */
@@ -30,7 +32,7 @@ export function registerAppearanceIpc<
     wardrobe?: Record<string, boolean>; vrmPath?: string; defaultPose?: string;
   }
 >(deps: AppearanceIpcDeps<TProfile>): () => void {
-  const { overlay, settings, getPet, updatePet, hasPet, avatarIcons, wardrobeLists, dataDir } = deps;
+  const { overlay, settings, getPet, updatePet, hasPet, avatarIcons, wardrobeLists, dataDir, defaultVrmPath } = deps;
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);
   ipcMain.on('save-state', (event, id: string, state: unknown) => {
@@ -86,8 +88,9 @@ export function registerAppearanceIpc<
   const vrmReadCache = new Map<string, { mtimeMs: number; data: Promise<Buffer> }>();
   let vrmCacheSweep: NodeJS.Timeout | null = null;
   ipcMain.handle('get-boot-vrm', async (_event, id: string) => {
-    const path = getPet(id)?.vrmPath;
-    if (!path) return null;
+    const profile = getPet(id);
+    if (!profile) return null;
+    const path = profile.vrmPath ?? defaultVrmPath();
     try {
       const mtimeMs = (await stat(path)).mtimeMs;
       const hit = vrmReadCache.get(path);
