@@ -680,6 +680,8 @@ function petMenu(requestedId?: string): Menu {
 
 function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', petId?: string): void {
   if (petId) selectPet(petId);
+  // 設定與中控共用管理用途；切換時關閉另一扇，避免兩邊同時佔用桌面。
+  if (controlWin && !controlWin.isDestroyed()) controlWin.close();
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.webContents.send('switch-tab', tab);
     settingsWin.webContents.send('selected-pet-apply', registry.selectedPetId);
@@ -712,6 +714,7 @@ function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', pe
 /** 中控面板:多寵狀態總覽、指派任務(綁定/公用池)、佇列撤單、審批代答、沙盒設定分頁、系統操作。
  *  (獨立沙盒視窗已廢棄:沙盒設定併入中控的「沙盒設定」分頁,高風險讀寫通道仍限中控 sender。) */
 function openControlPanel(tab: 'overview' | 'sandbox' = 'overview'): void {
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
   if (controlWin && !controlWin.isDestroyed()) {
     controlWin.webContents.send('switch-tab', tab);
     controlWin.show();
@@ -801,12 +804,7 @@ app.whenReady().then(async () => {
   loadConfigSync();
 
   app.on('second-instance', () => {
-    if (controlWin && !controlWin.isDestroyed()) {
-      controlWin.show();
-      controlWin.focus();
-    } else {
-      openControlPanel();
-    }
+    openControlPanel();
   });
 
   /* ── 串流文字合併(效能優化階段 3)──
@@ -1342,7 +1340,7 @@ app.whenReady().then(async () => {
     if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url);
   });
 
-  /* ── 中控面板專用 IPC(sender 一律限 controlWin)──
+  /* ── 中控面板專用 IPC(sender 一律限 controlWin;系統重啟/結束另供 overlay 右鍵選單使用)──
    * 指派任務走自己的 enqueue 通道(chat-send 保持泡泡專用);一切失敗回饋走 invoke 回傳,
    * 絕不發 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn(§10 鐵律)。 */
   ipcMain.handle('control-enqueue', (event, text: string, assignee?: string, restrictWorkspace?: string): ChatSendResult => {
@@ -1415,11 +1413,13 @@ app.whenReady().then(async () => {
     return removed;
   });
   ipcMain.on('system-restart', (event) => {
-    if (!controlWin || event.sender !== controlWin.webContents) return;
+    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
+    if (!fromOurWindow) return;
     restartApp();
   });
   ipcMain.on('system-quit', (event) => {
-    if (!controlWin || event.sender !== controlWin.webContents) return;
+    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
+    if (!fromOurWindow) return;
     // app.exit 不觸發 before-quit,清理要自己做(同 Tray 結束;已知坑,見 DEVLOG §22)
     shutdownSync();
     app.exit(0);
