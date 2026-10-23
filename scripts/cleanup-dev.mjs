@@ -1,7 +1,8 @@
 import { readFile, rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { join } from 'node:path';
+import { dataDir } from './data-dir.mjs';
 
-const pidFile = resolve('runtime-data/pet-system.pid');
+const pidFile = join(dataDir(), 'runtime-data', 'pet-system.pid');
 
 try {
   const pid = Number.parseInt((await readFile(pidFile, 'utf8')).trim(), 10);

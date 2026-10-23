@@ -4,8 +4,10 @@ set -u
 unsetopt BG_NICE
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PID_FILE="$PROJECT_DIR/runtime-data/pet-system.pid"
-LOG_FILE="$PROJECT_DIR/runtime-data/pet-system-restart.log"
+PET_DATA_DIR="$(node "$PROJECT_DIR/scripts/data-dir.mjs")" || exit 1
+PID_FILE="$PET_DATA_DIR/runtime-data/pet-system.pid"
+LOG_FILE="$PET_DATA_DIR/runtime-data/pet-system-restart.log"
+mkdir -p "$PET_DATA_DIR/runtime-data"
 
 log() {
   print -r -- "$(date '+%Y-%m-%dT%H:%M:%S%z') $1" >> "$LOG_FILE"

@@ -11,10 +11,11 @@ set -u
 unsetopt BG_NICE
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LOG_FILE="$PROJECT_DIR/runtime-data/pet-system.log"
-PID_FILE="$PROJECT_DIR/runtime-data/pet-system.pid"
+PET_DATA_DIR="$(node "$PROJECT_DIR/scripts/data-dir.mjs")" || exit 1
+LOG_FILE="$PET_DATA_DIR/runtime-data/pet-system.log"
+PID_FILE="$PET_DATA_DIR/runtime-data/pet-system.pid"
 
-mkdir -p "$PROJECT_DIR/runtime-data"
+mkdir -p "$PET_DATA_DIR/runtime-data"
 
 # 已在運行就不重複啟動(predev 的 pkill 會把舊的殺掉,重複啟動等於無聲重啟)
 if [[ -f "$PID_FILE" ]]; then

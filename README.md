@@ -68,7 +68,7 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 - **右鍵角色(或 Tray 圖示)**:切換/新增寵物、選 VRM 檔、角色動作、設定、**中控面板**、沙盒設定、重置位置、休息/喚醒、重啟寵物或整個系統。
 - **設定面板**分頁:光影/角色(名稱、個性、晃動、服裝)/動作(預設姿勢、待機動作)/工作(agent、模型、力度、權限、工作目錄)。
 
-模型放 `models/`、動作(.vrma)放 `motions/`;運行資料在 `runtime-data/`(皆不入版控)。
+開發版與安裝版共用使用者資料目錄（macOS：`~/Library/Application Support/VRM Pet/`）：模型放其下的 `models/`、動作放 `motions/`，角色設定與對話紀錄放 `runtime-data/`。專案內僅保留打包及首次初始化用的預設模型。
 
 > `.codex/config.toml` 可能包含專案沙盒策略與本機路徑,提交前請確認內容適合分享;憑證、token、API key 不得寫入 repository。
 
@@ -78,7 +78,7 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 
 | 變數 | 值 | 作用 |
 |---|---|---|
-| `VRM_PET_DATA_DIR` | 路徑 | 運行資料根目錄(`config.json`、`models/`、`motions/`、`runtime-data/` 都在其下)。預設:開發模式=專案根目錄,打包後=系統 `userData`。測試時指到 `$(mktemp -d)` 可完全隔離,不動到日常寵物的設定 |
+| `VRM_PET_DATA_DIR` | 路徑 | 運行資料根目錄(`config.json`、`models/`、`motions/`、`runtime-data/` 都在其下)。預設:開發版與安裝版皆為系統使用者資料下的 `VRM Pet` 目錄，共用模型、動作、角色設定及對話紀錄。測試時指到 `$(mktemp -d)` 可完全隔離,不動到日常寵物的設定 |
 | `VRM_PET_AGENT_SELFTEST` | `1` \| `claude` \| `codex` \| `agy` | Headless 回歸自驗(不開視窗,跑完即退出)。`1`=MockProvider 全鏈自驗,不耗額度;`claude`/`codex`/`agy`=對真 CLI 跑 e2e,**會耗訂閱額度**,顯式觸發才跑 |
 | `VRM_PET_AGENT_MOCK` | `1` | 所有寵物改用假 agent(照腳本吐事件),正常開視窗走完整 UI 鏈路,驗 UI 不耗額度 |
 | `VRM_PET_AGENT_DEBUG` | `1` | 把 agent 子行程的 argv 與收發 payload 印到終端機,除錯串接問題用 |

@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { isAbsolute, join } from 'node:path';
-import { mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
+import { constants, mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
 import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
@@ -114,6 +114,14 @@ let dispatchAllHook: (() => void) | null = null;
 /** 中控面板快照重推(whenReady 注入,50ms debounce):寵物/佇列/agent 狀態變更時呼叫。 */
 let scheduleControlStatusHook: (() => void) | null = null;
 
+// 固定產品目錄，避免開發版套件名稱與安裝版產品名稱造成兩份資料。
+const userDataDir = process.env['VRM_PET_DATA_DIR']
+  ? resolve(process.env['VRM_PET_DATA_DIR'])
+  : join(app.getPath('appData'), 'VRM Pet');
+mkdirSync(userDataDir, { recursive: true });
+app.setPath('userData', userDataDir);
+app.setPath('sessionData', userDataDir);
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 
@@ -121,9 +129,8 @@ function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
 }
 
-/* 開發模式預設將運行資料放專案根目錄；測試可用 VRM_PET_DATA_DIR 隔離資料。 */
-const dataDir = (): string =>
-  process.env['VRM_PET_DATA_DIR'] || (app.isPackaged ? app.getPath('userData') : app.getAppPath());
+/* 開發版與安裝版共用使用者資料；測試可用 VRM_PET_DATA_DIR 隔離。 */
+const dataDir = (): string => app.getPath('userData');
 const defaultVrmPath = (): string => join(dataDir(), 'models', 'AvatarSample_A.vrm');
 const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
 const petsDir = (): string => join(runtimeDataDir(), 'pets');
@@ -135,16 +142,16 @@ const legacyRuntimeConfigPath = (): string => join(runtimeDataDir(), 'config.jso
 const legacyRootConfigPath = (): string => join(dataDir(), 'config.json');
 const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
 
-/** 正式版把 app 資源內的預設模型複製到可寫的 userData；已存在時保留使用者那份。 */
+/** 兩種版本首次啟動都初始化預設模型；已有檔案時不覆寫。 */
 async function ensureDefaultVrm(): Promise<void> {
-  if (!app.isPackaged) return;
   try {
     await stat(defaultVrmPath());
     return;
   } catch { /* 尚未初始化 */ }
   try {
     await mkdir(join(dataDir(), 'models'), { recursive: true });
-    await copyFile(join(process.resourcesPath, 'models', 'AvatarSample_A.vrm'), defaultVrmPath());
+    const source = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'models', 'AvatarSample_A.vrm');
+    await copyFile(source, defaultVrmPath(), constants.COPYFILE_EXCL);
   } catch (error) {
     console.error('[main] default VRM initialization failed', error);
   }
@@ -404,6 +411,7 @@ async function pushVrm(petId: string, path: string): Promise<void> {
 async function chooseVrm(petId: string, parent?: BrowserWindow): Promise<void> {
   app.focus({ steal: true });
   const options: Electron.OpenDialogOptions = {
+    defaultPath: join(dataDir(), 'models'),
     properties: ['openFile'],
     filters: [{ name: 'VRM', extensions: ['vrm'] }]
   };
