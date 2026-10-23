@@ -75,5 +75,8 @@
     "dompurify": "^3.4.14",
     "marked": "^18.0.7",
     "three": "^0.169.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
   }
 }
