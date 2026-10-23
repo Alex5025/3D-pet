@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentEvent } from './types';
 import type { AgentPetProfile } from './bridge';
 import { createAgentBridge } from './bridge';
@@ -12,7 +12,7 @@ import { createAgyProvider } from './agyProvider';
 import { createMockProvider } from './mockProvider';
 import { createPetToolsHub, type PetToolsHub } from './petToolsHub';
 import { parseProjectSandboxConfig, updateProjectSandboxConfig } from '../sandboxConfig';
-import { resolveWorkspaceDirName, sanitizeWorkspaceName } from '../workspaceDefaults';
+import { ensurePetWorkspace, resolveWorkspaceDirName, sanitizeWorkspaceName } from '../workspaceDefaults';
 import { getLocale, resolveLocale, setLocale, t, type MessageKey } from '../../shared/i18n';
 import { sanitizePetMeta } from '../petIpc';
 
@@ -349,6 +349,36 @@ export async function runAgentSelftest(): Promise<boolean> {
     resolveWorkspaceDirName('寵物 3', wsDate, () => false) === '寵物3_2026-08-06_14-30-52');
   check('工作目錄:同秒碰撞加序號',
     resolveWorkspaceDirName('寵物 3', wsDate, (d) => !d.endsWith('-3')) === '寵物3_2026-08-06_14-30-52-3');
+
+  // 啟動補建：模擬落盤後再載入，確認重複啟動不換路徑、不動工作檔案。
+  const testRoot = join(tmpdir(), '3D-pet');
+  mkdirSync(testRoot, { recursive: true });
+  const workspaceTestDir = mkdtempSync(join(testRoot, 'workspace-init-'));
+  try {
+    const root = join(workspaceTestDir, 'custom-root');
+    const profile: { name: string; workspacePath?: string } = { name: '小狐狸' };
+    check('工作目錄:預設及舊角色補建成功', ensurePetWorkspace(root, profile));
+    if (profile.workspacePath) {
+      check('工作目錄:使用指定根位置', dirname(profile.workspacePath) === root && existsSync(profile.workspacePath));
+      const file = join(profile.workspacePath, '使用者資料.txt');
+      writeFileSync(file, '重啟後必須保留', 'utf8');
+      const saved = JSON.stringify(profile);
+      const reloaded = JSON.parse(saved) as typeof profile;
+      check('工作目錄:重複啟動不再建立', !ensurePetWorkspace(root, reloaded) && readdirSync(root).length === 1);
+      check('工作目錄:重複啟動設定與內容不變', JSON.stringify(reloaded) === saved &&
+        readFileSync(file, 'utf8') === '重啟後必須保留');
+    }
+    const offline = { name: '自訂角色', workspacePath: join(workspaceTestDir, 'offline') };
+    check('工作目錄:已有路徑暫時不存在仍保留', !ensurePetWorkspace(root, offline) &&
+      !existsSync(offline.workspacePath));
+    const blockedRoot = join(workspaceTestDir, 'blocked');
+    writeFileSync(blockedRoot, '這是檔案，不能當作根目錄', 'utf8');
+    const retry: typeof profile = { name: '重試角色' };
+    check('工作目錄:建立失敗不寫入假路徑', !ensurePetWorkspace(blockedRoot, retry) && !retry.workspacePath);
+    check('工作目錄:下次啟動可以重試', ensurePetWorkspace(root, retry) && !!retry.workspacePath);
+  } finally {
+    rmSync(workspaceTestDir, { recursive: true, force: true });
+  }
 
   // i18n 純函式:語系解析、插值、fallback(測完還原,不影響後續測試的字串)
   {

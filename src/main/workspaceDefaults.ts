@@ -50,3 +50,17 @@ export function createDefaultWorkspace(root: string, petName: string, now = new 
     return null;
   }
 }
+
+/** 首次啟動、舊角色與新增角色共用：只補尚未設定的工作目錄。
+ *  已有路徑即使暫時不存在也保留，避免外接磁碟離線時被換成另一個工作區。
+ *  建立成功才更新角色；失敗時留待下次啟動重試。回傳是否需要儲存設定。 */
+export function ensurePetWorkspace(
+  root: string,
+  profile: { name: string; workspacePath?: string },
+): boolean {
+  if (typeof profile.workspacePath === 'string' && profile.workspacePath.trim()) return false;
+  const workspace = createDefaultWorkspace(root, profile.name);
+  if (!workspace) return false;
+  profile.workspacePath = workspace;
+  return true;
+}

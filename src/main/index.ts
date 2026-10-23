@@ -19,7 +19,7 @@ import type { PetToolsHub } from './agent/petToolsHub';
 import { createProviders } from './agent/providers';
 import { runAgentSelftest, runAgyE2E, runClaudeE2E, runCodexE2E } from './agent/selftest';
 import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
-import { createDefaultWorkspace } from './workspaceDefaults';
+import { ensurePetWorkspace } from './workspaceDefaults';
 import { LOCALES, getLocale, resolveLocale, setLocale, t, type Locale } from '../shared/i18n';
 import { configureOverlayWindow, overlayPlatformOptions } from './platform';
 
@@ -74,7 +74,7 @@ interface AppRegistry {
   schemaVersion: 2;
   selectedPetId: string;
   petIds: string[];
-  /** 新寵物預設工作目錄的根位置(全域);未設定時用 ~/Documents/PetWorkspaces。 */
+  /** 預設工作目錄的根位置(全域);未設定時用 ~/Documents/PetWorkspaces。 */
   defaultWorkspaceRoot?: string;
   /** UI 語言(四語代碼);未設定 = 跟隨系統(app.getLocale())。 */
   locale?: string;
@@ -156,7 +156,7 @@ async function ensureDefaultVrm(): Promise<void> {
     console.error('[main] default VRM initialization failed', error);
   }
 }
-/** 有效的新寵物預設工作根目錄:全域設定優先,否則 ~/Documents/PetWorkspaces。 */
+/** 預設工作根目錄：供新寵物及啟動時缺少工作目錄的角色使用。 */
 const workspaceRoot = (): string =>
   registry.defaultWorkspaceRoot ?? join(app.getPath('documents'), 'PetWorkspaces');
 
@@ -212,7 +212,7 @@ const dirtyPetIds = new Set<string>();
 let registryDirty = false;
 let configFlushInFlight = false;
 
-/** 全量同步落盤——**只給退出路徑用**(before-quit 與 Tray 結束;app.exit 不觸發 before-quit,
+/** 初始化及退出時全量同步落盤(before-quit 與 Tray 結束;app.exit 不觸發 before-quit,
  *  行程要死了必須同步寫完)。平時的 500ms debounce 走 persistConfigAsync,不佔 main event loop。 */
 function persistConfigSync(): void {
   if (configFlush) {
@@ -447,8 +447,7 @@ async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<s
 function createNewPet(): PetProfile {
   const profile = createProfile();
   // 自動建立預設工作目錄:避免忘記選目錄造成工作區污染;失敗時維持未設定(bridge 原擋門行為)
-  const workspace = createDefaultWorkspace(workspaceRoot(), profile.name);
-  if (workspace) profile.workspacePath = workspace;
+  ensurePetWorkspace(workspaceRoot(), profile);
   pets.set(profile.id, profile);
   registry.petIds.push(profile.id);
   registry.selectedPetId = profile.id;
@@ -827,6 +826,13 @@ app.whenReady().then(async () => {
   }
   if (process.platform === 'darwin') app.dock?.hide();
   loadConfigSync();
+  // registry 讀回後才取自訂根目錄；首次啟動與舊設定都經過這裡，已有路徑不變。
+  let workspaceAdded = false;
+  for (const profile of pets.values()) {
+    if (ensurePetWorkspace(workspaceRoot(), profile)) workspaceAdded = true;
+  }
+  // 顯示視窗前落盤，避免下次啟動再次替同一隻寵物建立目錄。
+  if (workspaceAdded) persistConfigSync();
 
   app.on('second-instance', () => {
     openControlPanel();
