@@ -32,7 +32,8 @@ export function overlayPlatformOptions(): Partial<BrowserWindowConstructorOption
 }
 
 export function configureOverlayWindow(window: BrowserWindow): void {
-  window.setAlwaysOnTop(true, process.platform === 'darwin' ? 'screen-saver' : 'floating');
+  // 桌寵只需高於一般視窗；不可使用 screen-saver 層干擾其他應用程式的彈出選單。
+  window.setAlwaysOnTop(true, 'floating');
   if (platformCapabilities.visibleOnAllWorkspaces) {
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }

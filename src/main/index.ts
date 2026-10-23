@@ -750,7 +750,7 @@ function openControlPanel(tab: 'overview' | 'sandbox' = 'overview'): void {
     height: 620,
     minWidth: 560,
     minHeight: 420,
-    title: t('window.control'), // 常駐工作視窗:可縮放、不置頂(疊層在 screen-saver 層且點擊穿透,不衝突)
+    title: t('window.control'), // 常駐工作視窗:可縮放、不置頂；疊層使用浮動置頂與點擊穿透。
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

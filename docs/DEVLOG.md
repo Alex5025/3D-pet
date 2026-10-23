@@ -1018,3 +1018,12 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 驗證：型別檢查、production build、路徑解析斷言、啟動腳本語法與 diff 空白檢查通過。隔離的 Mock 自驗啟動受阻：本機 Electron 套件缺少執行檔，尚未完成首次啟動驗證。未搬移使用者資產。
 
 後續驗證：Electron 套件實際缺少 path.txt、版本檔與核心 Framework。npm 核准 electron@33.4.11 安裝腳本後，Node 26 下安裝仍未完成；改以本機 Node 24 執行套件安裝程序成功，Electron --version 回報 v33.4.11。隔離目錄下 MockProvider 全鏈自驗 PASS，並確認預設模型與 PID 檔均建立於指定資料目錄。未啟動日常桌寵或消耗真實代理額度。
+
+
+## 59. 桌寵置頂層級干擾 Chrome 書籤選單（2026-10-22）
+
+症狀：Chrome 分頁可點，但工作、社交等書籤資料夾的下拉內容無法顯示。介面樹可讀到選單項目，不能據此判定實際可見。停止桌寵後，使用者確認選單恢復。
+
+修正：platform.ts 的 macOS 疊層由 screen-saver 降為 floating，保留 panel、跨工作區與全螢幕工作區顯示設定及滑鼠穿透。桌寵仍高於一般視窗，讓原生彈出選單位於其上。官方參考：https://www.electronjs.org/docs/latest/api/browser-window#winsetalwaysontopflag-level-relativelevel 。
+
+驗證：typecheck、build、git diff --check 通過。重啟桌寵後，使用者確認 Chrome 書籤內容恢復可見。
