@@ -378,8 +378,9 @@ function addRuntime(profile: PetProfile): void {
       // main 回推 pet-profiles-apply 後徽章自然更新(不在這裡樂觀改本地狀態)
       onAgentChange: (patch) => {
         const current = runtimes.get(profile.id);
-        const agent = current?.profile.agent;
-        if (!current || !agent) return;
+        if (!current) return;
+        // 尚未儲存 AI 設定時，沿用畫面顯示的預設 Codex，讓第一次選擇也能寫入。
+        const agent: NonNullable<PetProfile['agent']> = current.profile.agent ?? { kind: 'codex' };
         // 換供應商 = 換 CLI:模型 id、力度與 session 都不通用,一律清掉重來
         // (main 的 sanitizePetMeta 看到 kind 改變也會關掉舊 session)
         const switching = !!patch.kind && patch.kind !== agent.kind;

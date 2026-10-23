@@ -1027,3 +1027,11 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 修正：platform.ts 的 macOS 疊層由 screen-saver 降為 floating，保留 panel、跨工作區與全螢幕工作區顯示設定及滑鼠穿透。桌寵仍高於一般視窗，讓原生彈出選單位於其上。官方參考：https://www.electronjs.org/docs/latest/api/browser-window#winsetalwaysontopflag-level-relativelevel 。
 
 驗證：typecheck、build、git diff --check 通過。重啟桌寵後，使用者確認 Chrome 書籤內容恢復可見。
+
+## 60. 未儲存 AI 設定的寵物無法直接切換供應商（2026-10-22）
+
+症狀：對話泡泡顯示預設 Codex，但選擇 Claude 或 Antigravity 沒有更新。`onAgentChange` 在 profile 尚無 agent 欄位時直接返回，與畫面的預設值不一致；第一次選擇模型或推理力度也受同一個守衛影響。
+
+修正：角色仍存在但尚無 agent 時，以 Codex 預設綁定合併當次選擇，沿用既有 IPC 寫入及廣播，不再要求先到設定面板建立 AI 設定。
+
+驗證：typecheck、build 通過；開發版畫面已顯示小狐狸切換為 Antigravity，對應角色檔也已儲存 agy。另開 vrmtest.html 確認預設 VRM 正常載入。此驗證未發送真實 AI 任務。
