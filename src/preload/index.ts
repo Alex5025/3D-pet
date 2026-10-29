@@ -94,6 +94,7 @@ const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
 const api = {
+  respondToPrompt: (response: number): void => ipcRenderer.send('app-prompt-response', response),
   setInteractive: (value: boolean) => ipcRenderer.send('set-interactive', value),
   setInputMode: (value: boolean): Promise<void> => ipcRenderer.invoke('set-input-mode', value),
   onCursor: (callback: (point: { x: number; y: number }) => void) =>

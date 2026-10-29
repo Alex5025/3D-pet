@@ -1,3 +1,4 @@
+import { appDialog } from './appDialog';
 import type { ControlPetStatus, ControlStatusSnapshot, ControlTaskRecord } from '../shared/chat';
 import { normalizeWorkspacePath, workspaceFolderName } from '../shared/petGroups';
 import { setLocale, t, type Locale } from '../shared/i18n';
@@ -179,8 +180,8 @@ function petCard(pet: ControlPetStatus): HTMLElement {
   const fresh = document.createElement('button');
   fresh.textContent = t('control.newSession');
   fresh.title = t('control.newSessionTitle');
-  fresh.addEventListener('click', () => {
-    if (window.confirm(t('control.confirmNewSession', { name: pet.name }))) window.pet.newSession(pet.petId);
+  fresh.addEventListener('click', async () => {
+    if (await appDialog({ message: t('control.confirmNewSession', { name: pet.name }), buttons: [t('quit.cancel'), t('control.newSession')], cancelId: 0 }) === 1) window.pet.newSession(pet.petId);
   });
   const chooseDir = document.createElement('button');
   chooseDir.textContent = t('control.chooseDir');
@@ -515,7 +516,7 @@ function sandboxRow(pet: ControlPetStatus): HTMLElement {
   apply.addEventListener('click', async () => {
     const sandboxMode = mode.value as SandboxMode;
     if (sandboxMode === 'danger-full-access' &&
-      !window.confirm(t('control.confirmDanger', { name: pet.name }))) return;
+      await appDialog({ message: t('control.confirmDanger', { name: pet.name }), buttons: [t('quit.cancel'), t('control.apply')], cancelId: 0 }) !== 1) return;
     apply.disabled = true;
     setRowStatus(refs, t('control.applying'));
     try {
@@ -597,8 +598,8 @@ function loadSandboxSettings(): void {
 
 /* ---------- 系統操作 ---------- */
 el('system-restart').addEventListener('click', () => window.pet.systemRestart());
-el('system-quit').addEventListener('click', () => {
-  if (window.confirm(t('control.confirmQuit'))) window.pet.systemQuit();
+el('system-quit').addEventListener('click', async () => {
+  if (await appDialog({ message: t('control.confirmQuit'), buttons: [t('quit.cancel'), t('quit.confirm')], cancelId: 0 }) === 1) window.pet.systemQuit();
 });
 
 /* ---------- 語言下拉(全域設定,存 registry.locale) ---------- */

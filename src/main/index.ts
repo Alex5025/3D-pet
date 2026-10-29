@@ -1,3 +1,4 @@
+import { appPrompt } from './appPrompt';
 import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -1132,11 +1133,9 @@ app.whenReady().then(async () => {
       properties = ['openFile', 'openDirectory', 'multiSelections'];
     } else {
       // Windows/Linux 的 native dialog 不能同時選檔案與資料夾，先讓使用者選模式。
-      const choice = await dialog.showMessageBox({
-        type: 'question',
+      const choice = await appPrompt({
         message: t('dialog.chooseReferences'),
         buttons: [t('dialog.chooseFiles'), t('dialog.chooseFolder'), t('quit.cancel')],
-        defaultId: 0,
         cancelId: 2,
       });
       if (choice.response === 2) return;
@@ -1753,10 +1752,8 @@ app.on('before-quit', (event) => {
   quitPromptOpen = true;
   app.focus({ steal: true }); // 背景 app(dock 隱藏)的 dialog 會被壓在其他視窗底下
   const awake = [...pets.values()].filter((profile) => profile.enabled).length;
-  void dialog.showMessageBox({
-    type: 'question',
+  void appPrompt({
     buttons: [t('quit.cancel'), t('quit.confirm')],
-    defaultId: 0,
     cancelId: 0, // Esc / ⌘. 等同取消
     message: t('quit.message'),
     detail: t('quit.detail', { n: awake }),

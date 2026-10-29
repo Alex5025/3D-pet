@@ -1,3 +1,4 @@
+import { appDialog } from './appDialog';
 import { DEFAULT_LIGHTING, DEFAULT_SWAY, type Lighting, type Sway } from './viewer';
 import type { AgentKind, AgentModelInfo, PetProfile, PetState, WardrobeItem } from '../preload/index';
 import { groupPetsByWorkspace } from '../shared/petGroups';
@@ -208,7 +209,7 @@ el('add-pet').addEventListener('click', async () => {
 el('remove-pet').addEventListener('click', async () => {
   const profile = selectedProfile();
   if (!profile || profiles.length <= 1) return;
-  if (!confirm(t('settings.removeConfirm', { name: profile.name }))) return;
+  if (await appDialog({ message: t('settings.removeConfirm', { name: profile.name }), buttons: [t('quit.cancel'), t('settings.removePet')], cancelId: 0 }) !== 1) return;
   if (!await window.pet.removePet(profile.id)) return;
   const collection = await window.pet.getPetCollection();
   selectedPetId = collection.selectedPetId;
