@@ -1,3 +1,4 @@
+import { configureInstance } from './scripts/instance-config.mjs';
 import { resolve } from 'node:path';
 import { createReadStream, readFileSync } from 'node:fs';
 import { defineConfig } from 'electron-vite';
@@ -25,7 +26,7 @@ function defaultVrmPlugin(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   main: {
     build: {
       lib: { entry: resolve(__dirname, 'src/main/index.ts') },
@@ -39,6 +40,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    server: command === 'serve' ? { host: '127.0.0.1', port: configureInstance(), strictPort: true } : undefined,
     root: resolve(__dirname, 'src/renderer'),
     publicDir: false,
     plugins: [defaultVrmPlugin()],
@@ -53,4 +55,4 @@ export default defineConfig({
       }
     }
   }
-});
+}));

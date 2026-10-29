@@ -8,7 +8,9 @@ try {
   const pid = Number.parseInt((await readFile(pidFile, 'utf8')).trim(), 10);
   if (Number.isSafeInteger(pid) && pid > 1 && pid !== process.pid) {
     try {
-      process.kill(pid, 'SIGKILL');
+      process.kill(pid, 0);
+      console.error('此實例已在執行；請先結束或使用重啟功能。', pidFile);
+      process.exit(1);
     } catch (error) {
       if (error?.code !== 'ESRCH') throw error;
     }

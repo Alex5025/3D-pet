@@ -17,7 +17,7 @@ PID_FILE="$PET_DATA_DIR/runtime-data/pet-system.pid"
 
 mkdir -p "$PET_DATA_DIR/runtime-data"
 
-# 已在運行就不重複啟動(predev 的 pkill 會把舊的殺掉,重複啟動等於無聲重啟)
+# 已在運行就不重複啟動；PID 與日誌只屬於目前實例。
 if [[ -f "$PID_FILE" ]]; then
   RUNNING_PID="$(tr -d '[:space:]' < "$PID_FILE")"
   if [[ "$RUNNING_PID" =~ '^[0-9]+$' ]] && kill -0 "$RUNNING_PID" 2>/dev/null; then
