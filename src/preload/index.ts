@@ -1,3 +1,5 @@
+import type { PetProject } from '../shared/projects';
+import type { CharacterFileResult } from '../shared/character';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
 import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, QueuedMessageSummary } from '../shared/chat';
@@ -51,6 +53,11 @@ export interface WardrobeItem {
 }
 
 export interface PetProfile {
+  projects?: PetProject[];
+  characterId?: string;
+  characterReady?: boolean;
+  characterRevision?: number;
+  characterError?: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -94,6 +101,10 @@ const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
 const api = {
+  characterFile: (petId: string, action: 'import' | 'export'): Promise<CharacterFileResult> => ipcRenderer.invoke('character-file', petId, action),
+  retryCharacterStorage: (): Promise<string> => ipcRenderer.invoke('character-storage-retry'),
+  characterStorageStatus: (): Promise<string> => ipcRenderer.invoke('character-storage-status'),
+  onCharacterStorageError: (callback: (message: string) => void) => ipcRenderer.on('character-storage-error', (_event, message: string) => callback(message)),
   respondToPrompt: (response: number): void => ipcRenderer.send('app-prompt-response', response),
   setInteractive: (value: boolean) => ipcRenderer.send('set-interactive', value),
   setInputMode: (value: boolean): Promise<void> => ipcRenderer.invoke('set-input-mode', value),
@@ -106,8 +117,9 @@ const api = {
   selectPet: (petId: string): Promise<PetProfile | null> => ipcRenderer.invoke('select-pet', petId),
   updatePetMeta: (
     petId: string,
-    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent' | 'persona' | 'idleMotions'>
-  ): Promise<PetProfile | null> => ipcRenderer.invoke('update-pet-meta', petId, patch),
+    patch: Pick<Partial<PetProfile>, 'name' | 'enabled' | 'agent' | 'persona' | 'idleMotions'>,
+    characterId?: string,
+  ): Promise<PetProfile | null> => ipcRenderer.invoke('update-pet-meta', petId, patch, characterId),
   onPetProfiles: (callback: (pets: PetProfile[], selectedPetId: string) => void) =>
     ipcRenderer.on('pet-profiles-apply', (_event, pets, selectedPetId) => callback(pets, selectedPetId)),
   onSelectedPet: (callback: (petId: string) => void) =>
@@ -133,6 +145,7 @@ const api = {
   onSwitchTab: (callback: (tab: string) => void) =>
     ipcRenderer.on('switch-tab', (_event, tab) => callback(tab)),
 
+  selectProject: (petId: string, workspacePath: string): Promise<boolean> => ipcRenderer.invoke('select-project', petId, workspacePath),
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
   /** 角色分頁與桌寵右鍵選單的「選擇 VRM 檔」(開檔對話框由 main 處理)。 */
@@ -157,8 +170,8 @@ const api = {
 
   listAgentModels: (kind: AgentKind): Promise<AgentModelInfo[]> =>
     ipcRenderer.invoke('agent-models', kind),
-  chatSend: (petId: string, text: string, images: ChatImage[] = []): Promise<ChatSendResult> =>
-    ipcRenderer.invoke('chat-send', petId, text, images),
+  chatSend: (petId: string, text: string, images: ChatImage[] = [], workspacePath?: string): Promise<ChatSendResult> =>
+    ipcRenderer.invoke('chat-send', petId, text, images, workspacePath),
   removeQueuedMessage: (petId: string, taskId: string) =>
     ipcRenderer.send('chat-queue-remove', petId, taskId),
   getChatQueue: (petId: string): Promise<QueuedMessageSummary[]> =>
@@ -166,9 +179,9 @@ const api = {
   onChatQueue: (callback: (petId: string, list: QueuedMessageSummary[]) => void) =>
     ipcRenderer.on('chat-queue-apply', (_event, petId, list) => callback(petId, list)),
   /** 上次對話紀錄(重啟後回填泡泡);沒有紀錄時回 null。 */
-  getChatTranscript: (petId: string): Promise<ChatTranscript | null> =>
-    ipcRenderer.invoke('chat-transcript-get', petId),
-  chatCancel: (petId: string) => ipcRenderer.send('chat-cancel', petId),
+  getChatTranscript: (petId: string, workspacePath?: string): Promise<ChatTranscript | null> =>
+    ipcRenderer.invoke('chat-transcript-get', petId, workspacePath),
+  chatCancel: (petId: string, workspacePath?: string) => ipcRenderer.send('chat-cancel', petId, workspacePath),
   chatApproval: (petId: string, requestId: string, allow: boolean, feedback?: string) =>
     ipcRenderer.send('chat-approval', petId, requestId, allow, feedback),
   newSession: (petId: string) => ipcRenderer.send('new-session', petId),
@@ -199,8 +212,8 @@ const api = {
     ipcRenderer.send('pet-rects', rects),
 
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
-  onChatEvent: (callback: (petId: string, event: AgentEvent) => void) =>
-    ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent) => callback(petId, agentEvent)),
+  onChatEvent: (callback: (petId: string, event: AgentEvent, workspacePath?: string, revision?: number) => void) =>
+    ipcRenderer.on('chat-event-apply', (_event, petId, agentEvent, workspacePath, revision) => callback(petId, agentEvent, workspacePath, revision)),
 
   onPowerProfile: (callback: (profile: PowerProfile) => void) =>
     ipcRenderer.on('power-profile-apply', (_event, profile) => callback(profile)),
@@ -230,7 +243,7 @@ const api = {
     ipcRenderer.send('set-default-pose', petId, file),
 
   getSway: (petId: string): Promise<Partial<Sway> | null> => ipcRenderer.invoke('get-sway', petId),
-  setSway: (petId: string, sway: Sway) => ipcRenderer.send('set-sway', petId, sway),
+  setSway: (petId: string, sway: Sway, characterId?: string) => ipcRenderer.send('set-sway', petId, sway, characterId),
   onSway: (callback: (petId: string, sway: Partial<Sway>) => void) =>
     ipcRenderer.on('apply-sway', (_event, petId, sway) => callback(petId, sway)),
 
@@ -252,8 +265,8 @@ const api = {
 
   getLighting: (petId: string): Promise<Partial<Lighting> | null> =>
     ipcRenderer.invoke('get-lighting', petId),
-  setLighting: (petId: string, lighting: Lighting) =>
-    ipcRenderer.send('set-lighting', petId, lighting),
+  setLighting: (petId: string, lighting: Lighting, characterId?: string) =>
+    ipcRenderer.send('set-lighting', petId, lighting, characterId),
   onLighting: (callback: (petId: string, lighting: Partial<Lighting>) => void) =>
     ipcRenderer.on('apply-lighting', (_event, petId, lighting) => callback(petId, lighting))
 };

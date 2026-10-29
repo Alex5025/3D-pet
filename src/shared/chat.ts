@@ -19,6 +19,8 @@ export interface QueuedMessageSummary {
 
 /** 中控面板的每寵狀態(只有狀態燈號,不含回覆文字)。 */
 export interface ControlPetStatus {
+  projects?: string[];
+  runningWorkspacePath?: string;
   petId: string;
   name: string;
   enabled: boolean;
@@ -66,6 +68,9 @@ export interface ChatImage {
 
 /** 上次對話紀錄(每寵最後一輪):重啟後回填泡泡,讓使用者看得到聊到哪。 */
 export interface ChatTranscript {
+  revision?: number;
+  running?: boolean;
+  pendingApproval?: { requestId: string; description: string };
   /** 使用者當時送出的訊息(截斷保存)。 */
   user: string;
   /** agent 的回覆(markdown 原文,尾端截斷保存)。 */

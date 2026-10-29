@@ -233,7 +233,7 @@ function applyWardrobe(runtime: PetRuntime): void {
 
 function sendAvatarIcons(runtime: PetRuntime): void {
   requestAnimationFrame(() => {
-    if (!runtimes.has(runtime.profile.id)) return;
+    if (runtimes.get(runtime.profile.id) !== runtime) return;
     try {
       window.pet.sendAvatarIcons(runtime.profile.id, {
         front: runtime.viewer.snapshot(false),
@@ -256,7 +256,7 @@ function playDefaultPose(runtime: PetRuntime): void {
 }
 
 function afterModelLoad(runtime: PetRuntime): void {
-  if (!runtimes.has(runtime.profile.id)) return;
+  if (runtimes.get(runtime.profile.id) !== runtime) return;
   measureRuntime(runtime);
   applyState(runtime);
   runtime.viewer.enableRootMotionSway();
@@ -270,13 +270,13 @@ function afterModelLoad(runtime: PetRuntime): void {
 async function loadInitialModel(runtime: PetRuntime): Promise<void> {
   try {
     const boot = await window.pet.getBootVrm(runtime.profile.id);
-    if (!runtimes.has(runtime.profile.id)) return;
+    if (runtimes.get(runtime.profile.id) !== runtime) return;
     if (boot) await runtime.viewer.loadFromBuffer(boot);
     else await runtime.viewer.loadFromUrl('/AvatarSample_A.vrm');
     afterModelLoad(runtime);
   } catch (error) {
     console.log(`[overlay] ${runtime.profile.name} boot load failed, falling back`, error);
-    if (!runtimes.has(runtime.profile.id)) return;
+    if (runtimes.get(runtime.profile.id) !== runtime) return;
     try {
       await runtime.viewer.loadFromUrl('/AvatarSample_A.vrm');
       afterModelLoad(runtime);
@@ -303,6 +303,7 @@ function refreshAgentControls(petId: string): void {
   const runtime = runtimes.get(petId);
   if (!runtime) return;
   const agent = runtime.profile.agent;
+  const workspacePath = runtime.profile.workspacePath;
   const kind: AgentKind = agent?.kind === 'claude' || agent?.kind === 'agy' ? agent.kind : 'codex';
   const info = {
     kind,
@@ -313,7 +314,7 @@ function refreshAgentControls(petId: string): void {
   runtime.bubble.setAgentControls({ ...info, models: [] }); // 先畫出來,清單到了再補
   void agentModels(kind).then((models) => {
     const current = runtimes.get(petId);
-    if (current?.profile.agent?.kind !== agent?.kind) return; // 等待期間換了家
+    if (current?.profile.agent?.kind !== agent?.kind || current?.profile.workspacePath !== workspacePath) return; // 等待期間換了家
     current?.bubble.setAgentControls({ ...info, models });
   });
 }
@@ -353,9 +354,10 @@ function addRuntime(profile: PetProfile): void {
           return;
         }
         // 不再樂觀 beginTurn:訊息可能被排入佇列,beginTurn 改由 turnStart 事件觸發
-        void window.pet.chatSend(profile.id, text, images).then((result) => {
+        const workspacePath = current.profile.workspacePath;
+        void window.pet.chatSend(profile.id, text, images, workspacePath).then((result) => {
           const bubble = runtimes.get(profile.id)?.bubble;
-          if (!bubble) return;
+          if (!bubble || runtimes.get(profile.id)?.profile.workspacePath !== workspacePath) return;
           if (result.queued) {
             bubble.clearComposer(); // 送出被接受才清(排隊接續時不可洗掉正在打的字)
           } else {
@@ -363,7 +365,7 @@ function addRuntime(profile: PetProfile): void {
           }
         });
       },
-      onCancel: () => window.pet.chatCancel(profile.id),
+      onCancel: () => window.pet.chatCancel(profile.id, runtimes.get(profile.id)?.profile.workspacePath),
       onApproval: (requestId, allow, feedback) =>
         window.pet.chatApproval(profile.id, requestId, allow, feedback),
       onOpenLink: (url) => window.pet.openExternal(url),
@@ -405,9 +407,7 @@ function addRuntime(profile: PetProfile): void {
   // 泡泡重建(renderer crash reload / 單寵熱重啟)後主動拉一次佇列現況——廣播式推播蓋不到重建
   void window.pet.getChatQueue(profile.id).then((list) => runtimes.get(profile.id)?.bubble.setQueue(list));
   // 上次對話回填:agent session 本來就續著,泡泡也該接得上(bubble 端會讓進行中的一輪優先)
-  void window.pet.getChatTranscript(profile.id).then((transcript) => {
-    if (transcript) runtimes.get(profile.id)?.bubble.restoreTranscript(transcript);
-  });
+  hydrateProject(runtime);
   viewer.setLighting(profile.lighting ?? {});
   viewer.setSway(profile.sway ?? {});
   applyState(runtime);
@@ -445,7 +445,17 @@ function reconcileProfiles(profiles: PetProfile[]): void {
     if (!profile.enabled) continue;
     if (!runtime) addRuntime(profile);
     else {
+      if (runtime.profile.characterId !== profile.characterId
+        || runtime.profile.characterRevision !== profile.characterRevision
+        || runtime.profile.vrmPath !== profile.vrmPath) {
+        const state = { ...runtime.state };
+        removeRuntime(profile.id);
+        addRuntime({ ...profile, state });
+        continue;
+      }
+      const switchedProject = runtime.profile.workspacePath !== profile.workspacePath;
       runtime.profile = profile;
+      if (switchedProject) { runtime.bubble.resetProject(); hydrateProject(runtime); }
       runtime.bubble.setPetName(profile.name);
       runtime.bubble.setWorkspacePath(profile.workspacePath);
       runtime.bubble.setAgentInfo(agentInfoText(profile)); // 設定面板換模型/力度即時反映
@@ -532,10 +542,30 @@ window.pet.onWardrobe((petId, states) => {
   runtime.wardrobeStates = states;
   applyWardrobe(runtime);
 });
-window.pet.onChatEvent((petId, event) => {
+type BufferedEvent = { event: Parameters<Parameters<typeof window.pet.onChatEvent>[0]>[1]; revision: number };
+const hydratingProjects = new Map<string, { path?: string; events: BufferedEvent[] }>();
+function hydrateProject(runtime: PetRuntime): void {
+  const id = runtime.profile.id;
+  const path = runtime.profile.workspacePath;
+  const pending = { path, events: [] as BufferedEvent[] };
+  hydratingProjects.set(id, pending);
+  void window.pet.getChatTranscript(id, path).then((transcript) => {
+    if (runtimes.get(id) !== runtime || hydratingProjects.get(id) !== pending || runtime.profile.workspacePath !== path) return;
+    hydratingProjects.delete(id);
+    if (transcript?.running) {
+      runtime.bubble.beginTurn(transcript.user);
+      runtime.bubble.appendText(transcript.reply);
+      if (transcript.pendingApproval) runtime.bubble.showApproval(transcript.pendingApproval.requestId, transcript.pendingApproval.description);
+    } else if (transcript) runtime.bubble.restoreTranscript(transcript);
+    for (const item of pending.events) if (item.revision > (transcript?.revision ?? -1)) handleChatEvent(id, item.event, path, item.revision);
+  });
+}
+function handleChatEvent(petId: string, event: BufferedEvent['event'], workspacePath?: string, revision = 0): void {
   const runtime = runtimes.get(petId);
   const bubble = runtime?.bubble;
-  if (!runtime || !bubble) return;
+  if (!runtime || !bubble || (workspacePath && workspacePath !== runtime.profile.workspacePath)) return;
+  const pending = hydratingProjects.get(petId);
+  if (pending && pending.path === runtime.profile.workspacePath) { pending.events.push({ event, revision }); return; }
   // 狀態膠囊「已讀前不隨泡泡收合消失」:泡泡收合時把膠囊定位到寵物旁(泡泡從未打開過也要有位置)
   const placeActivity = (): void => {
     if (!bubble.isVisible()) positionSpeechBubble(runtime, false, true);
@@ -576,7 +606,8 @@ window.pet.onChatEvent((petId, event) => {
       placeActivity();
       break;
   }
-});
+}
+window.pet.onChatEvent(handleChatEvent);
 
 function scheduleSave(runtime: PetRuntime): void {
   const previous = saveTimers.get(runtime.profile.id);

@@ -29,6 +29,7 @@ export interface SpeechBubble {
   isResizing: () => boolean;
   /** 清空輸入框與待送附件(送出被 main 接受後由 renderer 呼叫;不綁在 beginTurn——佇列接續時會洗掉正在打的字)。 */
   clearComposer: () => void;
+  resetProject: () => void;
   /** 排隊中的訊息清單(輸入框上方;每則 ✕ → onRemoveQueued);空陣列收合。 */
   setQueue: (list: { id: string; text: string; hasImages: boolean }[]) => void;
   /** 就地錯誤(workspace 未設定/佇列滿):回覆區紅字 + activity 提示,不動 busy 狀態。 */
@@ -877,6 +878,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       reply.classList.remove('open');
       status.textContent = '';
       statusRow.classList.add('open');
+    },
+    resetProject: () => {
+      busy = false; replyRaw = ''; reply.replaceChildren(mdBox); mdBox.innerHTML = ''; reply.classList.remove('open');
+      approvalRequestId = null; approvalBox.classList.remove('open'); statusRow.classList.remove('open');
+      status.textContent = ''; setTask(null); activity.classList.remove('open');
+      input.value = ''; history.length = 0; historyIndex = null; pendingImages = []; updateImagesBox();
+      refsBox.replaceChildren(); refsBox.classList.remove('open');
     },
     clearComposer: () => {
       // 這裡是「送出被 main 接受」的唯一時機(被拒收不會呼叫),歷史就在這收

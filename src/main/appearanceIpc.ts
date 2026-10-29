@@ -28,7 +28,7 @@ export interface AppearanceIpcDeps<TProfile> {
 /** 註冊外觀 IPC;回傳 dispose 供測試或熱重載清理(正式流程 app 結束即釋放)。 */
 export function registerAppearanceIpc<
   TProfile extends {
-    state?: unknown; lighting?: unknown; sway?: unknown;
+    characterId?: string; state?: unknown; lighting?: unknown; sway?: unknown;
     wardrobe?: Record<string, boolean>; vrmPath?: string; defaultPose?: string;
   }
 >(deps: AppearanceIpcDeps<TProfile>): () => void {
@@ -54,15 +54,19 @@ export function registerAppearanceIpc<
   });
 
   ipcMain.handle('get-lighting', (_event, id: string) => getPet(id)?.lighting ?? null);
-  ipcMain.on('set-lighting', (_event, id: string, lighting: unknown) => {
-    updatePet(id, { lighting } as Partial<TProfile>);
-    overlay()?.webContents.send('apply-lighting', id, lighting);
+  ipcMain.on('set-lighting', (event, id: string, lighting: unknown, characterId?: string) => {
+    if (characterId && getPet(id)?.characterId !== characterId) return;
+    if (event.sender !== settings()?.webContents && event.sender !== overlay()?.webContents) return;
+    const saved = updatePet(id, { lighting } as Partial<TProfile>);
+    if (saved) overlay()?.webContents.send('apply-lighting', id, saved.lighting);
   });
 
   ipcMain.handle('get-sway', (_event, id: string) => getPet(id)?.sway ?? null);
-  ipcMain.on('set-sway', (_event, id: string, sway: unknown) => {
-    updatePet(id, { sway } as Partial<TProfile>);
-    overlay()?.webContents.send('apply-sway', id, sway);
+  ipcMain.on('set-sway', (event, id: string, sway: unknown, characterId?: string) => {
+    if (characterId && getPet(id)?.characterId !== characterId) return;
+    if (event.sender !== settings()?.webContents && event.sender !== overlay()?.webContents) return;
+    const saved = updatePet(id, { sway } as Partial<TProfile>);
+    if (saved) overlay()?.webContents.send('apply-sway', id, saved.sway);
   });
 
   ipcMain.on('wardrobe-list', (event, id: string, list: { key: string; label: string }[]) => {
@@ -75,12 +79,14 @@ export function registerAppearanceIpc<
     list: wardrobeLists.get(id) ?? [],
     states: getPet(id)?.wardrobe ?? {}
   }));
-  ipcMain.on('set-wardrobe', (_event, id: string, key: string, visible: boolean) => {
+  ipcMain.on('set-wardrobe', (event, id: string, key: string, visible: boolean) => {
+    if (event.sender !== settings()?.webContents && event.sender !== overlay()?.webContents) return;
+    if (typeof key !== 'string' || typeof visible !== 'boolean') return;
     const profile = getPet(id);
     if (!profile) return;
     const states = { ...(profile.wardrobe ?? {}), [key]: visible };
-    updatePet(id, { wardrobe: states } as Partial<TProfile>);
-    overlay()?.webContents.send('apply-wardrobe', id, states);
+    const saved = updatePet(id, { wardrobe: states } as Partial<TProfile>);
+    if (saved) overlay()?.webContents.send('apply-wardrobe', id, saved.wardrobe);
   });
 
   /* VRM 讀檔快取:N 隻寵物用同一個模型檔時開機只讀一次磁碟(VRM 可達十幾 MB)。

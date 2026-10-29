@@ -1,9 +1,13 @@
+import type { LocalPet, PetProject } from '../shared/projects';
+import { SettingsStore, migrateSettings } from './settingsStore';
 import { appPrompt } from './appPrompt';
+import { CharacterStore, applyCharacter, atomicYaml, parseCharacterYaml, characterParameters, modelHash } from './characterStore';
+import { CHARACTER_KEYS, parseCharacterExport, type CharacterFileResult } from '../shared/character';
 import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { isAbsolute, join, resolve } from 'node:path';
-import { constants, mkdirSync, readFileSync, renameSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { constants, existsSync, realpathSync, mkdirSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
 import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
@@ -52,6 +56,13 @@ interface Sway {
 }
 
 interface PetProfile {
+  projects?: PetProject[];
+  personaVersion?: string;
+  characterId?: string;
+  characterReady?: boolean;
+  characterLoaded?: boolean;
+  characterRevision?: number;
+  characterError?: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -81,12 +92,6 @@ interface AppRegistry {
   locale?: string;
 }
 
-type LegacyConfig = Omit<PetProfile, 'id' | 'name' | 'enabled'> & {
-  schemaVersion?: number;
-  selectedPetId?: string;
-  pets?: PetProfile[];
-};
-
 const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
 
 let win: BrowserWindow | null = null;
@@ -109,6 +114,8 @@ let refreshCursorPollHook: (() => void) | null = null;
 /** 清空某寵的對話佇列(whenReady 注入):寵物休息/刪除/開新對話時呼叫。 */
 let clearChatQueueHook: ((petId: string) => void) | null = null;
 /** 清掉某寵的上次對話紀錄(開新對話/刪除寵物);whenReady 內注入。 */
+let projectChangedHook: ((id: string) => void) | null = null;
+let queuedTaskCountHook: ((id: string) => number) | null = null;
 let clearTranscriptHook: ((petId: string) => void) | null = null;
 /** 全域派發(whenReady 注入):寵物喚醒時呼叫——醒來的寵物可領公用池的單。 */
 let dispatchAllHook: (() => void) | null = null;
@@ -124,7 +131,7 @@ app.setPath('userData', userDataDir);
 app.setPath('sessionData', userDataDir);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) app.quit();
+if (!hasSingleInstanceLock) app.exit(0);
 
 function syncOverlayMouseEvents(): void {
   win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
@@ -132,15 +139,41 @@ function syncOverlayMouseEvents(): void {
 
 /* 開發版與安裝版共用使用者資料；測試可用 VRM_PET_DATA_DIR 隔離。 */
 const dataDir = (): string => app.getPath('userData');
-const defaultVrmPath = (): string => join(dataDir(), 'models', 'AvatarSample_A.vrm');
+const defaultVrmPath = (): string => join(dirname(characters.filePath), 'assets', 'AvatarSample_A.vrm');
 const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
-const petsDir = (): string => join(runtimeDataDir(), 'pets');
-const registryPath = (): string => join(runtimeDataDir(), 'app.json');
-const petPath = (id: string): string => join(petsDir(), `${id}.json`);
+const settings = new SettingsStore(join(runtimeDataDir(), 'app.yaml'));
+let settingsReady = false;
+let characters = new CharacterStore(process.env['VRM_PET_SHARED_CHARACTERS'] ?? join(app.getPath('appData'), 'VRM Pet', 'runtime-data', 'characters.yaml'));
+let characterOperation: Promise<unknown> = Promise.resolve();
+function serializeCharacter<T>(operation: () => Promise<T>): Promise<T> {
+  const result = characterOperation.then(operation);
+  characterOperation = result.catch(() => {});
+  return result;
+}
+let storageError = '';
+function reportStorageError(error: unknown): void {
+  storageError = error instanceof Error ? error.message : String(error);
+  settingsWin?.webContents.send('character-storage-error', storageError);
+}
+function localPet(profile: PetProfile): LocalPet {
+  return { id: profile.id, name: profile.name, enabled: profile.enabled, projects: profile.projects ?? [],
+    workspacePath: profile.workspacePath, state: profile.state, personaVersion: profile.personaVersion };
+}
+function projectFor(profile: PetProfile, path = profile.workspacePath): PetProject | undefined {
+  return profile.projects?.find((p) => p.workspacePath === path);
+}
+function selectProject(profile: PetProfile, path: string): boolean {
+  const project = projectFor(profile, path);
+  if (!project) return false;
+  profile.workspacePath = path;
+  profile.agent = project.agent;
+  projectChangedHook?.(profile.id);
+  scheduleConfigFlush();
+  sendPetProfiles();
+  return true;
+}
 const transcriptsDir = (): string => join(runtimeDataDir(), 'transcripts');
-const transcriptPath = (id: string): string => join(transcriptsDir(), `${id}.json`);
-const legacyRuntimeConfigPath = (): string => join(runtimeDataDir(), 'config.json');
-const legacyRootConfigPath = (): string => join(dataDir(), 'config.json');
+const transcriptPath = (id: string, workspace = getPet(id)?.workspacePath ?? ''): string => join(transcriptsDir(), `${modelHash(Buffer.from(JSON.stringify([id, workspace])))}.json`);
 const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
 
 /** 兩種版本首次啟動都初始化預設模型；已有檔案時不覆寫。 */
@@ -150,7 +183,7 @@ async function ensureDefaultVrm(): Promise<void> {
     return;
   } catch { /* 尚未初始化 */ }
   try {
-    await mkdir(join(dataDir(), 'models'), { recursive: true });
+    await mkdir(dirname(defaultVrmPath()), { recursive: true });
     const source = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'models', 'AvatarSample_A.vrm');
     await copyFile(source, defaultVrmPath(), constants.COPYFILE_EXCL);
   } catch (error) {
@@ -167,25 +200,14 @@ function writeSystemPidRecord(): void {
   writeFileSync(systemPidPath(), `${process.pid}\n`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readJson(path: string): unknown | null {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 function normalizeProfile(value: Partial<PetProfile>, index: number): PetProfile {
   const id = typeof value.id === 'string' && value.id ? value.id : randomUUID();
   const profile: PetProfile = {
     ...value,
     id,
     name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : t('common.defaultPetName', { n: index + 1 }),
-    enabled: value.enabled !== false
+    enabled: value.enabled !== false,
+    characterReady: false,
   };
   // 遷移:舊 codexSessionId → agent(舊欄位保留不刪,循遷移慣例)
   if (!profile.agent && profile.codexSessionId) {
@@ -208,134 +230,64 @@ function createProfile(index = pets.size): PetProfile {
   );
 }
 
-/** 待落盤集合:updatePet 標寵物、selectPet 等標 registry;flush 只寫髒的檔案。 */
-const dirtyPetIds = new Set<string>();
-let registryDirty = false;
-let configFlushInFlight = false;
+/** 合併短時間內的設定變更，統一原子落盤。 */
 
-/** 初始化及退出時全量同步落盤(before-quit 與 Tray 結束;app.exit 不觸發 before-quit,
- *  行程要死了必須同步寫完)。平時的 500ms debounce 走 persistConfigAsync,不佔 main event loop。 */
+/** 平時合併 500ms 內的變更；角色資料先寫入，啟動索引最後更新。 */
 function persistConfigSync(): void {
   if (configFlush) {
     clearTimeout(configFlush);
     configFlush = null;
   }
   try {
-    mkdirSync(petsDir(), { recursive: true });
-    writeFileSync(registryPath(), JSON.stringify(registry, null, 2));
-    for (const profile of pets.values()) {
-      writeFileSync(petPath(profile.id), JSON.stringify(profile, null, 2));
-    }
-    registryDirty = false;
-    dirtyPetIds.clear();
+    if (!settingsReady) return;
+    characters.flush();
+    settings.save({ initialized: true, selectedPetId: registry.selectedPetId,
+      defaultWorkspaceRoot: registry.defaultWorkspaceRoot, locale: registry.locale,
+      pets: [...pets.values()].map(localPet),
+    });
+    storageError = '';
+    settingsWin?.webContents.send('character-storage-error', '');
   } catch (error) {
+    reportStorageError(error);
     console.log('[main] config flush failed', error);
   }
 }
 
-/** 非同步落盤:只寫髒檔;寫入期間新標髒的由迴圈或下一輪 debounce 撿走。 */
-async function persistConfigAsync(): Promise<void> {
-  if (configFlushInFlight) {
-    scheduleConfigFlush(); // 上一輪還在寫,改期再來(不可交錯寫同一批檔案)
-    return;
-  }
-  configFlushInFlight = true;
-  try {
-    await mkdir(petsDir(), { recursive: true });
-    while (registryDirty || dirtyPetIds.size) {
-      if (registryDirty) {
-        registryDirty = false;
-        await writeFile(registryPath(), JSON.stringify(registry, null, 2));
-      }
-      const ids = [...dirtyPetIds];
-      dirtyPetIds.clear();
-      for (const id of ids) {
-        const profile = pets.get(id);
-        if (profile) await writeFile(petPath(id), JSON.stringify(profile, null, 2));
-      }
-    }
-  } catch (error) {
-    console.log('[main] config flush failed', error);
-  } finally {
-    configFlushInFlight = false;
-    // 迴圈結束到這裡之間若又標髒(await 空檔),補一輪 debounce 免得漏寫
-    if (registryDirty || dirtyPetIds.size) scheduleConfigFlush();
-  }
+/** 先寫角色檔再寫桌寵引用，與退出儲存共用同一個序列。 */
+function persistPendingConfig(): void {
+  // 同步原子替換避免退出與背景寫入交錯。
+  persistConfigSync();
 }
 
 function scheduleConfigFlush(): void {
   if (configFlush) clearTimeout(configFlush);
-  configFlush = setTimeout(() => void persistConfigAsync(), 500);
+  configFlush = setTimeout(persistPendingConfig, 500);
 }
 
-function loadConfigSync(): void {
-  mkdirSync(petsDir(), { recursive: true });
-  const rawRegistry = readJson(registryPath());
-  // 語言要在 normalize 之前就緒:缺名寵物的預設名(寵物 N)在下面產生,晚 setLocale 會拿到錯語言
-  const peekedLocale = isRecord(rawRegistry) && typeof rawRegistry['locale'] === 'string'
-    && LOCALES.includes(rawRegistry['locale'] as Locale)
-    ? (rawRegistry['locale'] as Locale)
-    : undefined;
-  setLocale(peekedLocale ?? resolveLocale(app.getLocale()));
-  if (isRecord(rawRegistry) && rawRegistry['schemaVersion'] === 2 && Array.isArray(rawRegistry['petIds'])) {
-    const ids = rawRegistry['petIds'].filter((id): id is string => typeof id === 'string');
-    ids.forEach((id, index) => {
-      const raw = readJson(petPath(id));
-      if (isRecord(raw)) {
-        const profile = normalizeProfile(raw as Partial<PetProfile>, index);
-        pets.set(profile.id, profile);
-      }
-    });
-    if (pets.size) {
-      const requested = typeof rawRegistry['selectedPetId'] === 'string' ? rawRegistry['selectedPetId'] : '';
-      // 全域設定要讀回保留,否則重建 registry 時會被洗掉
-      const savedRoot = typeof rawRegistry['defaultWorkspaceRoot'] === 'string' && rawRegistry['defaultWorkspaceRoot']
-        ? rawRegistry['defaultWorkspaceRoot']
-        : undefined;
-      registry = {
-        schemaVersion: 2,
-        selectedPetId: pets.has(requested) ? requested : pets.keys().next().value!,
-        petIds: [...pets.keys()],
-        ...(savedRoot ? { defaultWorkspaceRoot: savedRoot } : {}),
-        ...(peekedLocale ? { locale: peekedLocale } : {})
-      };
-      persistConfigSync();
-      return;
-    }
+async function loadConfig(): Promise<void> {
+  const boot = await migrateSettings(settings, defaultVrmPath(), characters.filePath, {
+    model: async (path, name) => {
+      await appPrompt({ message: `「${name}」的模型路徑已失效，請重新選擇模型。`, detail: path, buttons: ['選擇模型', '取消'], cancelId: 1 }).then((answer) => { if (answer.response === 1) throw new Error('已取消修復'); });
+      const result = await dialog.showOpenDialog({ title: `修復 ${name} 的模型路徑`, defaultPath: join(app.getPath('appData'), 'VRM Pet', 'models'), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
+      return result.filePaths[0] ?? null;
+    },
+    parameters: async (existing, incoming) => {
+      const result = await appPrompt({ message: '同一模型有不同角色設定，請選擇所有工作樹共用的版本。',
+        detail: `既有設定：\n${JSON.stringify(existing, null, 2)}\n\n待匯入設定：\n${JSON.stringify(incoming, null, 2)}`,
+        buttons: [`保留 ${existing.name}`, `採用 ${incoming.name}`, '取消'], cancelId: 2 });
+      return result.response === 0 ? 'existing' : result.response === 1 ? 'incoming' : 'cancel';
+    },
+  }, process.env['VRM_PET_BASELINE_DIR']);
+  characters = new CharacterStore(boot.charactersPath);
+  setLocale(boot.locale && LOCALES.includes(boot.locale as Locale) ? boot.locale as Locale : resolveLocale(app.getLocale()));
+  for (const item of boot.pets) {
+    const profile = normalizeProfile({ ...item, characterId: item.id }, pets.size);
+    profile.agent = projectFor(profile)?.agent;
+    pets.set(item.id, profile);
   }
-
-  // v1 runtime-data/config.json（或更早的根目錄 config.json）自動轉成第一隻寵物。
-  const legacyRaw = readJson(legacyRuntimeConfigPath()) ?? readJson(legacyRootConfigPath());
-  const legacy = isRecord(legacyRaw) ? (legacyRaw as LegacyConfig) : {};
-  const legacyPets = Array.isArray(legacy.pets) ? legacy.pets : null;
-  if (legacyPets?.length) {
-    legacyPets.forEach((profile, index) => {
-      const normalized = normalizeProfile(profile, index);
-      pets.set(normalized.id, normalized);
-    });
-  } else {
-    const {
-      schemaVersion: _schemaVersion,
-      selectedPetId: _selectedPetId,
-      pets: _legacyPets,
-      ...legacyProfile
-    } = legacy;
-    const profile = normalizeProfile({
-      ...legacyProfile,
-      id: randomUUID(),
-      name: t('common.myPet'),
-      enabled: true
-    }, 0);
-    pets.set(profile.id, profile);
-  }
-  const requested = typeof legacy.selectedPetId === 'string' ? legacy.selectedPetId : '';
-  registry = {
-    schemaVersion: 2,
-    selectedPetId: pets.has(requested) ? requested : pets.keys().next().value!,
-    petIds: [...pets.keys()]
-  };
-  persistConfigSync();
-  console.log(`[main] migrated ${pets.size} pet profile(s) to:`, petsDir());
+  registry = { schemaVersion: 2, selectedPetId: boot.selectedPetId ?? boot.pets[0]?.id ?? '', petIds: boot.pets.map((p) => p.id),
+    defaultWorkspaceRoot: boot.defaultWorkspaceRoot, locale: boot.locale as Locale | undefined };
+  settingsReady = true;
 }
 
 function getPet(id?: string): PetProfile | null {
@@ -345,6 +297,19 @@ function getPet(id?: string): PetProfile | null {
 function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
   const profile = pets.get(id);
   if (!profile) return null;
+  if (!profile.characterLoaded && Object.keys(patch).some((key) => key !== 'enabled')) return profile;
+  if (patch.enabled === true && !profile.characterReady) return profile;
+  if (CHARACTER_KEYS.some((key) => key in patch)) {
+    if (!profile.enabled || !profile.characterReady) return profile;
+    try {
+      const parameters = characterParameters({ ...profile, ...patch });
+      if (profile.characterId) characters.update(profile.characterId, parameters);
+    } catch (error) { reportStorageError(error); return profile; }
+  }
+  if (patch.agent) {
+    const project = projectFor(profile);
+    if (project) project.agent = patch.agent;
+  }
   Object.assign(profile, patch, { id: profile.id });
   // 「休息 → 釋放快取 + 關 agent session」是 disable 的固有副作用:集中在這唯一變更點,
   // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
@@ -357,7 +322,6 @@ function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
   }
   if (patch.enabled !== undefined) refreshCursorPollHook?.();
   if (patch.enabled !== undefined || 'idleMotions' in patch) scheduleIdleMotion(id);
-  dirtyPetIds.add(id);
   scheduleConfigFlush();
   return profile;
 }
@@ -367,11 +331,46 @@ function releasePetCaches(id: string): void {
   wardrobeLists.delete(id);
 }
 
-function setPetEnabled(id: string, enabled: boolean): PetProfile | null {
-  const profile = updatePet(id, { enabled }); // 快取釋放已內建於 updatePet
-  if (!profile) return null;
-  sendPetProfiles();
-  return profile;
+async function wakeCharacter(profile: PetProfile): Promise<void> {
+  characters.loadForWake();
+  const saved = characters.get(profile.id);
+  if (profile.characterId && !saved) throw new Error('characters.yaml 缺少此角色，請還原設定');
+  if (saved) {
+    const version = modelHash(Buffer.from(saved.parameters.persona ?? ''));
+    if (profile.personaVersion !== version) {
+      await bridge?.closePetSession(profile.id);
+      for (const project of profile.projects ?? []) if (project.agent) delete project.agent.sessionId;
+    }
+    profile.personaVersion = version;
+    profile.vrmPath = saved.vrmPath;
+    profile.agent = projectFor(profile)?.agent;
+    applyCharacter(profile, saved.parameters);
+  }
+  if (!profile.workspacePath) throw new Error('請先選擇工作目錄');
+  await bindCharacter(profile, profile.workspacePath, profile.vrmPath ?? defaultVrmPath(), true);
+  updatePet(profile.id, { enabled: true });
+}
+
+async function setPetEnabled(id: string, enabled: boolean): Promise<PetProfile | null> {
+  return serializeCharacter(async () => {
+    const profile = getPet(id);
+    if (!profile) return null;
+    if (enabled && !profile.enabled) {
+      try { await wakeCharacter(profile); }
+      catch (error) {
+        profile.enabled = false;
+        profile.characterReady = false;
+        profile.characterError = `角色設定載入失敗：${String(error)}`;
+        await appPrompt({ message: profile.characterError, buttons: ['確定'], cancelId: 0 });
+      }
+    } else if (!enabled) {
+      updatePet(id, { enabled: false });
+      profile.characterReady = false;
+    }
+    persistConfigSync();
+    sendPetProfiles();
+    return profile;
+  });
 }
 
 function sendPetProfiles(): void {
@@ -387,7 +386,6 @@ function selectPet(id: string): PetProfile | null {
   const profile = pets.get(id);
   if (!profile) return null;
   registry.selectedPetId = id;
-  registryDirty = true;
   scheduleConfigFlush();
   refreshTray();
   settingsWin?.webContents.send('selected-pet-apply', id);
@@ -398,15 +396,58 @@ function selectPet(id: string): PetProfile | null {
   return profile;
 }
 
+/** 先完成讀檔、查重及角色檔驗證，成功後才改變目前綁定。 */
+async function bindCharacter(profile: PetProfile, workspace: string, path: string, waking = false): Promise<void> {
+  const bytes = await readFile(path);
+  const hash = modelHash(bytes);
+  if (!waking && !profile.characterLoaded) throw new Error('請先喚醒寵物以載入完整設定');
+  characters.flush();
+  const id = profile.id;
+  const initial = characterParameters(profile);
+  const document = characters.resolve(path, hash, initial, !!profile.characterId, id);
+  if (!pets.has(profile.id)) throw new Error('桌寵已移除');
+  profile.workspacePath = workspace;
+  profile.vrmPath = path;
+  profile.characterId = id;
+  profile.characterReady = waking || profile.enabled;
+  profile.characterLoaded = true;
+  profile.characterRevision = (profile.characterRevision ?? 0) + 1;
+  delete profile.characterError;
+  applyCharacter(profile, document.parameters);
+  releasePetCaches(profile.id);
+  scheduleIdleMotion(profile.id);
+  if (!waking) { persistConfigSync(); sendPetProfiles(); }
+  // 完整設定由 profile 廣播套用；模型由 renderer 依角色版本重建，避免兩次載入競態。
+}
+
 async function pushVrm(petId: string, path: string): Promise<void> {
-  try {
-    const buf = await readFile(path);
-    updatePet(petId, { vrmPath: path });
-    win?.webContents.send('vrm-buffer', petId, buf);
-    sendPetProfiles();
-  } catch (error) {
-    console.log('[main] pushVrm failed', error);
+  await serializeCharacter(async () => {
+    const profile = getPet(petId);
+    if (!profile) return;
+    if (!profile.workspacePath) {
+      await appPrompt({ message: '請先喚醒寵物以載入完整設定', buttons: ['確定'], cancelId: 0 });
+      return;
+    }
+    try { await bindCharacter(profile, profile.workspacePath, path); }
+    catch (error) {
+      await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 });
+    }
+  });
+}
+
+/** 啟動僅還原原先啟用的桌寵；休息中的桌寵不讀 YAML 或模型。 */
+async function initializeCharacters(): Promise<void> {
+  for (const profile of pets.values()) {
+    const enabled = profile.enabled;
+    profile.enabled = false;
+    profile.characterReady = false;
+    if (!enabled) continue;
+    try { await wakeCharacter(profile); }
+    catch (error) {
+      profile.characterError = `角色設定載入失敗（原檔已保留）：${String(error)}`;
+    }
   }
+  persistConfigSync();
 }
 
 async function chooseVrm(petId: string, parent?: BrowserWindow): Promise<void> {
@@ -440,19 +481,45 @@ async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<s
     : await dialog.showOpenDialog(options);
   const path = result.filePaths[0];
   if (result.canceled || !path) return profile.workspacePath ?? null;
-  updatePet(petId, { workspacePath: path });
-  sendPetProfiles();
-  return path;
+  await serializeCharacter(async () => {
+    try {
+      const canonical = realpathSync.native(path);
+      profile.projects ??= [];
+      if (!projectFor(profile, canonical)) profile.projects.push({ workspacePath: canonical });
+      selectProject(profile, canonical);
+      persistConfigSync();
+    }
+    catch (error) { await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 }); }
+  });
+  return profile.workspacePath ?? null;
 }
 
-function createNewPet(): PetProfile {
+async function createNewPet(): Promise<PetProfile> {
+  const result = await dialog.showOpenDialog({ title: '選擇新寵物模型', properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
+  if (result.canceled || !result.filePaths[0]) return getPet()!;
   const profile = createProfile();
-  // 自動建立預設工作目錄:避免忘記選目錄造成工作區污染;失敗時維持未設定(bridge 原擋門行為)
+  profile.vrmPath = result.filePaths[0];
+  profile.enabled = false;
+  characters.loadForWake(); // 新增寵物也是一次明確的喚醒操作。
+  const hash = modelHash(await readFile(profile.vrmPath));
+  const duplicate = characters.all().find((doc) => doc.modelHash === hash);
+  if (duplicate && pets.has(duplicate.id)) {
+    await appPrompt({ message: `此世界已有「${duplicate.parameters.name}」，請在既有角色新增負責的專案。`, buttons: ['確定'], cancelId: 0 });
+    return getPet(duplicate.id)!;
+  }
+  profile.id = duplicate?.id ?? profile.id;
+  if (duplicate) { profile.characterId = duplicate.id; applyCharacter(profile, duplicate.parameters); }
   ensurePetWorkspace(workspaceRoot(), profile);
+  if (profile.workspacePath) {
+    profile.workspacePath = realpathSync.native(profile.workspacePath);
+    profile.projects = [{ workspacePath: profile.workspacePath }];
+  }
   pets.set(profile.id, profile);
+  try { await wakeCharacter(profile); }
+  catch (error) { pets.delete(profile.id); throw error; }
   registry.petIds.push(profile.id);
   registry.selectedPetId = profile.id;
-  refreshCursorPollHook?.(); // 全休息時新增的寵物是啟用的:恢復輪詢
+  refreshCursorPollHook?.();
   persistConfigSync();
   sendPetProfiles();
   return profile;
@@ -460,11 +527,7 @@ function createNewPet(): PetProfile {
 
 function removePet(id: string): boolean {
   if (pets.size <= 1 || !pets.has(id)) return false;
-  const trashDir = join(petsDir(), '.trash');
-  mkdirSync(trashDir, { recursive: true });
-  try {
-    renameSync(petPath(id), join(trashDir, `${id}-${Date.now()}.json`));
-  } catch { /* 尚未落盤的新寵物沒有檔案可搬 */ }
+  // 移除本世界的角色引用，不刪除其他世界仍使用的共用角色。
   pets.delete(id);
   releasePetCaches(id);
   clearChatQueueHook?.(id);
@@ -691,8 +754,8 @@ function petMenu(requestedId?: string): Menu {
     { type: 'separator' },
     {
       label: t('tray.addPet'),
-      click: () => {
-        const created = createNewPet();
+      click: async () => {
+        const created = await serializeCharacter(createNewPet);
         openSettings('project', created.id);
       }
     },
@@ -813,7 +876,6 @@ const TRAY_ICON =
 
 app.whenReady().then(async () => {
   writeSystemPidRecord();
-  await ensureDefaultVrm();
   // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)。
   // =1 → MockProvider 全鏈;=claude / =codex → 真 CLI e2e(耗額度,顯式觸發才跑)
   const selftestMode = process.env['VRM_PET_AGENT_SELFTEST'];
@@ -826,14 +888,19 @@ app.whenReady().then(async () => {
     return;
   }
   if (process.platform === 'darwin') app.dock?.hide();
-  loadConfigSync();
-  // registry 讀回後才取自訂根目錄；首次啟動與舊設定都經過這裡，已有路徑不變。
-  let workspaceAdded = false;
-  for (const profile of pets.values()) {
-    if (ensurePetWorkspace(workspaceRoot(), profile)) workspaceAdded = true;
+  try {
+    const boot = settings.loadRaw();
+    if (boot.schemaVersion === 2 && typeof boot.charactersPath === 'string') characters = new CharacterStore(boot.charactersPath);
+    await ensureDefaultVrm();
+    await loadConfig();
+  }
+  catch (error) {
+    await appPrompt({ message: `設定初始化失敗，原檔已保留：${String(error)}`, buttons: ['結束'], cancelId: 0 });
+    app.exit(1);
+    return;
   }
   // 顯示視窗前落盤，避免下次啟動再次替同一隻寵物建立目錄。
-  if (workspaceAdded) persistConfigSync();
+  await initializeCharacters();
 
   app.on('second-instance', () => {
     openControlPanel();
@@ -842,15 +909,17 @@ app.whenReady().then(async () => {
   /* ── 串流文字合併(效能優化階段 3)──
    * provider 的 text delta 是 token 級,每 token 一次 IPC 太密(renderer 每次都全文重渲);
    * 33ms 合併一次;非 text 事件(done/error/approval…)到達時先 flush 緩衝,嚴格保序。 */
-  const chatTextBuffers = new Map<string, string>();
+  const chatTextBuffers = new Map<string, { text: string; workspacePath?: string; revision: number }>();
+  const chatRevisions = new Map<string, number>();
+  const chatKey = (id: string, path?: string): string => JSON.stringify([id, path]);
   let chatFlushTimer: NodeJS.Timeout | null = null;
   function flushChatText(): void {
     if (chatFlushTimer) {
       clearTimeout(chatFlushTimer);
       chatFlushTimer = null;
     }
-    for (const [petId, text] of chatTextBuffers) {
-      win?.webContents.send('chat-event-apply', petId, { kind: 'text', text });
+    for (const [petId, value] of chatTextBuffers) {
+      win?.webContents.send('chat-event-apply', petId, { kind: 'text', text: value.text }, value.workspacePath, value.revision);
     }
     chatTextBuffers.clear();
   }
@@ -888,11 +957,12 @@ app.whenReady().then(async () => {
    *    但泡泡是空的)。只留最後一輪,寫在獨立檔案——寵物設定檔會被拖曳位置高頻改寫,
    *    幾十 KB 的逐字稿混進去每次都要重寫一遍。落盤只發生在 turn 結束。 */
   const TRANSCRIPT_MAX_CHARS = 40_000;
-  const liveTranscripts = new Map<string, { user: string; reply: string }>();
+  const liveTranscripts = new Map<string, { user: string; reply: string; workspacePath?: string }>();
 
-  function beginTranscript(petId: string, userText: string): void {
-    liveTranscripts.set(petId, { user: userText.slice(0, 2_000), reply: '' });
+  function beginTranscript(petId: string, userText: string, workspacePath?: string): void {
+    liveTranscripts.set(petId, { user: userText.slice(0, 2_000), reply: '', workspacePath });
   }
+  const completedTranscripts = new Map<string, ChatTranscript>();
   function persistTranscript(petId: string): void {
     const live = liveTranscripts.get(petId);
     liveTranscripts.delete(petId);
@@ -902,17 +972,23 @@ app.whenReady().then(async () => {
       reply: live.reply.slice(-TRANSCRIPT_MAX_CHARS),
       at: Date.now(),
     };
+    completedTranscripts.set(chatKey(petId, live.workspacePath), record);
     void mkdir(transcriptsDir(), { recursive: true })
-      .then(() => writeFile(transcriptPath(petId), JSON.stringify(record), 'utf8'))
+      .then(() => writeFile(transcriptPath(petId, live.workspacePath), JSON.stringify(record), 'utf8'))
       .catch(() => {}); // 紀錄是附加價值,寫失敗不該影響對話
   }
   clearTranscriptHook = (petId) => {
-    liveTranscripts.delete(petId);
+    const selected = getPet(petId)?.workspacePath;
+    if (liveTranscripts.get(petId)?.workspacePath === selected) liveTranscripts.delete(petId);
+    completedTranscripts.delete(chatKey(petId, selected));
     void rm(transcriptPath(petId), { force: true }).catch(() => {});
   };
 
-  function sendChatEvent(petId: string, event: AgentEvent): void {
-    if (event.kind === 'turnStart') beginTranscript(petId, event.text);
+  function sendChatEvent(petId: string, event: AgentEvent, workspacePath = bridge?.petStates().find((s) => s.petId === petId && s.running)?.workspacePath ?? getPet(petId)?.workspacePath): void {
+    const key = chatKey(petId, workspacePath);
+    const revision = (chatRevisions.get(key) ?? 0) + 1;
+    chatRevisions.set(key, revision);
+    if (event.kind === 'turnStart') beginTranscript(petId, event.text, workspacePath);
     else if (event.kind === 'text') {
       const live = liveTranscripts.get(petId);
       if (live) live.reply += event.text;
@@ -921,14 +997,14 @@ app.whenReady().then(async () => {
     }
     if (event.kind === 'text') {
       // text 增量一律不推中控:中控只顯示狀態燈號,33ms 合併節奏的高頻 IPC 不打第二個視窗
-      chatTextBuffers.set(petId, (chatTextBuffers.get(petId) ?? '') + event.text);
+      chatTextBuffers.set(petId, { text: (chatTextBuffers.get(petId)?.text ?? '') + event.text, workspacePath, revision });
       chatFlushTimer ??= setTimeout(flushChatText, 33);
       return;
     }
     if (event.kind === 'done') finishLedgerTask(petId, event.ok);
     else if (event.kind === 'error') finishLedgerTask(petId, false);
     flushChatText();
-    win?.webContents.send('chat-event-apply', petId, event);
+    win?.webContents.send('chat-event-apply', petId, event, workspacePath, revision);
     scheduleControlStatusHook?.(); // 非 text 事件(turnStart/approval/done…)= 狀態燈號可能變了
   }
 
@@ -964,14 +1040,16 @@ app.whenReady().then(async () => {
     if (petId) win?.webContents.send('chat-queue-apply', petId, chatQueue.summaries(petId));
     scheduleControlStatusHook?.(); // 綁定佇列與公用池(petId=undefined)變更都重推中控快照
   });
+  queuedTaskCountHook = (id) => chatQueue.size(id);
   const chatDispatcher = createChatDispatcher({
     queue: chatQueue,
-    canAccept: (petId) => bridge?.canAccept(petId) ?? false,
+    canAccept: (petId) => !!getPet(petId)?.enabled && (bridge?.canAccept(petId) ?? false),
     // 領公用池的資格:啟用中且已設工作目錄
     unboundCandidates: () => [...pets.values()]
       .filter((profile) => profile.enabled !== false && !!profile.workspacePath)
       .map((profile) => profile.id),
     workspaceOf: (petId) => pets.get(petId)?.workspacePath,
+    workspacesOf: (petId) => pets.get(petId)?.projects?.map((p) => p.workspacePath) ?? [],
     runTask: (petId, task) => {
       // 中控投的任務進帳本:標執行中、補接收者與實際執行位置(公用池單在領走的這一刻才確定)
       const record = taskLedger.get(task.id);
@@ -980,12 +1058,12 @@ app.whenReady().then(async () => {
         record.status = 'running';
         record.assignee = petId;
         if (profile?.name) record.assigneeName = profile.name;
-        if (profile?.workspacePath) record.workspacePath = profile.workspacePath;
+        if (task.workspacePath) record.workspacePath = task.workspacePath;
         runningTaskByPet.set(petId, task.id);
       }
       // turnStart 讓泡泡知道「這一則開始跑了」(beginTurn);非 text 事件,合併器會先 flush 保序
-      sendChatEvent(petId, { kind: 'turnStart', text: task.text });
-      bridge?.chatSend(petId, task.text, task.images);
+      sendChatEvent(petId, { kind: 'turnStart', text: task.text }, task.workspacePath);
+      bridge?.chatSend(petId, task.text, task.images, task.workspacePath);
     }
   });
   clearChatQueueHook = (petId) => chatQueue.clear(petId);
@@ -993,13 +1071,23 @@ app.whenReady().then(async () => {
 
   bridge = createAgentBridge({
     // 淺拷貝合併參考檔(ephemeral,不落盤——persist 走 pets.get 的原物件);資料夾以尾斜線標記
-    getPet: (id) => {
+    getPet: (id, workspacePath) => {
       const profile = pets.get(id);
       if (!profile) return null;
-      const refs = petRefFiles.get(id);
-      return refs?.length ? { ...profile, refFiles: refs.map((r) => r.path + (r.isDir ? '/' : '')) } : profile;
+      const project = projectFor(profile, workspacePath);
+      if (!project) return null;
+      try { if (realpathSync.native(project.workspacePath) !== project.workspacePath) return null; } catch { return null; }
+      const refs = petRefFiles.get(refKey(id, project.workspacePath));
+      return { ...profile, workspacePath: project.workspacePath, agent: project.agent, refFiles: refs?.map((r) => r.path + (r.isDir ? '/' : '')) };
     },
-    updatePet,
+    updatePet: (id, patch, workspacePath) => {
+      const profile = getPet(id);
+      const project = profile && projectFor(profile, workspacePath);
+      if (!profile || !project) return;
+      project.agent = patch.agent;
+      if (profile.workspacePath === project.workspacePath) profile.agent = patch.agent;
+      scheduleConfigFlush();
+    },
     send: sendChatEvent,
     providers: createProviders(petToolsHub),
     // turn 結束(含早退)→ 派發佇列;用 dispatchAll:全域上限釋放的名額可能輪到別隻寵物
@@ -1017,6 +1105,8 @@ app.whenReady().then(async () => {
         : agent?.pendingApproval ? 'awaitingApproval' : agent?.running ? 'working' : 'idle';
       return {
         petId: profile.id,
+        projects: profile.projects?.map((p) => p.workspacePath) ?? [],
+        runningWorkspacePath: agent?.running ? agent.workspacePath : undefined,
         name: profile.name,
         enabled: profile.enabled !== false,
         ...(profile.workspacePath ? { workspacePath: profile.workspacePath } : {}),
@@ -1074,24 +1164,41 @@ app.whenReady().then(async () => {
 
   // 寵物 CRUD 與中繼資料 IPC 已抽到 petIpc.ts(update-pet-meta 的欄位白名單在那裡)
   registerPetIpc({
+    authorized: (event) => event.sender === win?.webContents || event.sender === settingsWin?.webContents || event.sender === controlWin?.webContents,
     listPets: () => [...pets.values()],
     selectedPetId: () => registry.selectedPetId,
     getPet,
-    updatePet,
-    createNewPet,
-    removePet,
+    updatePet: async (id, patch) => {
+      const { enabled, ...metadata } = patch;
+      if (metadata.agent && bridge?.petStates().some((state) => state.petId === id && state.running && state.workspacePath === getPet(id)?.workspacePath)) return getPet(id);
+      if (Object.keys(metadata).length) updatePet(id, metadata);
+      return enabled === undefined ? getPet(id) : setPetEnabled(id, enabled);
+    },
+    createNewPet: () => serializeCharacter(async () => {
+      try { return await createNewPet(); }
+      catch (error) {
+        await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 });
+        return getPet()!;
+      }
+    }),
+    removePet: (id) => serializeCharacter(async () => removePet(id)),
     selectPet,
     sendPetProfiles,
-    closePetSession: (id) => void bridge?.closePetSession(id),
+    closePetSession: (id) => {
+      if (!bridge?.petStates().some((state) => state.petId === id && state.running && state.workspacePath === getPet(id)?.workspacePath)) void bridge?.closePetSession(id, getPet(id)?.workspacePath);
+    },
   });
 
   /* ── 參考檔案(拖放到寵物身上;當次對話有效,純記憶體不落盤)──
    * renderer 經 webUtils 取絕對路徑送來;這裡 stat 驗證存在、判資料夾,注入走 bridge 的 turnOpts。 */
+  const refKey = (id: string, workspacePath = getPet(id)?.workspacePath): string => JSON.stringify([id, workspacePath]);
   const petRefFiles = new Map<string, { path: string; isDir: boolean }[]>();
   const sendRefFiles = (petId: string): void =>
-    win?.webContents.send('ref-files-apply', petId, petRefFiles.get(petId) ?? []);
+    win?.webContents.send('ref-files-apply', petId, petRefFiles.get(refKey(petId)) ?? []);
+  projectChangedHook = sendRefFiles;
   const addReferencePaths = async (petId: string, paths: string[]): Promise<void> => {
-      const list = petRefFiles.get(petId) ?? [];
+      const key = refKey(petId);
+      const list = petRefFiles.get(key) ?? [];
       let changed = false;
       for (const path of paths.filter((p): p is string => typeof p === 'string' && isAbsolute(p))) {
         // .vrm/.vrma 維持原本拖放語意(換模型/播動作)——疊層收不到拖放後,接收窗是它們唯一的拖放入口
@@ -1115,7 +1222,7 @@ app.whenReady().then(async () => {
         }
       }
       if (changed) {
-        petRefFiles.set(petId, list);
+        petRefFiles.set(key, list);
         sendRefFiles(petId);
       }
   };
@@ -1149,21 +1256,31 @@ app.whenReady().then(async () => {
     if (!result.canceled) await addReferencePaths(petId, result.filePaths);
   });
   ipcMain.on('ref-files-remove', (event, petId: string, path: string) => {
-    if (!win || event.sender !== win.webContents || !petRefFiles.has(petId)) return;
-    petRefFiles.set(petId, (petRefFiles.get(petId) ?? []).filter((item) => item.path !== path));
+    if (!win || event.sender !== win.webContents || !petRefFiles.has(refKey(petId))) return;
+    petRefFiles.set(refKey(petId), (petRefFiles.get(refKey(petId)) ?? []).filter((item) => item.path !== path));
     sendRefFiles(petId);
   });
 
   /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
    *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
   /** 上次對話紀錄:泡泡建立時 pull(循 chat-queue-get 的慣例,推播漏接也能自癒)。 */
-  ipcMain.handle('chat-transcript-get', async (event, id: string): Promise<ChatTranscript | null> => {
+  ipcMain.handle('chat-transcript-get', async (event, id: string, workspacePath?: string): Promise<ChatTranscript | null> => {
     if (!win || event.sender !== win.webContents || !pets.has(id)) return null;
     try {
-      const raw = await readFile(transcriptPath(id), 'utf8');
+      const project = projectFor(getPet(id)!, workspacePath);
+      if (!project) return null;
+      const key = chatKey(id, project.workspacePath);
+      const revision = chatRevisions.get(key) ?? 0;
+      const state = bridge?.petStates().find((s) => s.petId === id && s.workspacePath === project.workspacePath);
+      const extra = { revision, running: !!state?.running, pendingApproval: state?.pendingApproval ?? undefined };
+      const live = liveTranscripts.get(id);
+      if (live?.workspacePath === project.workspacePath) return { user: live.user, reply: live.reply, at: Date.now(), ...extra };
+      const completed = completedTranscripts.get(key);
+      if (completed) return { ...completed, ...extra };
+      const raw = await readFile(transcriptPath(id, project.workspacePath), 'utf8');
       const parsed = JSON.parse(raw) as Partial<ChatTranscript>;
       if (typeof parsed.reply !== 'string' && typeof parsed.user !== 'string') return null;
-      return { user: parsed.user ?? '', reply: parsed.reply ?? '', at: parsed.at ?? 0 };
+      return { user: parsed.user ?? '', reply: parsed.reply ?? '', at: parsed.at ?? 0, ...extra };
     } catch {
       return null; // 沒有紀錄(第一次對話前)或檔案壞掉,都當作沒有
     }
@@ -1173,19 +1290,75 @@ app.whenReady().then(async () => {
     const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents
       || event.sender === controlWin?.webContents;
     if (!fromOurWindow) return;
-    petRefFiles.delete(id); // 參考檔是「當次對話」的:開新對話一併清空
+    const selected = getPet(id)?.workspacePath;
+    if (bridge?.petStates().some((s) => s.petId === id && s.workspacePath === selected && s.running)) return;
+    petRefFiles.delete(refKey(id)); // 參考檔是「當次對話」的:開新對話一併清空
     sendRefFiles(id);
-    clearChatQueueHook?.(id); // 排隊中的舊對話訊息也一併清掉
+    chatQueue.clearProject(id, selected); // 只清目前專案的待處理對話
     clearTranscriptHook?.(id); // 上次對話紀錄同理:開新對話 = 從零開始,泡泡不該再回填舊內容
     const profile = getPet(id);
     if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
     const { sessionId: _dropped, ...keep } = profile.agent;
     updatePet(id, { agent: keep });
-    void bridge?.closePetSession(id);
+    void bridge?.closePetSession(id, getPet(id)?.workspacePath);
     sendPetProfiles();
   });
 
   // 設定分頁與桌寵右鍵選單共用選檔流程;僅允許這兩個視窗操作既有寵物。
+  ipcMain.handle('character-storage-retry', (event) => {
+    if (event.sender !== settingsWin?.webContents) return '';
+    persistConfigSync();
+    return storageError;
+  });
+  ipcMain.handle('character-storage-status', (event) => event.sender === settingsWin?.webContents ? storageError : '');
+  ipcMain.handle('character-file', async (event, id: string, action: unknown): Promise<CharacterFileResult> => {
+    if (!settingsWin || event.sender !== settingsWin.webContents || !pets.has(id)
+      || (action !== 'import' && action !== 'export')) return { ok: false, message: '無法操作角色設定' };
+    return serializeCharacter(async () => {
+      try {
+        const profile = getPet(id);
+        if (!profile?.enabled || !profile.characterReady || !profile.characterId || profile.characterError) throw new Error(profile?.characterError ?? '請先喚醒寵物再匯入或匯出');
+        const characterId = profile.characterId;
+        const document = characters.get(characterId);
+        if (!document) throw new Error('尚未載入角色設定');
+        const parent = settingsWin!;
+        if (action === 'export') {
+          const result = await dialog.showSaveDialog(parent, { title: '匯出角色設定', defaultPath: 'character.yaml', filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }] });
+          if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+          if (getPet(id)?.characterId !== characterId) throw new Error('角色已變更，請重新操作');
+          characters.flush();
+          atomicYaml(result.filePath, { schemaVersion: 1, modelHash: document.modelHash, parameters: document.parameters });
+        } else {
+          const result = await dialog.showOpenDialog(parent, { title: '匯入角色設定', properties: ['openFile'], filters: [{ name: '角色設定', extensions: ['yaml', 'yml', 'json'] }] });
+          const path = result.filePaths[0];
+          if (result.canceled || !path) return { ok: false, canceled: true };
+          if ((await stat(path)).size > 2_000_000) throw new Error('角色設定檔過大');
+          const imported = parseCharacterExport(parseCharacterYaml(await readFile(path, 'utf8')));
+          if (imported.modelHash !== document.modelHash) throw new Error('設定檔的 VRM 與目前模型不符');
+          const answer = await appPrompt({ message: `以匯入設定覆寫「${profile.name}」的光影與角色參數？`, buttons: ['取消', '覆寫'], cancelId: 0 });
+          if (answer.response !== 1) return { ok: false, canceled: true };
+          if (getPet(id)?.characterId !== characterId) throw new Error('角色已變更，請重新操作');
+          const previous = structuredClone(document.parameters);
+          characters.update(characterId, imported.parameters);
+          try { characters.flush(); }
+          catch (error) {
+            characters.update(characterId, previous);
+            reportStorageError(error);
+            throw error;
+          }
+          applyCharacter(profile, imported.parameters);
+          profile.characterRevision = (profile.characterRevision ?? 0) + 1;
+          scheduleIdleMotion(id);
+          persistConfigSync();
+          sendPetProfiles();
+        }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) };
+      }
+    });
+  });
+
   ipcMain.handle('choose-vrm', async (event, id: string) => {
     const fromSettings = !!settingsWin && event.sender === settingsWin.webContents;
     const fromOverlay = !!win && event.sender === win.webContents;
@@ -1194,11 +1367,17 @@ app.whenReady().then(async () => {
     await chooseVrm(id, fromSettings ? settingsWin ?? undefined : undefined);
   });
 
+  ipcMain.handle('select-project', (event, id: string, path: string) => {
+    if (![win?.webContents, settingsWin?.webContents, controlWin?.webContents].includes(event.sender)) return false;
+    const profile = getPet(id);
+    return profile && typeof path === 'string' ? selectProject(profile, path) : false;
+  });
   ipcMain.handle('choose-workspace', (event, id: string) => {
     const parent = event.sender === settingsWin?.webContents
       ? settingsWin
       : event.sender === controlWin?.webContents ? controlWin : undefined;
-    return chooseWorkspace(id, parent ?? undefined);
+    if (!parent || !pets.has(id)) return null;
+    return chooseWorkspace(id, parent);
   });
 
   /* ── 全域:新寵物預設工作根目錄 ── */
@@ -1218,8 +1397,7 @@ app.whenReady().then(async () => {
     const path = result.filePaths[0];
     if (result.canceled || !path) return workspaceRoot();
     registry.defaultWorkspaceRoot = path;
-    registryDirty = true;
-    scheduleConfigFlush();
+      scheduleConfigFlush();
     controlWin?.webContents.send('workspace-root-apply', path);
     return path;
   });
@@ -1236,8 +1414,7 @@ app.whenReady().then(async () => {
     if (value === '') delete registry.locale; // 跟隨系統
     else if (LOCALES.includes(value as Locale)) registry.locale = value;
     else return getLocale();
-    registryDirty = true;
-    scheduleConfigFlush();
+      scheduleConfigFlush();
     applyLocaleEverywhere(registry.locale ? (registry.locale as Locale) : resolveLocale(app.getLocale()));
     return getLocale();
   });
@@ -1317,7 +1494,7 @@ app.whenReady().then(async () => {
 
   // 對話送出改 invoke:回傳 {queued, position, reason?} 讓泡泡同步得知「立即執行/已排入/被拒」。
   // 「佇列已滿」不可走 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn。
-  ipcMain.handle('chat-send', (event, petId: string, text: string, rawImages: unknown): ChatSendResult => {
+  ipcMain.handle('chat-send', (event, petId: string, text: string, rawImages: unknown, workspacePath?: string): ChatSendResult => {
     if (!win || event.sender !== win.webContents || !pets.has(petId)) {
       return { queued: false, position: -1, reason: t('reason.invalidRequest') };
     }
@@ -1339,7 +1516,10 @@ app.whenReady().then(async () => {
     }
     const trimmed = String(text).slice(0, 1000).trim();
     if (!trimmed && !images.length) return { queued: false, position: -1, reason: t('reason.emptyMessage') };
-    const result = chatQueue.enqueue({ assignee: petId, text: trimmed, images, source: 'bubble' });
+    const profile = getPet(petId)!;
+    const project = projectFor(profile, workspacePath);
+    if (!profile.enabled || !project) return { queued: false, position: -1, reason: '角色休眠或專案未綁定' };
+    const result = chatQueue.enqueue({ assignee: petId, workspacePath: project.workspacePath, text: trimmed, images, source: 'bubble' });
     if (!result.ok) return { queued: false, position: -1, reason: result.reason };
     chatDispatcher.dispatch(petId);
     return { queued: true, position: result.position };
@@ -1353,11 +1533,11 @@ app.whenReady().then(async () => {
     if (!win || event.sender !== win.webContents) return [];
     return chatQueue.summaries(String(petId));
   });
-  ipcMain.on('chat-cancel', (event, petId: string) => {
+  ipcMain.on('chat-cancel', (event, petId: string, workspacePath?: string) => {
     if (!win || event.sender !== win.webContents) return;
-    bridge?.chatCancel(petId);
+    bridge?.chatCancel(petId, workspacePath ?? getPet(petId)?.workspacePath);
   });
-  ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean, feedback?: string) => {
+  ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean, feedback?: string, workspacePath?: string) => {
     // 泡泡與中控都可回覆;requestId 與掛著審批的相符性由 bridge 把關(雙 UI race 在源頭擋)
     const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
     if (!fromOurWindow) return;
@@ -1366,6 +1546,7 @@ app.whenReady().then(async () => {
       String(requestId),
       allow === true,
       typeof feedback === 'string' ? feedback.trim().slice(0, 1000) : undefined,
+      workspacePath,
     );
   });
   ipcMain.on('open-external', (event, url: string) => {
@@ -1397,7 +1578,7 @@ app.whenReady().then(async () => {
     if (!target && typeof restrictWorkspace === 'string' && restrictWorkspace) {
       const normalized = normalizeWorkspacePath(restrictWorkspace);
       const known = new Set(
-        [...pets.values()].map((p) => normalizeWorkspacePath(p.workspacePath)).filter((p): p is string => !!p)
+        [...pets.values()].flatMap((p) => p.projects?.map((project) => project.workspacePath) ?? [])
       );
       if (!normalized || !known.has(normalized)) {
         return { queued: false, position: -1, reason: t('reason.workspaceUnknown') };
@@ -1406,6 +1587,7 @@ app.whenReady().then(async () => {
     }
     const result = chatQueue.enqueue({
       assignee: target,
+      ...(target ? { workspacePath: getPet(target)?.workspacePath } : {}),
       ...(restrict ? { restrictWorkspace: restrict } : {}),
       text: trimmed,
       images: [],
@@ -1739,6 +1921,8 @@ app.whenReady().then(async () => {
   tray = new Tray(icon);
   tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(petMenu(registry.selectedPetId));
+  const unresolved = [...pets.values()].find((profile) => profile.characterError);
+  if (unresolved) openSettings('char', unresolved.id);
 });
 
 app.on('window-all-closed', () => { /* 常駐 */ });

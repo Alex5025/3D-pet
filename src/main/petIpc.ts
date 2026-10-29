@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { AgentBinding } from '../shared/agentEvents';
 
 /* 寵物本身的 IPC(清單/新增/刪除/選取/中繼資料)。
@@ -17,10 +17,11 @@ export interface PetMetaPatch {
 }
 
 export interface PetIpcDeps<TProfile extends { name: string; agent?: AgentBinding }> {
+  authorized: (event: IpcMainInvokeEvent) => boolean;
   listPets: () => TProfile[];
   selectedPetId: () => string;
   getPet: (id: string) => TProfile | null;
-  updatePet: (id: string, patch: Partial<TProfile>) => TProfile | null;
+  updatePet: (id: string, patch: Partial<TProfile>) => TProfile | null | Promise<TProfile | null>;
   createNewPet: () => TProfile | Promise<TProfile>;
   removePet: (id: string) => boolean | Promise<boolean>;
   selectPet: (id: string) => TProfile | null;
@@ -69,22 +70,26 @@ export function sanitizePetMeta<TProfile extends { name: string; agent?: AgentBi
   return { next: next as Partial<TProfile>, closeSession };
 }
 
-export function registerPetIpc<TProfile extends { name: string; agent?: AgentBinding }>(
+export function registerPetIpc<TProfile extends { name: string; agent?: AgentBinding; characterId?: string }>(
   deps: PetIpcDeps<TProfile>
 ): () => void {
   ipcMain.handle('get-pet-collection', () => ({
     pets: deps.listPets(),
     selectedPetId: deps.selectedPetId()
   }));
-  ipcMain.handle('create-pet', () => deps.createNewPet());
+  ipcMain.handle('create-pet', (event) => {
+    if (!deps.authorized(event)) throw new Error('未授權視窗');
+    return deps.createNewPet();
+  });
   ipcMain.handle('remove-pet', (_event, id: string) => deps.removePet(id));
   ipcMain.handle('select-pet', (_event, id: string) => deps.selectPet(id));
-  ipcMain.handle('update-pet-meta', (_event, id: string, patch: PetMetaPatch) => {
+  ipcMain.handle('update-pet-meta', async (event, id: string, patch: PetMetaPatch, characterId?: string) => {
+    if (!deps.authorized(event) || !patch || typeof patch !== 'object') return null;
     const profile = deps.getPet(id);
-    if (!profile) return null;
+    if (!profile || (characterId && profile.characterId !== characterId)) return null;
     const { next, closeSession } = sanitizePetMeta(profile, patch);
     if (closeSession) deps.closePetSession(id);
-    const updated = deps.updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
+    const updated = await deps.updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
     deps.sendPetProfiles();
     return updated;
   });

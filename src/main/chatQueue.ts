@@ -14,6 +14,7 @@ import { t } from '../shared/i18n';
  */
 
 export interface QueuedTask {
+  workspacePath?: string;
   id: string;
   /** 指定執行者(petId);undefined = 不綁定,領取(claim)時寫入。 */
   assignee?: string;
@@ -58,12 +59,13 @@ export interface ChatQueue {
   dequeue(petId: string): QueuedTask | undefined;
   /** 只清該寵的綁定佇列;公用池不受影響(寵物休息不撤回大家都能做的單)。 */
   clear(petId: string): void;
+  clearProject(petId: string, workspacePath?: string): void;
   size(petId: string): number;
   /** 有綁定任務的寵物,依「隊首等最久優先」排序(dispatchAll 的公平順序)。 */
   petsWithTasks(): string[];
   summaries(petId: string): QueuedTaskSummary[];
   /** 領取公用池「最舊且可領」的一單(跳過限定其他工作區的單):寫入 assignee 後回傳;無可領回 undefined。 */
-  claimUnbound(petId: string, workspacePath?: string): QueuedTask | undefined;
+  claimUnbound(petId: string, workspacePath?: string, workspaces?: string[]): QueuedTask | undefined;
   hasUnbound(): boolean;
   unboundSummaries(): QueuedTaskSummary[];
   removeUnbound(taskId: string): boolean;
@@ -124,6 +126,10 @@ export function createChatQueue(onChanged?: (petId?: string) => void): ChatQueue
       bound.delete(petId);
       onChanged?.(petId);
     },
+    clearProject(petId, workspacePath) {
+      bound.set(petId, list(petId).filter((task) => task.workspacePath !== workspacePath));
+      onChanged?.(petId);
+    },
     size: (petId) => list(petId).length,
     petsWithTasks() {
       return [...bound.entries()]
@@ -132,13 +138,15 @@ export function createChatQueue(onChanged?: (petId?: string) => void): ChatQueue
         .map(([petId]) => petId);
     },
     summaries: (petId) => list(petId).map(toSummary),
-    claimUnbound(petId, workspacePath) {
+    claimUnbound(petId, workspacePath, workspaces = []) {
       // 限定工作區的單只給該工作區的寵物領(= 發佈者指定的運行路徑);其餘照最舊優先
       const normalized = normalizeWorkspacePath(workspacePath);
-      const index = unbound.findIndex((task) => !task.restrictWorkspace || task.restrictWorkspace === normalized);
+      const allowed = new Set([normalized, ...workspaces.map(normalizeWorkspacePath)]);
+      const index = unbound.findIndex((task) => !task.restrictWorkspace || allowed.has(task.restrictWorkspace));
       if (index < 0) return undefined;
       const task = unbound.splice(index, 1)[0]!;
       task.assignee = petId;
+      task.workspacePath = task.restrictWorkspace ?? workspacePath;
       onChanged?.(undefined);
       return task;
     },
@@ -168,6 +176,7 @@ export function createChatDispatcher(deps: {
   unboundCandidates(): string[];
   /** 寵物的工作目錄(claim 時比對限定工作區的單)。 */
   workspaceOf(petId: string): string | undefined;
+  workspacesOf?(petId: string): string[];
   /** 實際執行(index.ts 綁 turnStart 事件 + bridge.chatSend)。petId = 執行者。 */
   runTask(petId: string, task: QueuedTask): void;
 }): ChatDispatcher {
@@ -180,7 +189,7 @@ export function createChatDispatcher(deps: {
       return;
     }
     if (deps.queue.hasUnbound() && deps.unboundCandidates().includes(petId)) {
-      const task = deps.queue.claimUnbound(petId, deps.workspaceOf(petId));
+      const task = deps.queue.claimUnbound(petId, deps.workspaceOf(petId), deps.workspacesOf?.(petId));
       if (task) deps.runTask(petId, task);
     }
   }
@@ -192,7 +201,7 @@ export function createChatDispatcher(deps: {
       for (const petId of deps.unboundCandidates()) {
         if (!deps.queue.hasUnbound()) break;
         if (!deps.canAccept(petId) || deps.queue.peek(petId)) continue;
-        const task = deps.queue.claimUnbound(petId, deps.workspaceOf(petId));
+        const task = deps.queue.claimUnbound(petId, deps.workspaceOf(petId), deps.workspacesOf?.(petId));
         if (task) deps.runTask(petId, task);
       }
     }

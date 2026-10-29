@@ -96,7 +96,7 @@ function petCard(pet: ControlPetStatus): HTMLElement {
   const workspace = document.createElement('div');
   workspace.className = 'pet-workspace';
   const folder = workspaceFolderName(pet.workspacePath);
-  workspace.textContent = folder ? `📁 ${folder}` : t('common.notSet');
+  workspace.textContent = '📁 ';
   if (pet.workspacePath) workspace.title = pet.workspacePath;
 
   // 喚醒/休息
@@ -105,6 +105,13 @@ function petCard(pet: ControlPetStatus): HTMLElement {
   toggle.textContent = pet.enabled ? t('control.rest') : t('control.wake');
   toggle.addEventListener('click', () => void window.pet.updatePetMeta(pet.petId, { enabled: !pet.enabled }));
 
+  const projectSelect = document.createElement('select');
+  projectSelect.setAttribute('aria-label', `${pet.name} 的目前專案`);
+  for (const path of pet.projects ?? []) {
+    const option = document.createElement('option'); option.value = path; option.textContent = workspaceFolderName(path) ?? path; option.title = path; option.selected = path === pet.workspacePath; projectSelect.append(option);
+  }
+  projectSelect.addEventListener('change', () => void window.pet.selectProject(pet.petId, projectSelect.value));
+  workspace.append(projectSelect);
   head.append(dot, renamingPetId === pet.petId ? renameField(pet) : nameLabel(pet), workspace, toggle);
 
   // 狀態列:phase + 排隊則數,次要操作靠右
@@ -112,7 +119,7 @@ function petCard(pet: ControlPetStatus): HTMLElement {
   statusLine.className = 'pet-status-line';
   const status = document.createElement('div');
   status.className = 'pet-status';
-  status.textContent = phaseLabel(pet.phase);
+  status.textContent = phaseLabel(pet.phase) + (pet.runningWorkspacePath ? ` · ${workspaceFolderName(pet.runningWorkspacePath)}` : '');
   if (pet.queue.length) {
     const count = document.createElement('span');
     count.className = 'queue-count';
@@ -293,8 +300,8 @@ function renderPublishWorkspaces(): void {
   picker.innerHTML = '';
   picker.append(new Option(t('control.anyWorkspace'), ''));
   const seen = new Set<string>();
-  for (const pet of snapshot.pets) {
-    const normalized = normalizeWorkspacePath(pet.workspacePath);
+  for (const path of snapshot.pets.flatMap((pet) => pet.projects ?? (pet.workspacePath ? [pet.workspacePath] : []))) {
+    const normalized = normalizeWorkspacePath(path);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     const option = new Option(`📁 ${workspaceFolderName(normalized) ?? normalized}`, normalized);
@@ -402,7 +409,7 @@ function applySnapshot(next: ControlStatusSnapshot): void {
   renderPublishWorkspaces();
   renderTasks();
   // 沙盒列只在名單/名稱/工作目錄變化時重建——快照每次狀態變更都推,無條件重建會洗掉編輯中的選項
-  const signature = snapshot.pets.map((pet) => `${pet.petId}:${pet.name}:${pet.workspacePath ?? ''}`).join('|');
+  const signature = snapshot.pets.map((pet) => `${pet.petId}:${pet.name}:${pet.workspacePath ?? ''}:${pet.projects?.join(',') ?? ''}`).join('|');
   if (signature !== sandboxSignature) {
     sandboxSignature = signature;
     if (sandboxTabOpened) renderSandboxRows();
@@ -473,7 +480,7 @@ function sandboxRow(pet: ControlPetStatus): HTMLElement {
   const workspace = document.createElement('div');
   workspace.className = 'pet-workspace';
   const folder = workspaceFolderName(pet.workspacePath);
-  workspace.textContent = folder ? `📁 ${folder}` : t('common.notSet');
+  workspace.textContent = '📁 ';
   if (pet.workspacePath) workspace.title = pet.workspacePath;
 
   const policy = document.createElement('select');

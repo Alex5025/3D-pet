@@ -61,14 +61,17 @@ function renderPetSelector(): void {
  * 不會觸發頁面內 blur,原本只掛 change 事件會漏存。 */
 const personaEl = el('pet-persona') as HTMLTextAreaElement;
 let personaTimer: number | null = null;
+let displayedCharacter = '';
+let displayedPet = '';
+let displayedRevision = 0;
 async function savePersona(): Promise<void> {
   if (personaTimer !== null) {
     clearTimeout(personaTimer);
     personaTimer = null;
   }
   const profile = selectedProfile();
-  if (!profile || (profile.persona ?? '') === personaEl.value) return;
-  await window.pet.updatePetMeta(profile.id, { persona: personaEl.value });
+  if (!profile?.enabled || !profile.characterReady || (profile.persona ?? '') === personaEl.value) return;
+  await window.pet.updatePetMeta(profile.id, { persona: personaEl.value }, profile.characterId);
 }
 personaEl.addEventListener('input', () => {
   if (personaTimer !== null) clearTimeout(personaTimer);
@@ -149,21 +152,38 @@ function renderWorkSettings(): void {
   const path = el('workspace-path');
   path.textContent = profile?.workspacePath ?? t('settings.noWorkspace');
   path.classList.toggle('empty', !profile?.workspacePath);
-  el('change-workspace').textContent = profile?.workspacePath ? t('settings.changeWorkspace') : t('settings.chooseWorkspace');
+  el('change-workspace').textContent = '新增負責專案…';
+  const projects = el('project-select') as HTMLSelectElement;
+  projects.replaceChildren(...(profile?.projects ?? []).map((project) => {
+    const option = document.createElement('option'); option.value = project.workspacePath; option.textContent = project.workspacePath;
+    option.selected = project.workspacePath === profile?.workspacePath; return option;
+  }));
 }
 
 async function loadSelectedPet(notifyMain = true): Promise<void> {
   const profile = selectedProfile();
   if (!profile) return;
   if (notifyMain) await window.pet.selectPet(profile.id);
+  if (selectedPetId !== profile.id || selectedProfile()?.characterId !== profile.characterId
+    || selectedProfile()?.characterRevision !== profile.characterRevision) return;
   lighting = { ...DEFAULT_LIGHTING, ...(profile.lighting ?? {}) };
   sway = { ...DEFAULT_SWAY, ...(profile.sway ?? {}) };
   petState = { ...DEFAULT_STATE, ...(profile.state ?? {}) };
   wardrobeStates = { ...(profile.wardrobe ?? {}) };
   renderPetSelector();
   renderWorkSettings();
+  el('character-association').textContent = profile.characterError ?? `工作目錄：${profile.workspacePath ?? '未設定'}\n模型：${profile.vrmPath ?? '預設模型'}\n${profile.enabled && profile.characterReady ? '設定集中儲存於 characters.yaml；下次喚醒時重新讀取' : '休息中，喚醒時才讀取 characters.yaml'}`;
+  for (const action of ['import', 'export']) (el(`character-${action}`) as HTMLButtonElement).disabled = !profile.enabled || !profile.characterReady || !!profile.characterError;
   // 打字中(textarea 聚焦)不回寫——存檔廣播回來的 profiles 會蓋掉正在輸入的內容
-  if (document.activeElement !== personaEl) personaEl.value = profile.persona ?? '';
+  if (displayedPet !== profile.id || displayedCharacter !== (profile.characterId ?? '') || displayedRevision !== (profile.characterRevision ?? 0)) {
+    if (personaTimer !== null) clearTimeout(personaTimer);
+    personaTimer = null;
+    personaEl.value = profile.persona ?? '';
+  } else if (document.activeElement !== personaEl) personaEl.value = profile.persona ?? '';
+  displayedPet = profile.id;
+  displayedCharacter = profile.characterId ?? '';
+  displayedRevision = profile.characterRevision ?? 0;
+  setCharacterControlsEnabled(!!profile.enabled && !!profile.characterReady);
   void renderDefaultPose();
   void renderIdleMotions();
   render();
@@ -177,7 +197,8 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
     window.pet.getSway(profile.id),
     window.pet.getWardrobe(profile.id)
   ]);
-  if (selectedPetId !== profile.id) return;
+  if (selectedPetId !== profile.id || selectedProfile()?.characterId !== profile.characterId
+    || selectedProfile()?.characterRevision !== profile.characterRevision) return;
   petState = { ...DEFAULT_STATE, ...(savedState ?? {}) };
   lighting = { ...DEFAULT_LIGHTING, ...(savedLighting ?? {}) };
   sway = { ...DEFAULT_SWAY, ...(savedSway ?? {}) };
@@ -194,6 +215,8 @@ function syncProfiles(next: PetProfile[], selectedFromMain: string): void {
 }
 
 (el('pet-select') as HTMLSelectElement).addEventListener('change', (event) => {
+  void savePersona();
+  flushPendingAppearance();
   selectedPetId = (event.currentTarget as HTMLSelectElement).value;
   void loadSelectedPet(true);
 });
@@ -321,8 +344,17 @@ el('new-session').addEventListener('click', () => {
 el('pet-enabled-toggle').addEventListener('click', async () => {
   const profile = selectedProfile();
   if (!profile) return;
+  await savePersona();
+  flushPendingAppearance();
   await window.pet.updatePetMeta(profile.id, { enabled: profile.enabled === false });
   // 按鈕文字由 onPetProfiles → syncProfiles → renderWorkSettings 自動更新
+});
+
+el('project-select').addEventListener('change', async () => {
+  const profile = selectedProfile();
+  if (!profile) return;
+  await savePersona(); flushPendingAppearance();
+  await window.pet.selectProject(profile.id, (el('project-select') as HTMLSelectElement).value);
 });
 
 el('change-workspace').addEventListener('click', async () => {
@@ -331,6 +363,8 @@ el('change-workspace').addEventListener('click', async () => {
   const button = el('change-workspace') as HTMLButtonElement;
   button.disabled = true;
   try {
+    await savePersona();
+    flushPendingAppearance();
     await window.pet.chooseWorkspace(profile.id);
   } finally {
     button.disabled = false;
@@ -344,6 +378,8 @@ el('choose-vrm').addEventListener('click', async () => {
   const button = el('choose-vrm') as HTMLButtonElement;
   button.disabled = true;
   try {
+    await savePersona();
+    flushPendingAppearance();
     await window.pet.chooseVrmFile(profile.id);
   } finally {
     button.disabled = false;
@@ -385,20 +421,37 @@ const SWAY_KEYS = ['hair', 'cloth', 'chest', 'tail'] as const;
 /* 高頻 IPC 節流(50ms trailing):滑桿/拖曳墊的 input 事件可達 60/s,每發都送會讓
  * renderer 每發跑一次套用(shade 是整棵材質樹 traverse);到期時讀當下值,最終值保證送達。 */
 let lightingSendTimer: number | null = null;
+let pendingLighting: { id: string; characterId?: string; value: Lighting } | null = null;
 function sendLightingThrottled(): void {
+  pendingLighting = { id: selectedPetId, characterId: selectedProfile()?.characterId, value: { ...lighting } };
   if (lightingSendTimer !== null) return;
   lightingSendTimer = window.setTimeout(() => {
     lightingSendTimer = null;
-    if (selectedPetId) window.pet.setLighting(selectedPetId, lighting);
+    const pending = pendingLighting;
+    pendingLighting = null;
+    if (pending && profiles.find((p) => p.id === pending.id)?.characterId === pending.characterId) window.pet.setLighting(pending.id, pending.value, pending.characterId);
   }, 50);
 }
 let swaySendTimer: number | null = null;
+let pendingSway: { id: string; characterId?: string; value: Sway } | null = null;
 function sendSwayThrottled(): void {
+  pendingSway = { id: selectedPetId, characterId: selectedProfile()?.characterId, value: { ...sway } };
   if (swaySendTimer !== null) return;
   swaySendTimer = window.setTimeout(() => {
     swaySendTimer = null;
-    if (selectedPetId) window.pet.setSway(selectedPetId, sway);
+    const pending = pendingSway;
+    pendingSway = null;
+    if (pending && profiles.find((p) => p.id === pending.id)?.characterId === pending.characterId) window.pet.setSway(pending.id, pending.value, pending.characterId);
   }, 50);
+}
+
+function flushPendingAppearance(): void {
+  if (lightingSendTimer !== null) clearTimeout(lightingSendTimer);
+  if (swaySendTimer !== null) clearTimeout(swaySendTimer);
+  lightingSendTimer = swaySendTimer = null;
+  if (pendingLighting) window.pet.setLighting(pendingLighting.id, pendingLighting.value, pendingLighting.characterId);
+  if (pendingSway) window.pet.setSway(pendingSway.id, pendingSway.value, pendingSway.characterId);
+  pendingLighting = pendingSway = null;
 }
 
 for (const key of LIGHT_KEYS) {
@@ -654,3 +707,31 @@ void window.pet.getLocale().then((locale) => {
 });
 activateTab(initialTab);
 render();
+
+// 儲存錯誤保留到成功寫入，重新開啟設定頁亦可讀回。
+function showStorageError(message: string): void {
+  el('character-storage-error').textContent = message;
+  el('character-retry').hidden = !message;
+}
+window.pet.onCharacterStorageError(showStorageError);
+void window.pet.characterStorageStatus().then(showStorageError);
+el('character-retry').addEventListener('click', async () => {
+  showStorageError(await window.pet.retryCharacterStorage());
+});
+for (const action of ['import', 'export'] as const) {
+  el(`character-${action}`).addEventListener('click', async () => {
+    const profile = selectedProfile();
+    if (!profile) return;
+    await savePersona();
+    flushPendingAppearance();
+    const result = await window.pet.characterFile(profile.id, action);
+    if (!result.ok && !result.canceled) await appDialog({ message: result.message ?? '角色設定操作失敗', buttons: ['確定'], cancelId: 0 });
+  });
+}
+
+function setCharacterControlsEnabled(enabled: boolean): void {
+  for (const id of ['pet-name', 'pet-persona', 'reset-light', 'reset-light-pos', 'reset-sway', 'reset-wardrobe', 'reset']) {
+    (el(id) as HTMLInputElement | HTMLButtonElement).disabled = !enabled;
+  }
+  for (const fieldset of document.querySelectorAll<HTMLFieldSetElement>('.character-parameters')) fieldset.disabled = !enabled;
+}

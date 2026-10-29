@@ -88,6 +88,12 @@
       }
       .sec-reset:hover { background: var(--bg-hover); color: var(--text-1); }
       .row { margin-bottom: 10px; }
+      fieldset.character-parameters { border: 0; padding: 0; margin: 0; min-width: 0; }
+      fieldset.character-parameters:disabled { opacity: 0.55; }
+      fieldset.character-parameters:disabled .pad { pointer-events: none; }
+      .character-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+      .character-actions button.wide { flex: 1; min-width: 120px; margin: 0; }
+      .character-actions button:disabled { opacity: 0.45; cursor: default; }
       .row label { display: flex; justify-content: space-between; margin-bottom: 2px; color: var(--text-2); }
       .val { font-variant-numeric: tabular-nums; color: var(--accent); }
       input[type='range'] { width: 100%; accent-color: var(--accent); }
@@ -264,6 +270,7 @@
 
       <!-- ── 光影 ── -->
       <div class="tab active" id="tab-light">
+        <fieldset class="character-parameters">
         <div class="card">
         <h3><span data-i18n="settings.lightType">光源類型</span><button class="sec-reset" id="reset-light" data-i18n="settings.resetSection">還原預設</button></h3>
         <div id="ltype">
@@ -313,6 +320,7 @@
           </div>
         </div>
         </div>
+        </fieldset>
       </div>
 
       <!-- ── 角色 ── -->
@@ -326,6 +334,9 @@
         <h3 data-i18n="settings.model">模型</h3>
         <button class="wide" id="choose-vrm" data-i18n="tray.chooseVrm">選擇 VRM 檔…</button>
 
+        <p id="character-association" style="overflow-wrap:anywhere;white-space:pre-line;font-size:12px"></p>
+        <p id="character-storage-error" role="alert" style="color:#ff9a9a;overflow-wrap:anywhere"></p>
+        <div class="character-actions"><button class="wide" id="character-import">匯入角色設定…</button><button class="wide" id="character-export">匯出角色設定…</button><button class="wide" id="character-retry" hidden>重試儲存</button></div>
         <h3 data-i18n="settings.persona">角色設定（個性）</h3>
         <textarea class="text-input" id="pet-persona" data-i18n-placeholder="settings.personaPlaceholder" rows="4" maxlength="4000"
           style="width: 100%; resize: vertical; min-height: 72px; line-height: 1.5;"
@@ -333,6 +344,7 @@
 
         </div>
 
+        <fieldset class="character-parameters">
         <div class="card">
         <h3><span data-i18n="settings.sway">晃動強度(1 = 模型原廠)</span><button class="sec-reset" id="reset-sway" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="row">
@@ -359,6 +371,7 @@
         <div id="wardrobe"><span class="empty">載入中…</span></div>
         </div>
 
+        </fieldset>
         <div class="card">
         <h3><span data-i18n="settings.charPosition">角色位置</span><button class="sec-reset" id="reset-pet-pos" data-i18n="settings.resetSection">還原預設</button></h3>
         <div class="pads">
@@ -386,6 +399,7 @@
 
       <!-- ── 動作設定 ── -->
       <div class="tab" id="tab-motion">
+        <fieldset class="character-parameters">
         <div class="card">
         <h3 data-i18n="settings.defaultPose">預設姿勢</h3>
         <select class="text-input" id="default-pose" style="width: 100%;"></select>
@@ -395,6 +409,7 @@
         <h3 data-i18n="settings.idleMotions">待機動作（勾選後隨機播放）</h3>
         <div id="idle-motions"><span class="empty">載入中…</span></div>
         </div>
+        </fieldset>
       </div>
 
       <!-- ── 工作設定 ── -->
@@ -434,6 +449,8 @@
           <button class="wide" id="new-session" style="margin: 0 0 12px;" data-i18n="settings.newSession">開新對話（清空上下文）</button>
           <div class="workspace-label" data-i18n="settings.workspace">工作目錄</div>
           <code id="workspace-path" class="empty" data-i18n="settings.noWorkspace">尚未選擇工作目錄</code>
+          <label for="project-select">目前專案</label>
+          <select id="project-select" class="wide" aria-label="目前專案"></select>
           <button class="wide" id="change-workspace">選擇工作目錄…</button>
         </div>
 
