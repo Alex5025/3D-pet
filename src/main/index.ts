@@ -1186,10 +1186,13 @@ app.whenReady().then(async () => {
     sendPetProfiles();
   });
 
-  // 角色分頁的「選擇 VRM 檔」:與 Tray 選單同一條 chooseVrm 路徑(僅設定視窗可呼叫)
+  // 設定分頁與桌寵右鍵選單共用選檔流程;僅允許這兩個視窗操作既有寵物。
   ipcMain.handle('choose-vrm', async (event, id: string) => {
-    if (!settingsWin || event.sender !== settingsWin.webContents || !pets.has(id)) return;
-    await chooseVrm(id, settingsWin);
+    const fromSettings = !!settingsWin && event.sender === settingsWin.webContents;
+    const fromOverlay = !!win && event.sender === win.webContents;
+    if ((!fromSettings && !fromOverlay) || !pets.has(id)) return;
+    // 透明桌面疊層不掛 sheet,沿用 Tray 的獨立對話框;設定視窗則維持 sheet。
+    await chooseVrm(id, fromSettings ? settingsWin ?? undefined : undefined);
   });
 
   ipcMain.handle('choose-workspace', (event, id: string) => {

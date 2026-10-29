@@ -134,7 +134,7 @@ const api = {
 
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
-  /** 角色分頁的「選擇 VRM 檔」(開檔對話框由 main 處理,同 Tray 選單路徑)。 */
+  /** 角色分頁與桌寵右鍵選單的「選擇 VRM 檔」(開檔對話框由 main 處理)。 */
   chooseVrmFile: (petId: string): Promise<void> => ipcRenderer.invoke('choose-vrm', petId),
   /* i18n:各視窗開機取語言、設定面板改語言、切換廣播。 */
   getLocale: (): Promise<string> => ipcRenderer.invoke('locale-get'),
