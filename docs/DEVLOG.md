@@ -1035,3 +1035,13 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 修正：角色仍存在但尚無 agent 時，以 Codex 預設綁定合併當次選擇，沿用既有 IPC 寫入及廣播，不再要求先到設定面板建立 AI 設定。
 
 驗證：typecheck、build 通過；開發版畫面已顯示小狐狸切換為 Antigravity，對應角色檔也已儲存 agy。另開 vrmtest.html 確認預設 VRM 正常載入。此驗證未發送真實 AI 任務。
+
+## 61. 共用角色、各世界獨立啟動與多專案（2026-10-29）
+
+角色設定改為跨 worktree 共用 `characters.yaml`（schemaVersion 3），僅含穩定 ID、模型與基礎參數。本地 `app.yaml`（schemaVersion 2）保存 port、共用檔路徑、角色引用、專案分配、位置及各專案 Agent session。同一世界只有一個角色實體，可負責多個專案，切換不複製桌寵。新增、模型替換與遷移以 SHA-256 查重；舊同模型角色的參數不同時，顯示差異供使用者選擇，不擅自覆寫。
+
+任務入列即固定專案，逐寵依序派發；bridge 以角色與專案區分 session，關閉 session 期間保留派發閘門。逐字稿與參考檔案也分專案；串流事件攜帶工作目錄和序號，切換時回填對話並忽略其他專案事件。設定頁及中控台新增專案選單，中控狀態顯示實際執行目錄。
+
+共用檔只在喚醒讀取（首次遷移例外），以排他鎖、版本檢查與原子替換避免跨世界覆寫。個性版本改變後，下次喚醒清除本世界舊 session，但保留對話歷史。模型修復、遷移備份、舊 JSON 停用、固定 port 及 worktree 隔離保留。共用預設模型放在共用設定旁的 assets，不依賴暫存工作樹。
+
+驗證：typecheck、build、test:characters、git diff --check 通過；Electron Mock Agent 完整 selftest PASS。新增測試涵蓋共用 ID、衝突選擇、共用版本與鎖、喚醒讀取、多專案串行、固定目錄、session 分離與錯誤專案審批拒絕。macOS 原生中控確認一隻角色可在 X／Y 切換，兩筆 Mock 任務分別保存不同 session。兩個不同 worktree 在 52741／52742 並行，共用角色檔更新後，B 喚醒套用新版、A 維持舊版；兩邊仍各只有一隻角色。未發送真實 AI 任務，正式角色資料未遷移；Windows 未實測。架構與 SQLite 評估見 SYSTEM-INVENTORY。

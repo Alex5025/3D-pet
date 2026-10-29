@@ -31,8 +31,8 @@
 ## 1. 使用者流程(User Flows)
 
 ### F1. 開機到看見寵物
-`npm run start` → main 讀 `runtime-data/app.json`(寵物 id 清單、選中者、語言、預設工作根目錄)
-→ 逐一讀 `runtime-data/pets/<id>.json` → 建疊層視窗 → renderer 對每隻 `enabled` 的寵物建 runtime
+`npm run start` → Vite 讀 `runtime-data/app.yaml` 的固定 port；main 讀精簡角色清單、語言與預設工作根目錄
+→ 僅對原先啟用的角色執行喚醒，讀取 `characters.yaml` → 建疊層視窗 → renderer 對每隻成功喚醒的寵物建 runtime
 → `getBootVrm` 取模型 buffer → 載入 → 套 state/lighting/sway/wardrobe → `getDefaultPose` 播開機姿勢
 → pull `getChatQueue` 與 `getChatTranscript` 回填泡泡。
 
@@ -151,9 +151,9 @@ chatQueue(逐寵 FIFO,cap 10)
 
 | 檔案 | 內容 | 寫入時機 |
 |---|---|---|
-| `runtime-data/app.json` | 寵物 id 清單、選中者、語言、預設工作根目錄 | 500ms debounce |
-| `runtime-data/pets/<id>.json` | 逐寵:名稱、模型路徑、state、lighting、sway、wardrobe、agent 綁定、個性、待機動作、工作目錄 | 500ms debounce |
-| `runtime-data/transcripts/<id>.json` | 上一輪對話(user + reply) | turn 結束時 |
+| 各實例 `runtime-data/app.yaml` | 固定 port、共用角色檔路徑、啟用角色、專案清單、各專案 Agent session、位置 | 500ms 合併、原子替換 |
+| 共用 `characters.yaml` | 穩定角色 ID、模型路徑／SHA-256、個性、光影、動作；不含工作目錄與 session | 喚醒讀取；變更時跨程序鎖與版本檢查 |
+| 各實例 `runtime-data/transcripts/<角色與專案雜湊>.json` | 各角色、各專案的上一輪對話 | turn 結束時 |
 | 工作目錄的 `.codex/config.toml` | 沙盒策略 | 中控套用時,main 直寫 |
 
 **不落盤**:參考檔案清單、任務帳本、佇列。
@@ -167,3 +167,59 @@ chatQueue(逐寵 FIFO,cap 10)
 3. **狀態來源不同步**:設定面板是「逐寵 pull」,中控是「全量快照 push」。畫面重排時要留意兩者的更新節奏(中控 50ms 全量重繪,是就地編輯的最大約束)。
 4. **缺的畫面**:模型選擇器、動作預覽、對話歷史瀏覽、載入中回饋。
 5. **疊層的先天限制**(重排前必讀,詳見 CLAUDE.md 平台實證):收不到被動 mousemove、收不到 OS 拖放、開不了 DevTools、`setPointerCapture` 靜默失敗。任何新互動都要繞過這四點。
+
+
+## 6. 共用角色、獨立工作樹與多專案（2026-10-29）
+
+```mermaid
+flowchart TB
+  C["共用 characters.yaml<br/>小狐狸：角色 ID、模型、個性、光影"]
+  subgraph A["工作樹 A：平行世界 A"]
+    AC["app.yaml：port 5173、專案綁定、各專案 session"]
+    AF["唯一的小狐狸<br/>一條佇列，依序工作"]
+    AX["專案 X：提示與對話 X"]
+    AY["專案 Y：提示與對話 Y"]
+    AC --> AF
+    AF --> AX
+    AF --> AY
+  end
+  subgraph B["工作樹 B：平行世界 B"]
+    BC["app.yaml：port 5174、專案綁定、各專案 session"]
+    BF["唯一的小狐狸<br/>一條佇列，依序工作"]
+    BX["專案 X：獨立 session 與對話"]
+    BZ["專案 Z：提示與對話 Z"]
+    BC --> BF
+    BF --> BX
+    BF --> BZ
+  end
+  C -->|喚醒時讀取| AF
+  C -->|喚醒時讀取| BF
+```
+
+### 儲存與啟動
+
+共用角色預設位於產品資料目錄 `VRM Pet/runtime-data/characters.yaml`（schemaVersion 3）。每個角色使用穩定 UUID，模型內容 SHA-256 用於查重；角色更換模型不會改變 UUID。角色只保存模型、個性、光影與動作，沒有工作目錄或 session。預設範例模型放在共用角色檔旁的 `assets/`，不依賴任一測試世界的暫存模型。
+
+linked worktree 的本地資料位於 `/tmp/3D-pet/instances/<工作樹實體路徑雜湊>/`，可用 `node scripts/data-dir.mjs` 查詢。各自的 `app.yaml`（schemaVersion 2）保存固定 port、`charactersPath`、啟用角色、負責專案、選取專案、位置與各專案的 Agent 綁定。角色名稱是啟動清單的顯示快取；完整參數只存在共用檔。
+
+首次初始化預設複製正式版的專案分配，不繼承 session／對話，角色全部休眠；所有世界引用已存在的共用角色 ID，不再複製個性。`VRM_PET_DATA_DIR` 覆寫本地目錄；`VRM_PET_BASELINE_DIR` 指定首次分配來源；`VRM_PET_SHARED_CHARACTERS` 指定首次初始化使用的共用檔。初始化完成後，以 `app.yaml` 的 `charactersPath` 為準。測試應同時隔離本地目錄和共用角色檔，避免寫到正式資料。
+
+`npm run dev` 顯示實例路徑、port 與設定位置。port 預設 5173，改成 5174 等固定值後重新啟動。Vite 僅綁定 127.0.0.1，撞 port 明確失敗，不自動跳號。predev 不終止既有實例。`/tmp` 可能被清除，長期使用的本地資料應另行備份。
+
+### 多專案執行
+
+同一工作樹每個角色只有一個桌寵實體。設定頁與中控台可新增負責專案及切換目前專案；專案實體路徑去重。任務入列時固定工作目錄，切換選取項目不會改變既有任務。每隻寵物共用一條佇列，依序工作；公用任務可被負責該專案的寵物領取，不受目前選取專案限制。
+
+Agent session、逐字稿、參考檔案以角色與專案分開。每個 turn 固定使用該專案的工作目錄與 Agent 設定；共用個性再由既有 provider 注入，專案提示由 provider 在該目錄讀取。串流事件帶工作目錄與序號，泡泡只呈現目前專案，切換時回填該專案內容；審批以 request ID 與專案上下文確認。中控台顯示實際正在工作的專案。
+
+### 同步與遷移
+
+一般啟動只讀本地設定；首次遷移及喚醒才讀共用角色檔。其他世界不熱更新，下一次喚醒載入新設定；偵測基礎個性版本改變時，清除本世界各專案的舊 session，保留歷史對話供查看。
+
+共用檔寫入使用排他鎖、來源版本檢查與原子替換。衝突時拒絕覆寫並提示。程序異常結束若遺留 `.lock`，須確認其中 PID 已不在運行才移除；程式不擅自搶走鎖。YAML 重寫不保留手寫註解。
+
+遷移將同模型的多隻舊寵物整理為一個共用角色及多個專案關聯；參數不同時顯示兩份內容，由使用者選擇保留版本或取消。失效模型路徑透過選檔修復。發布前備份原設定，完成後才移離舊作用中檔案。同實例升級會複製已知舊逐字稿到新索引，原檔保留；移除本世界角色不刪除其他世界仍使用的共用角色。
+
+### SQLite 評估
+
+適合後續承接對話歷史與任務帳本；角色設定維持可手動編輯的 YAML，模型與動作保留原檔。佇列持久化另需定義中斷恢復與防止重複執行；本次未導入 SQLite。參考：[SQLite 適用情境](https://www.sqlite.org/whentouse.html)、[FTS5](https://www.sqlite.org/fts5.html)。
