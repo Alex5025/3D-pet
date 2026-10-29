@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'node:path';
 import type { AppDialogOptions } from '../renderer/appDialog';
 
+const activePrompts = new Set<BrowserWindow>();
+
 /** 主程序提示框使用同一套 HTML 元件,回覆僅接受該提示視窗。 */
 export function appPrompt(options: AppDialogOptions): Promise<{ response: number }> {
   return new Promise((resolve) => {
@@ -14,6 +16,7 @@ export function appPrompt(options: AppDialogOptions): Promise<{ response: number
         contextIsolation: true, nodeIntegration: false, sandbox: true,
       },
     });
+    activePrompts.add(prompt);
     let response = options.cancelId;
     const onResponse = (event: Electron.IpcMainEvent, value: unknown): void => {
       if (event.sender !== prompt.webContents || typeof value !== 'number'
@@ -23,6 +26,7 @@ export function appPrompt(options: AppDialogOptions): Promise<{ response: number
     };
     ipcMain.on('app-prompt-response', onResponse);
     prompt.once('closed', () => {
+      activePrompts.delete(prompt);
       ipcMain.removeListener('app-prompt-response', onResponse);
       resolve({ response });
     });
@@ -32,6 +36,9 @@ export function appPrompt(options: AppDialogOptions): Promise<{ response: number
     const loading = dev
       ? prompt.loadURL(`${dev}/prompt.html?${new URLSearchParams(query)}`)
       : prompt.loadFile(join(__dirname, '../renderer/prompt.html'), { query });
-    void loading.catch(() => { if (!prompt.isDestroyed()) prompt.close(); });
+    void loading.catch((error) => {
+      console.error('[prompt] load failed', error);
+      if (!prompt.isDestroyed()) prompt.close();
+    });
   });
 }
