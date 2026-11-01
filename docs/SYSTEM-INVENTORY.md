@@ -198,7 +198,7 @@ flowchart TB
 
 ### 儲存與啟動
 
-共用角色預設位於產品資料目錄 `VRM Pet/runtime-data/characters.yaml`（schemaVersion 3）。每個角色使用穩定 ID；SHA-256 僅識別 VRM 檔案，不作角色查重。不同角色可使用同一 VRM，各自保存個性、光影、服裝與動作參數。改名、更換 VRM 或切換 AI 模型不改變角色 ID。AI 模型保存在本地專案 Agent 綁定。共用角色沒有工作目錄或 session；預設範例模型位於共用角色檔旁的 `assets/`。
+共用角色預設位於產品資料目錄 `VRM Pet/runtime-data/characters.yaml`（schemaVersion 3）。每個角色使用穩定 ID；SHA-256 僅識別 VRM 檔案，不作角色查重。不同角色可使用同一 VRM，各自保存個性、光影、服裝與動作參數。改名、更換 VRM 或切換 AI 模型不改變角色 ID。AI 模型保存在本地專案 Agent 綁定。共用角色沒有工作目錄或 session；預設範例模型位於共用產品資料目錄的 `models/`；舊 `runtime-data/assets/` 檔案與既有角色引用保留。自訂共用角色檔時，模型與動作放在該 YAML 同層的 `models/`、`motions/`。
 
 linked worktree 的本地資料位於 `/tmp/3D-pet/instances/<工作樹實體路徑雜湊>/`，可用 `node scripts/data-dir.mjs` 查詢。各自的 `app.yaml`（schemaVersion 2）保存固定 port、`charactersPath`、啟用角色、負責專案、選取專案、位置與各專案的 Agent 綁定。角色名稱是啟動清單的顯示快取；完整參數只存在共用檔。
 
@@ -223,3 +223,12 @@ Agent session、逐字稿、參考檔案以角色與專案分開。每個 turn �
 ### SQLite 評估
 
 適合後續承接對話歷史與任務帳本；角色設定維持可手動編輯的 YAML，模型與動作保留原檔。佇列持久化另需定義中斷恢復與防止重複執行；本次未導入 SQLite。參考：[SQLite 適用情境](https://www.sqlite.org/whentouse.html)、[FTS5](https://www.sqlite.org/fts5.html)。
+
+
+### 安裝版與跨平台資料位置
+
+macOS 模型預設為 `~/Library/Application Support/VRM Pet/models/`，動作為同層 `motions/`。新增、替換、修復與內建範例均使用相同模型目錄；首次啟動建立資料夾，以不覆寫方式複製內建範例。舊範例只複製，不移除，已有角色的外部模型引用保持有效。
+
+Windows NSIS 預設採單一使用者安裝，程式位於 `%LOCALAPPDATA%\Programs\VRM Pet`，允許更改安裝位置。模型與動作位於 `%APPDATA%\VRM Pet\models`、`motions`；角色及啟動 YAML 位於其 `runtime-data`。Chromium 快取位於 `%LOCALAPPDATA%\VRM Pet\Cache`。標準解除安裝不刪除使用者資料，更新亦保留；明確指定解除安裝器的 `--delete-app-data` 參數則不在保留保證內。
+
+Windows linked worktree 的執行資料使用 `%TEMP%\3D-pet\instances\<實體路徑雜湊>`；設定 `VRM_PET_DATA_DIR` 時，快取位於該實例的 `Cache`，避免測試實例互相干擾。macOS 工作樹維持 `/tmp/3D-pet/instances/`。Windows 安裝與解除安裝尚需 Windows 實機驗收。

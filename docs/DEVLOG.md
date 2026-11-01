@@ -1047,3 +1047,10 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 共用檔只在喚醒讀取（首次遷移例外），以排他鎖、版本檢查與原子替換避免跨世界覆寫。個性版本改變後，下次喚醒清除本世界舊 session，但保留對話歷史。模型修復、遷移備份、舊 JSON 停用、固定 port 及 worktree 隔離保留。共用預設模型放在共用設定旁的 assets，不依賴暫存工作樹。
 
 驗證：typecheck、build、test:characters、git diff --check 通過；Electron Mock Agent 完整 selftest PASS。新增測試涵蓋共用 ID、衝突選擇、共用版本與鎖、喚醒讀取、多專案串行、固定目錄、session 分離與錯誤專案審批拒絕。macOS 原生中控確認一隻角色可在 X／Y 切換，兩筆 Mock 任務分別保存不同 session。兩個不同 worktree 在 52741／52742 並行，共用角色檔更新後，B 喚醒套用新版、A 維持舊版；兩邊仍各只有一隻角色。未發送真實 AI 任務，正式角色資料未遷移；Windows 未實測。架構與 SQLite 評估見 SYSTEM-INVENTORY。
+
+
+## 62. 統一模型目錄與 Windows 安裝資料分離（2026-11-01）
+
+新增、替換、修復及內建範例使用共用 models 目錄；動作也讀取共用 motions。預設目錄與工作樹暫存資料分離，自訂共用 YAML 時資產使用該檔同層目錄。首次啟動建立目錄，內建範例採排他複製，保留舊資產與角色路徑。Windows NSIS 明確設定 perMachine=false、deleteAppDataOnUninstall=false，保留安裝目錄選擇；快取移至 LocalAppData，設定仍位於 Roaming。Windows 工作樹改用 TEMP，不再硬編碼 /tmp。
+
+驗證：typecheck、build、test:characters 通過；Windows/macOS 路徑、中文使用者名稱及自訂 TEMP 的模擬檢查通過。Windows 安裝、升級與解除安裝尚未實機驗證。

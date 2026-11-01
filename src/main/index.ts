@@ -128,7 +128,14 @@ const userDataDir = process.env['VRM_PET_DATA_DIR']
   : join(app.getPath('appData'), 'VRM Pet');
 mkdirSync(userDataDir, { recursive: true });
 app.setPath('userData', userDataDir);
-app.setPath('sessionData', userDataDir);
+// Chromium 快取與使用者設定分開；開發實例的快取仍保持隔離。
+const sessionDataDir = process.env['VRM_PET_DATA_DIR']
+  ? join(userDataDir, 'Cache')
+  : process.platform === 'win32'
+    ? join(process.env['LOCALAPPDATA'] || join(app.getPath('home'), 'AppData', 'Local'), 'VRM Pet', 'Cache')
+    : join(userDataDir, 'Cache');
+mkdirSync(sessionDataDir, { recursive: true });
+app.setPath('sessionData', sessionDataDir);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.exit(0);
@@ -139,7 +146,12 @@ function syncOverlayMouseEvents(): void {
 
 /* 開發版與安裝版共用使用者資料；測試可用 VRM_PET_DATA_DIR 隔離。 */
 const dataDir = (): string => app.getPath('userData');
-const defaultVrmPath = (): string => join(dirname(characters.filePath), 'assets', 'AvatarSample_A.vrm');
+const productDataDir = (): string => join(app.getPath('appData'), 'VRM Pet');
+const sharedAssetRoot = (): string => resolve(characters.filePath) === resolve(productDataDir(), 'runtime-data', 'characters.yaml')
+  ? productDataDir() : dirname(characters.filePath);
+const modelsDir = (): string => join(sharedAssetRoot(), 'models');
+const motionsDir = (): string => join(sharedAssetRoot(), 'motions');
+const defaultVrmPath = (): string => join(modelsDir(), 'AvatarSample_A.vrm');
 const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
 const settings = new SettingsStore(join(runtimeDataDir(), 'app.yaml'));
 let settingsReady = false;
@@ -178,16 +190,15 @@ const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
 
 /** 兩種版本首次啟動都初始化預設模型；已有檔案時不覆寫。 */
 async function ensureDefaultVrm(): Promise<void> {
+  await mkdir(modelsDir(), { recursive: true });
+  await mkdir(motionsDir(), { recursive: true });
+  // 保留既有模型及角色引用；舊範例只複製，不搬移或覆寫。
+  const legacy = join(dirname(characters.filePath), 'assets', 'AvatarSample_A.vrm');
+  const bundled = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'models', 'AvatarSample_A.vrm');
   try {
-    await stat(defaultVrmPath());
-    return;
-  } catch { /* 尚未初始化 */ }
-  try {
-    await mkdir(dirname(defaultVrmPath()), { recursive: true });
-    const source = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'models', 'AvatarSample_A.vrm');
-    await copyFile(source, defaultVrmPath(), constants.COPYFILE_EXCL);
+    await copyFile(existsSync(legacy) ? legacy : bundled, defaultVrmPath(), constants.COPYFILE_EXCL);
   } catch (error) {
-    console.error('[main] default VRM initialization failed', error);
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   }
 }
 /** 預設工作根目錄：供新寵物及啟動時缺少工作目錄的角色使用。 */
@@ -268,7 +279,7 @@ async function loadConfig(): Promise<void> {
   const boot = await migrateSettings(settings, defaultVrmPath(), characters.filePath, {
     model: async (path, name) => {
       await appPrompt({ message: `「${name}」的模型路徑已失效，請重新選擇模型。`, detail: path, buttons: ['選擇模型', '取消'], cancelId: 1 }).then((answer) => { if (answer.response === 1) throw new Error('已取消修復'); });
-      const result = await dialog.showOpenDialog({ title: `修復 ${name} 的模型路徑`, defaultPath: join(app.getPath('appData'), 'VRM Pet', 'models'), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
+      const result = await dialog.showOpenDialog({ title: `修復 ${name} 的模型路徑`, defaultPath: modelsDir(), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
       return result.filePaths[0] ?? null;
     },
     parameters: async (existing, incoming) => {
@@ -453,7 +464,7 @@ async function initializeCharacters(): Promise<void> {
 async function chooseVrm(petId: string, parent?: BrowserWindow): Promise<void> {
   app.focus({ steal: true });
   const options: Electron.OpenDialogOptions = {
-    defaultPath: join(dataDir(), 'models'),
+    defaultPath: modelsDir(),
     properties: ['openFile'],
     filters: [{ name: 'VRM', extensions: ['vrm'] }]
   };
@@ -495,7 +506,7 @@ async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<s
 }
 
 async function createNewPet(): Promise<PetProfile> {
-  const result = await dialog.showOpenDialog({ title: '選擇新寵物模型', properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
+  const result = await dialog.showOpenDialog({ title: '選擇新寵物模型', defaultPath: modelsDir(), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
   if (result.canceled || !result.filePaths[0]) return getPet()!;
   const profile = createProfile();
   profile.vrmPath = result.filePaths[0];
@@ -548,7 +559,7 @@ let motionsDirMissing = false;
 
 async function refreshMotions(): Promise<void> {
   try {
-    motionFiles = (await readdir(join(dataDir(), 'motions')))
+    motionFiles = (await readdir(motionsDir()))
       .filter((file) => file.toLowerCase().endsWith('.vrma'))
       .sort();
     motionsDirMissing = false;
@@ -587,7 +598,7 @@ function scheduleIdleMotion(petId: string): void {
         const file = list[Math.floor(Math.random() * list.length)]!;
         try {
           // 第三參數 lowPower=true:待機播放以半幀率跑(手動/agent 觸發的播放不帶)
-          win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)), true);
+          win?.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)), true);
         } catch { /* 檔案剛被移走:這輪跳過,下輪過濾自然排除 */ }
       }
       scheduleIdleMotion(petId); // 排下一輪(撞到互斥鎖的這輪不播,順延到下一個隨機間隔)
@@ -598,7 +609,7 @@ function scheduleIdleMotion(petId: string): void {
 function motionMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
   if (motionsDirMissing) return [{ label: t('tray.noMotionsDir'), enabled: false }];
   if (!motionFiles.length) return [{ label: t('tray.noMotionFiles'), enabled: false }];
-  const dir = join(dataDir(), 'motions');
+  const dir = motionsDir();
   return motionFiles.map((file) => ({
     label: file.replace(/\.vrma$/i, ''),
     click: async () => {
@@ -619,7 +630,7 @@ async function setDefaultPose(petId: string, file: string | null): Promise<void>
   sendPetProfiles(); // 設定面板的下拉跟著同步
   if (!file) return;
   try {
-    win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+    win?.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)));
   } catch (error) {
     console.log('[main] default pose read failed', error);
   }
@@ -1005,7 +1016,7 @@ app.whenReady().then(async () => {
     playMotion: async (petId, file) => {
       if (!pets.has(petId) || !motionFiles.includes(file)) return false;
       try {
-        win?.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+        win?.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)));
         return true;
       } catch {
         return false;
@@ -1130,7 +1141,7 @@ app.whenReady().then(async () => {
   try {
     // macOS 單次檔案變動常觸發多個 watch 事件:debounce 讓一批變動只做一次 readdir + Tray 重建
     let motionsDebounce: NodeJS.Timeout | null = null;
-    motionsWatcher = watch(join(dataDir(), 'motions'), () => {
+    motionsWatcher = watch(motionsDir(), () => {
       if (motionsDebounce) clearTimeout(motionsDebounce);
       motionsDebounce = setTimeout(() => void refreshMotions().then(refreshTray), 300);
     });
@@ -1659,7 +1670,7 @@ app.whenReady().then(async () => {
     await refreshMotions();
     if (!motionFiles.includes(file)) return; // 白名單:只接受 motions/ 裡的檔名
     try {
-      win.webContents.send('vrma-play', petId, await readFile(join(dataDir(), 'motions', file)));
+      win.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)));
     } catch (error) {
       console.log('[main] vrma read failed', error);
     }
