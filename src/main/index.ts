@@ -272,7 +272,7 @@ async function loadConfig(): Promise<void> {
       return result.filePaths[0] ?? null;
     },
     parameters: async (existing, incoming) => {
-      const result = await appPrompt({ message: '同一模型有不同角色設定，請選擇所有工作樹共用的版本。',
+      const result = await appPrompt({ message: '同一角色 ID 有不同版本的設定，請選擇要保留的版本。',
         detail: `既有設定：\n${JSON.stringify(existing, null, 2)}\n\n待匯入設定：\n${JSON.stringify(incoming, null, 2)}`,
         buttons: [`保留 ${existing.name}`, `採用 ${incoming.name}`, '取消'], cancelId: 2 });
       return result.response === 0 ? 'existing' : result.response === 1 ? 'incoming' : 'cancel';
@@ -396,7 +396,7 @@ function selectPet(id: string): PetProfile | null {
   return profile;
 }
 
-/** 先完成讀檔、查重及角色檔驗證，成功後才改變目前綁定。 */
+/** 先完成讀檔及角色 ID 驗證，成功後才改變目前綁定。 */
 async function bindCharacter(profile: PetProfile, workspace: string, path: string, waking = false): Promise<void> {
   const bytes = await readFile(path);
   const hash = modelHash(bytes);
@@ -501,14 +501,6 @@ async function createNewPet(): Promise<PetProfile> {
   profile.vrmPath = result.filePaths[0];
   profile.enabled = false;
   characters.loadForWake(); // 新增寵物也是一次明確的喚醒操作。
-  const hash = modelHash(await readFile(profile.vrmPath));
-  const duplicate = characters.all().find((doc) => doc.modelHash === hash);
-  if (duplicate && pets.has(duplicate.id)) {
-    await appPrompt({ message: `此世界已有「${duplicate.parameters.name}」，請在既有角色新增負責的專案。`, buttons: ['確定'], cancelId: 0 });
-    return getPet(duplicate.id)!;
-  }
-  profile.id = duplicate?.id ?? profile.id;
-  if (duplicate) { profile.characterId = duplicate.id; applyCharacter(profile, duplicate.parameters); }
   ensurePetWorkspace(workspaceRoot(), profile);
   if (profile.workspacePath) {
     profile.workspacePath = realpathSync.native(profile.workspacePath);

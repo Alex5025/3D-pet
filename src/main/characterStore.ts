@@ -52,7 +52,7 @@ export function writeCharacters(path: string, expected: string | null, documents
     writeFileSync(fd, String(process.pid));
     if (signature(path) !== expected) throw new Error('characters.yaml 已被其他實例或外部修改，未覆寫；請重新載入後再編輯');
     const parsed = documents.map(parseStoredCharacter);
-    if (new Set(parsed.map((d) => d.id)).size !== parsed.length || new Set(parsed.map((d) => d.modelHash)).size !== parsed.length) throw new Error('共用角色 ID 或模型重複');
+    if (new Set(parsed.map((d) => d.id)).size !== parsed.length) throw new Error('共用角色 ID 重複');
     atomicYaml(path, { schemaVersion: 3, characters: parsed });
   } finally { closeSync(fd); unlinkSync(lock); }
 }
@@ -77,13 +77,9 @@ export class CharacterStore {
     const raw = parseCharacterYaml(readFileSync(this.filePath, 'utf8')) as Record<string, unknown> | null;
     if (!raw || raw.schemaVersion !== 3 || !Array.isArray(raw.characters)) throw new Error('角色 YAML 版本或清單無效');
     const next = new Map<string, CharacterDocument>();
-    const hashes = new Map<string, CharacterDocument>();
     for (const item of raw.characters) {
       const doc = parseStoredCharacter(item);
-      const duplicate = hashes.get(doc.modelHash);
-      if (duplicate) throw new Error(`相同模型重複：${duplicate.parameters.name}（${duplicate.vrmPath}）與 ${doc.parameters.name}（${doc.vrmPath}）`);
       if (next.has(doc.id)) throw new Error('重複寵物 ID');
-      hashes.set(doc.modelHash, doc);
       next.set(doc.id, doc);
     }
     if (signature(this.filePath) !== before) throw new Error('角色設定正在被外部修改，請重新喚醒');
@@ -91,11 +87,10 @@ export class CharacterStore {
     this.sourceSignature = before;
     this.loaded = true;
   }
-  resolve(vrmPath: string, hash: string, initial: CharacterParameters, requireExisting = false, id = hash): CharacterDocument {
+  resolve(vrmPath: string, hash: string, initial: CharacterParameters, requireExisting: boolean, id: string): CharacterDocument {
     if (!this.loaded) throw new Error('請先喚醒寵物以載入 characters.yaml');
+    if (!id) throw new Error('角色 ID 不可為空');
     vrmPath = realpathSync.native(vrmPath);
-    const duplicate = this.all().find((doc) => doc.modelHash === hash && doc.id !== id);
-    if (duplicate) throw new Error(`此模型已屬於「${duplicate.parameters.name}」（${duplicate.vrmPath}）`);
     const cached = this.documents.get(id);
     if (cached && cached.modelHash === hash && cached.vrmPath === vrmPath) return cached;
     if (!cached && requireExisting) throw new Error('characters.yaml 缺少此角色，請還原設定');

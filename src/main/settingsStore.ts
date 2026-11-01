@@ -1,5 +1,5 @@
 import { cpSync, copyFileSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { atomicYaml, characterParameters, modelHash, parseCharacterYaml, parseStoredCharacter, signature, writeCharacters } from './characterStore';
 import type { CharacterDocument, CharacterParameters } from '../shared/character';
@@ -101,11 +101,11 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
   if (record(globalRaw) && globalRaw.schemaVersion === 3 && Array.isArray(globalRaw.characters)) {
     for (const raw of globalRaw.characters) {
       const doc = parseStoredCharacter(raw);
-      if (globals.has(doc.modelHash)) throw new Error('共用角色有重複模型');
-      globals.set(doc.modelHash, doc);
+      if (globals.has(doc.id)) throw new Error('共用角色 ID 重複');
+      globals.set(doc.id, doc);
     }
   } else if (globalRaw !== null && sharedPath !== join(source, 'characters.yaml')) throw new Error('共用角色檔需先從原資料來源遷移');
-  const existingGlobalHashes = new Set(globals.keys());
+  const existingGlobalIds = new Set(globals.keys());
   let profiles: Record<string, unknown>[] = [];
   let global: Record<string, unknown> = record(registry) ? registry : {};
   if (record(sourceBoot) && sourceBoot.initialized === true) {
@@ -134,7 +134,7 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
   if (!profiles.length) profiles = [{ name: '我的寵物', enabled: false, vrmPath: defaultModel }];
   const locals = new Map<string, LocalPet>();
   const oldToNew = new Map<string, string>();
-  for (const profile of profiles) {
+  for (const [index, profile] of profiles.entries()) {
     const parameters = characterParameters({ name: '我的寵物', ...profile });
     let vrmPath = typeof profile.vrmPath === 'string' ? profile.vrmPath : defaultModel;
     if (!existsSync(vrmPath)) {
@@ -144,14 +144,17 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
     }
     vrmPath = realpathSync.native(vrmPath);
     const hash = modelHash(readFileSync(vrmPath));
-    let doc = globals.get(hash);
-    if (doc && !(copying && existingGlobalHashes.has(hash)) && JSON.stringify(doc.parameters) !== JSON.stringify(parameters)) {
+    // 缺少舊 ID 時以來源與記錄位置產生穩定識別，不能以 VRM 或名稱合併。
+    const id = typeof profile.id === 'string' && profile.id ? profile.id
+      : `legacy-${modelHash(Buffer.from(JSON.stringify([existsSync(sourceData) ? realpathSync.native(sourceData) : resolve(sourceData), index])))}`;
+    let doc = globals.get(id);
+    if (doc && !(copying && existingGlobalIds.has(id)) && JSON.stringify(doc.parameters) !== JSON.stringify(parameters)) {
       const decision = await choices.parameters(doc.parameters, parameters);
       if (decision === 'cancel') throw new Error('已取消角色設定整併，原資料保留');
-      if (decision === 'incoming') doc = { ...doc, parameters, vrmPath };
+      if (decision === 'incoming') doc = { ...doc, parameters, vrmPath, modelHash: hash };
     }
-    doc ??= { schemaVersion: 1, id: randomUUID(), modelHash: hash, vrmPath, parameters };
-    globals.set(hash, doc);
+    doc ??= { schemaVersion: 1, id, modelHash: hash, vrmPath, parameters };
+    globals.set(id, doc);
     if (typeof profile.id === 'string') oldToNew.set(profile.id, doc.id);
     let local = locals.get(doc.id);
     if (!local) {
