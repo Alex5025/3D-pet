@@ -172,7 +172,11 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
   wardrobeStates = { ...(profile.wardrobe ?? {}) };
   renderPetSelector();
   renderWorkSettings();
-  el('character-association').textContent = profile.characterError ?? `工作目錄：${profile.workspacePath ?? '未設定'}\n模型：${profile.vrmPath ?? '預設模型'}\n${profile.enabled && profile.characterReady ? '設定集中儲存於 characters.yaml；下次喚醒時重新讀取' : '休息中，喚醒時才讀取 characters.yaml'}`;
+  el('character-model-name').textContent = profile.vrmPath?.split(/[\\/]/).filter(Boolean).pop() ?? t('settings.defaultCharacterModel');
+  input('character-model-path').value = profile.vrmPath ?? t('settings.defaultCharacterModel');
+  input('character-model-path').title = input('character-model-path').value;
+  input('character-model-path').scrollLeft = 0;
+  el('character-load-error').textContent = profile.characterError ?? '';
   for (const action of ['import', 'export']) (el(`character-${action}`) as HTMLButtonElement).disabled = !profile.enabled || !profile.characterReady || !!profile.characterError;
   // 打字中(textarea 聚焦)不回寫——存檔廣播回來的 profiles 會蓋掉正在輸入的內容
   if (displayedPet !== profile.id || displayedCharacter !== (profile.characterId ?? '') || displayedRevision !== (profile.characterRevision ?? 0)) {

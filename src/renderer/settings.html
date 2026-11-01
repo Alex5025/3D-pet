@@ -91,6 +91,18 @@
       fieldset.character-parameters { border: 0; padding: 0; margin: 0; min-width: 0; }
       fieldset.character-parameters:disabled { opacity: 0.55; }
       fieldset.character-parameters:disabled .pad { pointer-events: none; }
+      .character-details { display: grid; gap: 16px; margin: 18px 0; min-width: 0; }
+      .character-details h3 { margin: 0 0 6px; }
+      .character-details .text-input { display: block; width: 100%; user-select: text; }
+      .character-details .text-input:focus { border-color: var(--accent); }
+      .character-model-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+      .character-model-header strong { flex: 1; min-width: 0; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+      .character-model-header button.wide { flex: none; width: auto; margin: 0; padding: 6px 10px; font-size: 13px; line-height: 20px; }
+      #character-model-path { font-size: 11px; color: var(--text-3); cursor: text; }
+      .character-error { color: #ff9a9a; overflow-wrap: anywhere; }
+      .character-error:empty { display: none; }
+      .persona-heading { margin-top: 22px; }
+      .persona-help { margin: 8px 0 0; color: var(--text-2); font-size: 12px; }
       .character-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
       .character-actions button.wide { flex: 1; min-width: 120px; margin: 0; }
       .character-actions button:disabled { opacity: 0.45; cursor: default; }
@@ -331,16 +343,24 @@
 
         <button class="wide" id="pet-enabled-toggle" style="margin: 12px 0 0;"></button>
 
-        <h3 data-i18n="settings.model">模型</h3>
-        <button class="wide" id="choose-vrm" data-i18n="tray.chooseVrm">選擇 VRM 檔…</button>
-
-        <p id="character-association" style="overflow-wrap:anywhere;white-space:pre-line;font-size:12px"></p>
+        <div class="character-details">
+          <div>
+            <h3><label for="character-model-path" data-i18n="settings.characterModel">角色模型（VRM）</label></h3>
+            <div class="character-model-header">
+              <strong id="character-model-name"></strong>
+              <button class="wide" id="choose-vrm" data-i18n="tray.chooseVrm">選擇 VRM 檔…</button>
+            </div>
+            <input class="text-input" id="character-model-path" type="text" readonly />
+          </div>
+        </div>
+        <p id="character-load-error" class="character-error" role="alert"></p>
         <p id="character-storage-error" role="alert" style="color:#ff9a9a;overflow-wrap:anywhere"></p>
-        <div class="character-actions"><button class="wide" id="character-import">匯入角色設定…</button><button class="wide" id="character-export">匯出角色設定…</button><button class="wide" id="character-retry" hidden>重試儲存</button></div>
-        <h3 data-i18n="settings.persona">角色設定（個性）</h3>
-        <textarea class="text-input" id="pet-persona" data-i18n-placeholder="settings.personaPlaceholder" rows="4" maxlength="4000"
-          style="width: 100%; resize: vertical; min-height: 72px; line-height: 1.5;"
-          placeholder="用自由文字定義這隻角色的個性與說話風格,例如:&#10;你是活潑的貓娘工程師,說話簡短俏皮,句尾偶爾加「喵」,回報問題時一針見血。&#10;會注入對話的 system prompt,存檔後下一句對話生效。"></textarea>
+        <button class="wide" id="character-retry" hidden>重試儲存</button>
+        <h3 class="persona-heading"><label for="pet-persona" data-i18n="settings.persona">角色設定（個性）</label></h3>
+        <textarea class="text-input" id="pet-persona" data-i18n-placeholder="settings.personaPlaceholder" rows="6" maxlength="4000" aria-describedby="persona-help"
+          style="width: 100%; resize: vertical; min-height: 144px; line-height: 1.6;"
+          placeholder="例如：活潑的貓娘工程師，說話簡短俏皮，回報問題時一針見血。"></textarea>
+        <p class="persona-help" id="persona-help" data-i18n="settings.personaHelp">定義角色的個性與說話風格。編輯後自動儲存。</p>
 
         </div>
 
@@ -394,6 +414,10 @@
             </div>
           </div>
         </div>
+        </div>
+        <div class="character-actions">
+          <button class="wide" id="character-import">匯入角色設定…</button>
+          <button class="wide" id="character-export">匯出角色設定…</button>
         </div>
       </div>
 
