@@ -16,3 +16,5 @@ extract-yourmom/.venv/
 extract-yourmom/*.vrm
 extract-yourmom/vrma/
 .idea/
+
+/worktrees/
