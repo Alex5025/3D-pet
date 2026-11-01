@@ -68,7 +68,23 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 - **右鍵角色(或 Tray 圖示)**:切換/新增寵物、選 VRM 檔、角色動作、設定、**中控面板**、沙盒設定、重置位置、休息/喚醒、重啟寵物或整個系統。
 - **設定面板**分頁:光影/角色(名稱、個性、晃動、服裝)/動作(預設姿勢、待機動作)/工作(agent、模型、力度、權限、工作目錄)。
 
-開發版與安裝版共用使用者資料目錄（macOS：`~/Library/Application Support/VRM Pet/`）：模型放其下的 `models/`、動作放 `motions/`，角色設定與對話紀錄放 `runtime-data/`。專案內僅保留打包及首次初始化用的預設模型。
+模型與動作預設使用共用產品資料目錄的 `models/`、`motions/`；專案內僅保留打包及首次初始化用的預設模型。開發工作樹各自保存啟動與對話狀態，角色基礎參數共用。
+
+### 角色設定的儲存與載入
+
+設定檔由應用程式管理，介面不提供儲存檔案位置的調整欄位；一般使用者直接在設定頁修改角色參數即可。
+
+| 平台 | 共用角色設定預設位置 |
+| --- | --- |
+| macOS | `~/Library/Application Support/VRM Pet/runtime-data/characters.yaml` |
+| Windows | `%APPDATA%\VRM Pet\runtime-data\characters.yaml` |
+
+- `characters.yaml` 集中保存各角色的名稱、VRM 路徑、個性、光影、服裝、擺動與動作設定。不同角色以獨立 ID 識別，即使使用相同 VRM，參數也不合併。
+- 同一角色在不同開發工作樹共用基礎參數；AI 模型與 Agent session 屬於本地專案執行設定，不影響角色身分。
+- 正常啟動讀取本地 `app.yaml`；喚醒角色時才讀取共用角色參數，首次初始化及遷移例外。其他已喚醒實例不即時套用變更，需下次喚醒才重新載入。
+- `app.yaml` 保存 port、角色引用、負責專案與 Agent 綁定。開發工作樹的本地資料在 macOS 位於 `/tmp/3D-pet/instances/<工作樹實體路徑雜湊>/`，Windows 位於 `%TEMP%\3D-pet\instances\<雜湊>\`；設定檔位於其中的 `runtime-data/`。
+- 儲存失敗仍會在設定頁顯示錯誤與重試操作。詳細目錄與遷移方式見 [系統架構與資料清單](docs/SYSTEM-INVENTORY.md)。
+
 
 > `.codex/config.toml` 可能包含專案沙盒策略與本機路徑,提交前請確認內容適合分享;憑證、token、API key 不得寫入 repository。
 
@@ -78,7 +94,7 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 
 | 變數 | 值 | 作用 |
 |---|---|---|
-| `VRM_PET_DATA_DIR` | 路徑 | 運行資料根目錄(`config.json`、`models/`、`motions/`、`runtime-data/` 都在其下)。預設:開發版與安裝版皆為系統使用者資料下的 `VRM Pet` 目錄，共用模型、動作、角色設定及對話紀錄。測試時指到 `$(mktemp -d)` 可完全隔離,不動到日常寵物的設定 |
+| `VRM_PET_DATA_DIR` | 路徑 | 覆寫本地執行資料目錄（啟動設定、對話及快取）；不會自動隔離共用角色與資產。隔離測試時，另設 `VRM_PET_SHARED_CHARACTERS` 指向測試用角色 YAML |
 | `VRM_PET_AGENT_SELFTEST` | `1` \| `claude` \| `codex` \| `agy` | Headless 回歸自驗(不開視窗,跑完即退出)。`1`=MockProvider 全鏈自驗,不耗額度;`claude`/`codex`/`agy`=對真 CLI 跑 e2e,**會耗訂閱額度**,顯式觸發才跑 |
 | `VRM_PET_AGENT_MOCK` | `1` | 所有寵物改用假 agent(照腳本吐事件),正常開視窗走完整 UI 鏈路,驗 UI 不耗額度 |
 | `VRM_PET_AGENT_DEBUG` | `1` | 把 agent 子行程的 argv 與收發 payload 印到終端機,除錯串接問題用 |
