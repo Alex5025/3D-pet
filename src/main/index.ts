@@ -104,7 +104,6 @@ let registry: AppRegistry;
 const pets = new Map<string, PetProfile>();
 const avatarIcons = new Map<string, { front: string; side: string }>();
 const wardrobeLists = new Map<string, { key: string; label: string }[]>();
-let configFlush: NodeJS.Timeout | null = null;
 let bridge: AgentBridge | null = null;
 let petToolsHub: PetToolsHub | null = null;
 let motionsWatcher: FSWatcher | null = null;
@@ -241,14 +240,8 @@ function createProfile(index = pets.size): PetProfile {
   );
 }
 
-/** 合併短時間內的設定變更，統一原子落盤。 */
-
-/** 平時合併 500ms 內的變更；角色資料先寫入，啟動索引最後更新。 */
+/** 設定異動立即原子落盤；角色資料先寫入，啟動索引最後更新。 */
 function persistConfigSync(): void {
-  if (configFlush) {
-    clearTimeout(configFlush);
-    configFlush = null;
-  }
   try {
     if (!settingsReady) return;
     characters.flush();
@@ -264,15 +257,8 @@ function persistConfigSync(): void {
   }
 }
 
-/** 先寫角色檔再寫桌寵引用，與退出儲存共用同一個序列。 */
-function persistPendingConfig(): void {
-  // 同步原子替換避免退出與背景寫入交錯。
-  persistConfigSync();
-}
-
 function scheduleConfigFlush(): void {
-  if (configFlush) clearTimeout(configFlush);
-  configFlush = setTimeout(persistPendingConfig, 500);
+  persistConfigSync();
 }
 
 async function loadConfig(): Promise<void> {

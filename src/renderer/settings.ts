@@ -57,26 +57,18 @@ function renderPetSelector(): void {
 }
 
 /* 角色設定(個性):自由文字,注入 agent 對話的 system prompt(claude 逐 turn;codex 注入既有 thread)。
- * 輸入即存(debounce)+ 失焦/切視窗立即補存——設定面板是獨立視窗,改完直接點回桌寵
+ * 輸入即存+ 失焦/切視窗立即補存——設定面板是獨立視窗,改完直接點回桌寵
  * 不會觸發頁面內 blur,原本只掛 change 事件會漏存。 */
 const personaEl = el('pet-persona') as HTMLTextAreaElement;
-let personaTimer: number | null = null;
 let displayedCharacter = '';
 let displayedPet = '';
 let displayedRevision = 0;
 async function savePersona(): Promise<void> {
-  if (personaTimer !== null) {
-    clearTimeout(personaTimer);
-    personaTimer = null;
-  }
   const profile = selectedProfile();
   if (!profile?.enabled || !profile.characterReady || (profile.persona ?? '') === personaEl.value) return;
   await window.pet.updatePetMeta(profile.id, { persona: personaEl.value }, profile.characterId);
 }
-personaEl.addEventListener('input', () => {
-  if (personaTimer !== null) clearTimeout(personaTimer);
-  personaTimer = window.setTimeout(() => void savePersona(), 500);
-});
+personaEl.addEventListener('input', () => void savePersona());
 personaEl.addEventListener('blur', () => void savePersona());
 window.addEventListener('blur', () => void savePersona());
 
@@ -180,8 +172,6 @@ async function loadSelectedPet(notifyMain = true): Promise<void> {
   for (const action of ['import', 'export']) (el(`character-${action}`) as HTMLButtonElement).disabled = !profile.enabled || !profile.characterReady || !!profile.characterError;
   // 打字中(textarea 聚焦)不回寫——存檔廣播回來的 profiles 會蓋掉正在輸入的內容
   if (displayedPet !== profile.id || displayedCharacter !== (profile.characterId ?? '') || displayedRevision !== (profile.characterRevision ?? 0)) {
-    if (personaTimer !== null) clearTimeout(personaTimer);
-    personaTimer = null;
     personaEl.value = profile.persona ?? '';
   } else if (document.activeElement !== personaEl) personaEl.value = profile.persona ?? '';
   displayedPet = profile.id;

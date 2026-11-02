@@ -61,12 +61,30 @@ export function signature(path: string): string | null {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 }
 
-/** 全角色集中儲存；一般啟動不讀內容，喚醒或一次性遷移才載入。 */
+/** 只套用本地相對於喚醒快照的異動，保留其他實例修改的欄位。 */
+function mergeChanges(base: unknown, local: unknown, disk: unknown, path: string): unknown {
+  const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  if (equal(base, local)) return disk;
+  if (equal(base, disk) || equal(local, disk)) return local;
+  const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (record(base) && record(local) && record(disk)) {
+    const merged: Record<string, unknown> = { ...disk };
+    for (const key of new Set([...Object.keys(base), ...Object.keys(local)])) {
+      const value = mergeChanges(base[key], local[key], disk[key], `${path}.${key}`);
+      if (value === undefined) delete merged[key];
+      else merged[key] = value;
+    }
+    return merged;
+  }
+  throw new Error(`characters.yaml 已被外部修改同一欄位（${path}），未覆寫；請確認兩邊內容後重試`);
+}
+
+/** 全角色集中儲存；一般啟動不讀內容，喚醒或一次性遷移載入；儲存時讀取磁碟以合併異動。 */
 export class CharacterStore {
   private documents = new Map<string, CharacterDocument>();
   private dirty = false;
+  private baseline = new Map<string, CharacterDocument>();
   private loaded = false;
-  private sourceSignature: string | null = null;
   constructor(readonly filePath: string) {}
   get(id: string): CharacterDocument | undefined { return this.documents.get(id); }
   all(): CharacterDocument[] { return [...this.documents.values()]; }
@@ -84,7 +102,7 @@ export class CharacterStore {
     }
     if (signature(this.filePath) !== before) throw new Error('角色設定正在被外部修改，請重新喚醒');
     this.documents = next;
-    this.sourceSignature = before;
+    this.baseline = structuredClone(next);
     this.loaded = true;
   }
   resolve(vrmPath: string, hash: string, initial: CharacterParameters, requireExisting: boolean, id: string): CharacterDocument {
@@ -112,10 +130,23 @@ export class CharacterStore {
   }
   flush(): void {
     if (!this.loaded || !this.dirty) return;
-    if (signature(this.filePath) !== this.sourceSignature) throw new Error('characters.yaml 已被外部修改，未覆寫檔案；請先處理尚未儲存的變更');
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    writeCharacters(this.filePath, this.sourceSignature, this.all());
-    this.sourceSignature = signature(this.filePath);
+    const currentSignature = signature(this.filePath);
+    if (currentSignature === null) throw new Error('characters.yaml 已遺失，請還原檔案');
+    const raw = parseCharacterYaml(readFileSync(this.filePath, 'utf8')) as Record<string, unknown> | null;
+    if (!raw || raw.schemaVersion !== 3 || !Array.isArray(raw.characters)) throw new Error('角色 YAML 版本或清單無效');
+    const merged = new Map<string, CharacterDocument>();
+    for (const item of raw.characters) {
+      const document = parseStoredCharacter(item);
+      if (merged.has(document.id)) throw new Error('重複寵物 ID');
+      merged.set(document.id, document);
+    }
+    for (const [id, local] of this.documents) {
+      const value = mergeChanges(this.baseline.get(id), local, merged.get(id), id);
+      if (value !== undefined) merged.set(id, parseStoredCharacter(value));
+    }
+    writeCharacters(this.filePath, currentSignature, [...merged.values()]);
+    // 不把其他世界的修改熱套用到目前角色；下次喚醒才讀入。
+    this.baseline = structuredClone(this.documents);
     this.dirty = false;
   }
 }

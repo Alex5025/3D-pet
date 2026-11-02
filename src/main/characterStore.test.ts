@@ -68,6 +68,26 @@ async function run(): Promise<void> {
   assert.equal(storeB.get(id)?.id, id);
   assert.equal(storeB.get('two')?.vrmPath, realpathSync(model));
   assert.equal(storeB.get('two')?.parameters.name, '八重神子');
+  // 外部個性與本地光影可合併，且後續儲存不可把舊個性寫回。
+  const mergePath = join(root, 'merge.yaml');
+  atomicYaml(mergePath, { schemaVersion: 3, characters: storeB.all() });
+  const localStore = new CharacterStore(mergePath); localStore.loadForWake();
+  const externalStore = new CharacterStore(mergePath); externalStore.loadForWake();
+  externalStore.update(id, { ...externalStore.get(id)!.parameters, persona: '外部新增個性' });
+  externalStore.update('two', { ...externalStore.get('two')!.parameters, persona: '另一角色外部個性' });
+  externalStore.flush();
+  localStore.update(id, { ...localStore.get(id)!.parameters, wardrobe: { coat: false } }); localStore.flush();
+  localStore.update(id, { ...localStore.get(id)!.parameters, name: '本地改名' }); localStore.flush();
+  assert.notEqual(localStore.get(id)!.parameters.persona, '外部新增個性', '不熱更新執行中個性');
+  const verified = new CharacterStore(mergePath); verified.loadForWake();
+  assert.equal(verified.get(id)!.parameters.persona, '外部新增個性');
+  assert.equal(verified.get(id)!.parameters.name, '本地改名');
+  assert.equal(verified.get(id)!.parameters.wardrobe!.coat, false);
+  assert.equal(verified.get('two')!.parameters.persona, '另一角色外部個性');
+  const beforeConflict = readFileSync(mergePath, 'utf8');
+  localStore.update(id, { ...localStore.get(id)!.parameters, persona: '本地不同個性' });
+  assert.throws(() => localStore.flush(), /同一欄位/);
+  assert.equal(readFileSync(mergePath, 'utf8'), beforeConflict);
   // 正常啟動不讀角色檔；即使壞掉仍可取得本地專案清單，喚醒才回報錯誤。
   writeFileSync(shared, 'characters: [');
   assert.equal((await migrateSettings(new SettingsStore(instanceA.filePath), model, shared, choices)).pets.length, 2);
