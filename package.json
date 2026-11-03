@@ -9,6 +9,7 @@
     "prepare": "git config core.hooksPath .githooks",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:secrets:all": "node scripts/check-secrets.mjs --tracked",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "predev": "node scripts/cleanup-dev.mjs",
     "dev": "electron-vite dev",
     "start": "zsh scripts/start-pet-system.sh",
