@@ -188,7 +188,7 @@ export const ja = {
   'settings.permReadonly': '読み取り専用(回答のみ、ファイルは変更しない)',
   'settings.permPlan': 'プランモード(まず計画、ファイルは変更しない)',
   'settings.permAsk': '作業ディレクトリ書き込み可(操作ごとに承認が必要)',
-  'settings.permAuto': '全自動(確認なし。ご注意ください)',
+  'settings.permAuto': '全自動(ツール操作を自動承認)',
   'settings.sessionId': 'Session ID(会話後に自動保存。手動入力は上級者向け)',
   'settings.newSession': '新しい会話(コンテキストをクリア)',
   'settings.newSessionDone': '新しい会話を開始しました。次の発言から新規です',

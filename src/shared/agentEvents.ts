@@ -5,7 +5,7 @@
 
 export type AgentKind = 'codex' | 'claude' | 'agy';
 
-/** 權限等級:readonly=唯讀只回答(預設)/ ask=可寫工作目錄、危險操作經泡泡核准 / auto=可寫且不詢問 */
+/** 權限等級:readonly=唯讀只回答(預設)/ ask=可寫工作目錄、危險操作經泡泡核准 / auto=自動執行並核准工具操作,不授予沙盒外權限(Codex) */
 /** 權限等級。plan = 先出計畫不動手(Claude 有原生 permission-mode;Codex 無對應旗標,
  *  以唯讀沙盒 + 計畫指示模擬)。 */
 export type AgentPermission = 'readonly' | 'plan' | 'ask' | 'auto';

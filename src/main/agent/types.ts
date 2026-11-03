@@ -60,7 +60,7 @@ export interface AgentProvider {
   sendMessage(sessionId: string, text: string, opts?: TurnOptions): AsyncIterable<AgentEvent>;
   /** 中斷該 session 進行中的 turn(codex: turn/interrupt;claude: 殺該 turn 的行程)。 */
   cancel(sessionId: string): Promise<void>;
-  /** 回覆 approval 事件(requestId 來自該事件);只在 permission=ask 時會發生。 */
+  /** 回覆 approval 事件(requestId 來自該事件);Codex auto 的必要核准也會走此流程。 */
   respondApproval(sessionId: string, requestId: string, allow: boolean, feedback?: string): Promise<void>;
   /** 釋放單一 session(寵物休眠/刪除)。 */
   closeSession(sessionId: string): Promise<void>;

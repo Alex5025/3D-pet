@@ -188,7 +188,7 @@ export const en = {
   'settings.permReadonly': 'Read-only (answers only, no file changes)',
   'settings.permPlan': 'Plan mode (plan first, no file changes)',
   'settings.permAsk': 'Write workspace (each operation needs my approval)',
-  'settings.permAuto': 'Fully automatic (no prompts — be careful)',
+  'settings.permAuto': 'Automatic (approve tool operations)',
   'settings.sessionId': 'Session ID (saved automatically after chatting; manual entry is advanced use)',
   'settings.newSession': 'New Chat (clear context)',
   'settings.newSessionDone': 'New chat started; next message starts fresh',

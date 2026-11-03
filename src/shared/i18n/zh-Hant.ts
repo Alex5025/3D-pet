@@ -194,7 +194,7 @@ export const zhHant = {
   'settings.permReadonly': '唯讀（只回答，不動檔案）',
   'settings.permPlan': '計畫模式(先給計畫,不動檔案)',
   'settings.permAsk': '可寫工作目錄（每次操作需我核准）',
-  'settings.permAuto': '全自動（不詢問，請小心）',
+  'settings.permAuto': '全自動（自動核准工具操作）',
   'settings.sessionId': 'Session ID（對話後自動回存；手動填寫為進階用途）',
   'settings.newSession': '開新對話（清空上下文）',
   'settings.newSessionDone': '已開新對話,下一句從零開始',

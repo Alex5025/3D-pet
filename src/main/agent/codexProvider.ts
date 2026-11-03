@@ -117,7 +117,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     });
     initialized = request('initialize', {
       clientInfo: { name: 'vrm-pet', title: 'VRM 桌寵', version: '0.1.0' },
-      capabilities: null
+      capabilities: { experimentalApi: true } // granular 核准政策需要此協定能力
     }).then((res) => {
       if (res.error) throw new Error(t('agent.initFailed', { error: res.error.message ?? t('common.unknown') }));
     });
@@ -148,9 +148,17 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const params = msg.params ?? {};
     const threadId = (params['threadId'] ?? params['conversationId']) as string | undefined;
     const handler = threadId ? turnHandlers.get(threadId) : undefined;
-    // 寵物工具的 MCP 呼叫核准(mcpServer/elicitation/request)自動放行——那是我們自己的工具
+    // 空白表單才是可直接確認的請求;需要填資料或開啟網址時不能偽造完成。
     if (msg.method === 'mcpServer/elicitation/request') {
-      if (params['serverName'] === 'pettools') {
+      const schema = params['requestedSchema'];
+      const confirmationOnly = params['mode'] === 'form' && isRecordLike(schema) &&
+        schema['type'] === 'object' && isRecordLike(schema['properties']) &&
+        Object.keys(schema['properties']).length === 0 &&
+        (schema['required'] === undefined ||
+          (Array.isArray(schema['required']) && schema['required'].length === 0));
+      const automatic = threadId && sessions.get(threadId)?.permission === 'auto';
+      if (handler && msg.id !== undefined && confirmationOnly &&
+          (automatic || params['serverName'] === 'pettools')) {
         respondToServer(msg.id!, { action: 'accept', content: {}, _meta: null });
         return;
       }
@@ -198,13 +206,18 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
   /** 權限等級 → thread 參數。ask 用 untrusted 而非 on-request:
    *  on-request 是「模型自行判斷」,workspace 內寫入常直接做(e2e 實測不穩);
    *  untrusted 只放行安全唯讀指令,其餘一律發審批(實測 allow/deny 兩向都保證詢問)。 */
-  const permissionParams = (permission: AgentPermission): Record<string, string> =>
+  const permissionParams = (permission: AgentPermission): Record<string, unknown> =>
     // plan 走唯讀沙盒:codex CLI 沒有對應的 plan 旗標(實測 --help 無此選項),
     // 「先出計畫不動手」= 唯讀 + 計畫指示(指示在 composeContext 注入)
     permission === 'ask'
       ? { sandbox: 'workspace-write', approvalPolicy: 'untrusted' }
       : permission === 'auto'
-        ? { sandbox: 'workspace-write', approvalPolicy: 'never' }
+        // 保留沙盒邊界、不詢問擴權;MCP 確認交由上方依此 thread 的 auto 模式處理。
+        // never 會在送出 MCP 確認前直接拒絕,因此只開啟 MCP elicitation。
+        ? { sandbox: 'workspace-write', approvalPolicy: { granular: {
+            sandbox_approval: false, rules: false, skill_approval: false,
+            request_permissions: false, mcp_elicitations: true,
+          } } }
         : { sandbox: 'read-only', approvalPolicy: 'never' };
 
   async function loadThread(threadId: string | null, workdir: string, persona: string | undefined, permission: AgentPermission, petId?: string): Promise<string> {

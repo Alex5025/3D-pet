@@ -188,7 +188,7 @@ export const ko = {
   'settings.permReadonly': '읽기 전용(답변만, 파일 변경 없음)',
   'settings.permPlan': '계획 모드(먼저 계획, 파일 변경 없음)',
   'settings.permAsk': '작업 디렉터리 쓰기 가능(작업마다 승인 필요)',
-  'settings.permAuto': '완전 자동(확인 없음, 주의하세요)',
+  'settings.permAuto': '완전 자동(도구 작업 자동 승인)',
   'settings.sessionId': 'Session ID(대화 후 자동 저장. 수동 입력은 고급 용도)',
   'settings.newSession': '새 대화(컨텍스트 지우기)',
   'settings.newSessionDone': '새 대화를 시작했습니다. 다음 메시지부터 새로 시작합니다',
