@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, cpSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CharacterStore, atomicYaml, parseCharacterYaml, modelHash, signature, writeCharacters } from './characterStore';
 import { SettingsStore, migrateSettings, type MigrationChoices } from './settingsStore';
@@ -9,8 +10,9 @@ import { createMockProvider } from './agent/mockProvider';
 import type { AgentBinding } from '../shared/agentEvents';
 
 async function run(): Promise<void> {
-  mkdirSync('/tmp/3D-pet', { recursive: true });
-  const root = mkdtempSync('/tmp/3D-pet/shared-tests-');
+  const scratch = join(tmpdir(), '3D-pet');
+  mkdirSync(scratch, { recursive: true });
+  const root = mkdtempSync(join(scratch, 'shared-tests-'));
   const shared = join(root, 'global', 'characters.yaml');
   const model = join(root, 'fox.vrm'); writeFileSync(model, 'test model');
   const hash = modelHash(readFileSync(model));

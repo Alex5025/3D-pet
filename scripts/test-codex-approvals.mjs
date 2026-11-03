@@ -1,12 +1,14 @@
 import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // 以假 app-server 驗證實際 provider 的 RPC 與核准事件,不存取使用者筆記。
-await mkdir('/tmp/3D-pet', { recursive: true });
-const dir = await mkdtemp('/tmp/3D-pet/codex-approvals-');
+const scratch = join(tmpdir(), '3D-pet');
+await mkdir(scratch, { recursive: true });
+const dir = await mkdtemp(join(scratch, 'codex-approvals-'));
 const oldPath = process.env.PATH;
 let provider;
 const deadline = setTimeout(() => { console.error('FAIL: 核准測試逾時'); process.exit(1); }, 25_000);

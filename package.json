@@ -19,7 +19,9 @@
     "dist:win": "npm run build && electron-builder --win nsis --x64",
     "dist:mac": "npm run build && electron-builder --mac dmg zip",
     "typecheck": "tsc --noEmit",
-    "test:characters": "node scripts/test-characters.mjs"
+    "test": "node scripts/test.mjs",
+    "test:characters": "node scripts/test-characters.mjs",
+    "test:codex": "node scripts/test-codex-approvals.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

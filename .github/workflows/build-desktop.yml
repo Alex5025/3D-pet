@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run check:i18n
+      - run: npm test
       - run: npm run build
       - name: Package macOS
         if: runner.os == 'macOS'
