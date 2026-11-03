@@ -59,6 +59,6 @@ characters: # 角色清單；每個「-」代表一個獨立角色。
 
 共用設定預設位置：macOS 為 `~/Library/Application Support/VRM Pet/runtime-data/characters.yaml`；Windows 為 `%APPDATA%\VRM Pet\runtime-data\characters.yaml`。動作檔放在同一產品資料目錄的 `motions/`。
 
-介面修改會自動儲存；手動修改檔案後，角色需休息再喚醒才載入。port、工作目錄、AI 模型與 Agent 綁定屬於各工作樹本地設定，不放在此檔案。YAML 內註解可能在程式儲存時被移除，本說明文件會保留。
+介面異動送達主程序後立即儲存；光影、晃動及位置的高頻操作保留約 50ms 傳送節流。儲存時合併不同欄位的外部修改，同一欄位有不同修改則提示衝突並保留磁碟內容；手動修改檔案後，角色需休息再喚醒才載入。port、工作目錄、AI 模型與 Agent 綁定屬於各工作樹本地設定，不放在此檔案。YAML 內註解可能在程式儲存時被移除，本說明文件會保留。
 
 參數定義依據：[欄位驗證](../src/shared/character.ts)、[渲染參數](../src/renderer/viewer.ts)。

@@ -143,7 +143,9 @@ chatQueue(逐寵 FIFO,cap 10)
 **MCP 寵物工具**(agent 主動呼叫,經 socket 回連 `petToolsHub`):
 `pet_play_motion` · `pet_show_expression` · `pet_speak`
 
-**權限三檔**:唯讀 / 可寫工作目錄(跳審批)/ 全自動 → 各自對映 codex 的 sandbox+approvalPolicy、claude 的旗標。
+**運行模式**：唯讀 / 計畫 / 可寫工作目錄（跳審批）/ 全自動；各 Provider 依能力對映。Antigravity 不支援需核准模式。
+
+Codex 全自動使用 workspace-write 與 granular 政策：只開啟 MCP elicitation，關閉 sandbox、rules、skill 與 request_permissions 核准。主程序僅自動接受有進行中對話、空白 object 表單的確認；需要輸入欄位或網址確認仍走核准流程，未知對話拒絕。initialize 宣告 experimentalApi，測試使用假 app-server，不代表所有 Codex CLI 版本都支援此政策。
 
 ---
 
@@ -151,8 +153,8 @@ chatQueue(逐寵 FIFO,cap 10)
 
 | 檔案 | 內容 | 寫入時機 |
 |---|---|---|
-| 各實例 `runtime-data/app.yaml` | 固定 port、共用角色檔路徑、啟用角色、專案清單、各專案 Agent session、位置 | 500ms 合併、原子替換 |
-| 共用 `characters.yaml` | 穩定角色 ID、模型路徑／SHA-256、個性、光影、動作；不含工作目錄與 session | 喚醒讀取；變更時跨程序鎖與版本檢查 |
+| 各實例 `runtime-data/app.yaml` | 固定 port、共用角色檔路徑、啟用角色、專案清單、各專案 Agent session、位置 | 異動送達主程序後立即原子替換 |
+| 共用 `characters.yaml` | 穩定角色 ID、模型路徑／SHA-256、個性、光影、動作；不含工作目錄與 session | 喚醒載入；儲存時讀取並合併欄位異動，以跨程序鎖、版本檢查及原子替換寫入 |
 | 各實例 `runtime-data/transcripts/<角色與專案雜湊>.json` | 各角色、各專案的上一輪對話 | turn 結束時 |
 | 工作目錄的 `.codex/config.toml` | 沙盒策略 | 中控套用時,main 直寫 |
 
@@ -214,7 +216,7 @@ Agent session、逐字稿、參考檔案以角色與專案分開。每個 turn �
 
 ### 同步與遷移
 
-一般啟動只讀本地設定；首次遷移及喚醒才讀共用角色檔。其他世界不熱更新，下一次喚醒載入新設定；偵測基礎個性版本改變時，清除本世界各專案的舊 session，保留歷史對話供查看。
+一般啟動讀本地設定；首次遷移及喚醒載入共用角色參數，儲存時另讀磁碟版本以合併不同欄位的異動。同一欄位兩邊修改不同時回報衝突，不覆寫磁碟版本。其他世界不熱更新，下一次喚醒載入新設定；偵測基礎個性版本改變時，清除本世界各專案的舊 session，保留歷史對話供查看。
 
 共用檔寫入使用排他鎖、來源版本檢查與原子替換。衝突時拒絕覆寫並提示。程序異常結束若遺留 `.lock`，須確認其中 PID 已不在運行才移除；程式不擅自搶走鎖。YAML 重寫不保留手寫註解。
 

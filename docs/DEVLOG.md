@@ -1054,3 +1054,16 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 新增、替換、修復及內建範例使用共用 models 目錄；動作也讀取共用 motions。預設目錄與工作樹暫存資料分離，自訂共用 YAML 時資產使用該檔同層目錄。首次啟動建立目錄，內建範例採排他複製，保留舊資產與角色路徑。Windows NSIS 明確設定 perMachine=false、deleteAppDataOnUninstall=false，保留安裝目錄選擇；快取移至 LocalAppData，設定仍位於 Roaming。Windows 工作樹改用 TEMP，不再硬編碼 /tmp。
 
 驗證：typecheck、build、test:characters 通過；Windows/macOS 路徑、中文使用者名稱及自訂 TEMP 的模擬檢查通過。Windows 安裝、升級與解除安裝尚未實機驗證。
+
+
+## 63. 角色設定即時儲存與參數說明（2026-11-03 補記）
+
+取消主程序設定及個性輸入的 500ms 儲存延遲。共用角色寫入改為比較喚醒快照、本地異動與磁碟內容，合併不同欄位的修改；同欄位不同修改仍回報衝突。寫入保留跨程序鎖、版本檢查與原子替換，不熱更新執行中的角色。這取代早期章節的延遲儲存與整檔衝突規則。
+
+角色頁呈現模型檔名、選擇按鈕及可複製的唯讀路徑，匯入／匯出移至底部。儲存位置由 README 說明，完整參數改以 CHARACTER-SETTINGS.md 的 YAML 註解形式保存。
+
+## 64. Codex 核准與統一測試入口（2026-11-03）
+
+Codex 全自動模式改用 granular 政策並宣告 experimentalApi，讓 MCP 確認可送達主程序，避免 never 政策在確認送出前直接拒絕。僅自動接受有效對話的空白表單確認；有輸入欄位或網址的請求仍經介面，未知對話拒絕，保留 workspace-write 沙盒。
+
+新增 npm test 掃描 scripts/test-*.mjs，依檔名執行，失敗即停止；提供 test:characters 與 test:codex 個別入口，接入 pre-push 及桌面 CI。測試暫存目錄改用系統 tmpdir 下的 3D-pet。Codex 測試使用假 app-server，涵蓋新建／恢復、模式切換、允許／拒絕、表單／網址及未知對話，不呼叫真實工具或消耗代理額度。Windows 尚待 CI 驗證。
