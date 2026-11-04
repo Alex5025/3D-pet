@@ -1,0 +1,242 @@
+[
+  {
+    "kind": "handle",
+    "name": "agent-models"
+  },
+  {
+    "kind": "on",
+    "name": "avatar-icons"
+  },
+  {
+    "kind": "handle",
+    "name": "character-file"
+  },
+  {
+    "kind": "handle",
+    "name": "character-storage-retry"
+  },
+  {
+    "kind": "handle",
+    "name": "character-storage-status"
+  },
+  {
+    "kind": "on",
+    "name": "chat-approval"
+  },
+  {
+    "kind": "on",
+    "name": "chat-cancel"
+  },
+  {
+    "kind": "handle",
+    "name": "chat-queue-get"
+  },
+  {
+    "kind": "on",
+    "name": "chat-queue-remove"
+  },
+  {
+    "kind": "handle",
+    "name": "chat-send"
+  },
+  {
+    "kind": "handle",
+    "name": "chat-transcript-get"
+  },
+  {
+    "kind": "handle",
+    "name": "chat-unbound-remove"
+  },
+  {
+    "kind": "handle",
+    "name": "choose-ref-files"
+  },
+  {
+    "kind": "handle",
+    "name": "choose-vrm"
+  },
+  {
+    "kind": "handle",
+    "name": "choose-workspace"
+  },
+  {
+    "kind": "handle",
+    "name": "choose-workspace-root"
+  },
+  {
+    "kind": "handle",
+    "name": "control-enqueue"
+  },
+  {
+    "kind": "handle",
+    "name": "control-status-get"
+  },
+  {
+    "kind": "handle",
+    "name": "create-pet"
+  },
+  {
+    "kind": "handle",
+    "name": "get-boot-vrm"
+  },
+  {
+    "kind": "handle",
+    "name": "get-default-pose"
+  },
+  {
+    "kind": "handle",
+    "name": "get-lighting"
+  },
+  {
+    "kind": "handle",
+    "name": "get-pet-collection"
+  },
+  {
+    "kind": "handle",
+    "name": "get-state"
+  },
+  {
+    "kind": "handle",
+    "name": "get-sway"
+  },
+  {
+    "kind": "handle",
+    "name": "get-wardrobe"
+  },
+  {
+    "kind": "handle",
+    "name": "locale-get"
+  },
+  {
+    "kind": "handle",
+    "name": "locale-pref-get"
+  },
+  {
+    "kind": "handle",
+    "name": "locale-set"
+  },
+  {
+    "kind": "on",
+    "name": "menu-open-control"
+  },
+  {
+    "kind": "on",
+    "name": "menu-open-settings"
+  },
+  {
+    "kind": "on",
+    "name": "menu-play-motion"
+  },
+  {
+    "kind": "on",
+    "name": "menu-reset-state"
+  },
+  {
+    "kind": "on",
+    "name": "menu-restart-pet"
+  },
+  {
+    "kind": "on",
+    "name": "menu-stop-motion"
+  },
+  {
+    "kind": "handle",
+    "name": "motion-list"
+  },
+  {
+    "kind": "on",
+    "name": "new-session"
+  },
+  {
+    "kind": "on",
+    "name": "open-external"
+  },
+  {
+    "kind": "on",
+    "name": "pet-rects"
+  },
+  {
+    "kind": "on",
+    "name": "ref-files-add"
+  },
+  {
+    "kind": "on",
+    "name": "ref-files-remove"
+  },
+  {
+    "kind": "handle",
+    "name": "remove-pet"
+  },
+  {
+    "kind": "handle",
+    "name": "sandbox-settings-get"
+  },
+  {
+    "kind": "handle",
+    "name": "sandbox-settings-set"
+  },
+  {
+    "kind": "on",
+    "name": "save-state"
+  },
+  {
+    "kind": "handle",
+    "name": "select-pet"
+  },
+  {
+    "kind": "handle",
+    "name": "select-project"
+  },
+  {
+    "kind": "on",
+    "name": "set-default-pose"
+  },
+  {
+    "kind": "handle",
+    "name": "set-input-mode"
+  },
+  {
+    "kind": "on",
+    "name": "set-interactive"
+  },
+  {
+    "kind": "on",
+    "name": "set-lighting"
+  },
+  {
+    "kind": "on",
+    "name": "set-state"
+  },
+  {
+    "kind": "on",
+    "name": "set-sway"
+  },
+  {
+    "kind": "on",
+    "name": "set-wardrobe"
+  },
+  {
+    "kind": "on",
+    "name": "show-menu"
+  },
+  {
+    "kind": "on",
+    "name": "system-quit"
+  },
+  {
+    "kind": "on",
+    "name": "system-restart"
+  },
+  {
+    "kind": "handle",
+    "name": "update-pet-meta"
+  },
+  {
+    "kind": "on",
+    "name": "wardrobe-list"
+  },
+  {
+    "kind": "handle",
+    "name": "workspace-root-get"
+  }
+]
