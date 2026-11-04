@@ -1,1875 +1,282 @@
-import type { PetState, Lighting, Sway, PetProfile, AppRegistry } from './runtimeTypes';
-import type { LocalPet, PetProject } from '../shared/projects';
-import { SettingsStore, migrateSettings } from './settingsStore';
-import { appPrompt } from './appPrompt';
-import { CharacterStore, applyCharacter, atomicYaml, parseCharacterYaml, characterParameters, modelHash } from './characterStore';
-import { CHARACTER_KEYS, parseCharacterExport, type CharacterFileResult } from '../shared/character';
-import { app, BrowserWindow, ipcMain, powerMonitor, screen, Tray, Menu, nativeImage, dialog, shell } from 'electron';
-import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { constants, existsSync, realpathSync, mkdirSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import type { AgentBinding, AgentEvent } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, ControlPetStatus, ControlTaskRecord } from '../shared/chat';
-import { createChatDispatcher, createChatQueue } from './chatQueue';
-import { registerAppearanceIpc } from './appearanceIpc';
-import { registerPetIpc } from './petIpc';
-import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../shared/sandboxSettings';
-import { groupPetsByWorkspace, normalizeWorkspacePath } from '../shared/petGroups';
-import type { AgentBridge } from './agent/bridge';
-import { createAgentBridge } from './agent/bridge';
-import { createDragMonitor, type DragMonitor } from './dragMonitor';
-import { PET_EXPRESSIONS, createPetToolsHub } from './agent/petToolsHub';
-import type { PetToolsHub } from './agent/petToolsHub';
-import { createProviders } from './agent/providers';
+import { app } from 'electron';
 import { runAgentSelftest, runAgyE2E, runClaudeE2E, runCodexE2E } from './agent/selftest';
-import { readProjectSandboxSettings, writeProjectSandboxSettings } from './sandboxConfig';
-import { ensurePetWorkspace } from './workspaceDefaults';
-import { LOCALES, getLocale, resolveLocale, setLocale, t, type Locale } from '../shared/i18n';
-import { configureOverlayWindow, overlayPlatformOptions } from './platform';
+import { appPrompt } from './appPrompt';
+import { createCharacters, type Characters } from './characters';
+import { createChat, type Chat } from './chat';
+import { createControl, type Control } from './control';
+import { createDrop, type Drop } from './drop';
+import { createIpcChat, type IpcChat } from './ipc/chat';
+import { createIpcControl, type IpcControl } from './ipc/control';
+import { createIpcMenu, type IpcMenu } from './ipc/menu';
+import { createIpcOverlay, type IpcOverlay } from './ipc/overlay';
+import { createIpcPets, type IpcPets } from './ipc/pets';
+import { createIpcReferences, type IpcReferences } from './ipc/references';
+import { createIpcSettings, type IpcSettings } from './ipc/settings';
+import { createLifecycle, type Lifecycle } from './lifecycle';
+import { createMotions, type Motions } from './motions';
+import { configureDataPaths, createPaths, type Paths } from './paths';
+import { createPower, type Power } from './power';
+import { createReferences, type References } from './references';
+import { createTray, type TrayService } from './tray';
+import { createWindows, type Windows } from './windows';
 
-const DEFAULT_STATE: PetState = { x: 0, y: 0, z: 0, rotY: 0, camZ: 5 };
+configureDataPaths();
+if (!app.requestSingleInstanceLock()) app.exit(0);
 
-let win: BrowserWindow | null = null;
-let tray: Tray | null = null;
-let settingsWin: BrowserWindow | null = null;
-let controlWin: BrowserWindow | null = null;
-let overlayInteractive = false;
-let overlayInputMode = false;
-let registry: AppRegistry;
-const pets = new Map<string, PetProfile>();
-const avatarIcons = new Map<string, { front: string; side: string }>();
-const wardrobeLists = new Map<string, { key: string; label: string }[]>();
-let bridge: AgentBridge | null = null;
-let petToolsHub: PetToolsHub | null = null;
-let motionsWatcher: FSWatcher | null = null;
-let dragMonitor: DragMonitor | null = null;
-/** 游標輪詢重算(功率檔位區塊注入):寵物啟用狀態變更時呼叫,全休息 = 停輪詢。 */
-let refreshCursorPollHook: (() => void) | null = null;
-/** 清空某寵的對話佇列(whenReady 注入):寵物休息/刪除/開新對話時呼叫。 */
-let clearChatQueueHook: ((petId: string) => void) | null = null;
-/** 清掉某寵的上次對話紀錄(開新對話/刪除寵物);whenReady 內注入。 */
-let projectChangedHook: ((id: string) => void) | null = null;
-let queuedTaskCountHook: ((id: string) => number) | null = null;
-let clearTranscriptHook: ((petId: string) => void) | null = null;
-/** 全域派發(whenReady 注入):寵物喚醒時呼叫——醒來的寵物可領公用池的單。 */
-let dispatchAllHook: (() => void) | null = null;
-/** 中控面板快照重推(whenReady 注入,50ms debounce):寵物/佇列/agent 狀態變更時呼叫。 */
-let scheduleControlStatusHook: (() => void) | null = null;
-
-// 固定產品目錄，避免開發版套件名稱與安裝版產品名稱造成兩份資料。
-const userDataDir = process.env['VRM_PET_DATA_DIR']
-  ? resolve(process.env['VRM_PET_DATA_DIR'])
-  : join(app.getPath('appData'), 'VRM Pet');
-mkdirSync(userDataDir, { recursive: true });
-app.setPath('userData', userDataDir);
-// Chromium 快取與使用者設定分開；開發實例的快取仍保持隔離。
-const sessionDataDir = process.env['VRM_PET_DATA_DIR']
-  ? join(userDataDir, 'Cache')
-  : process.platform === 'win32'
-    ? join(process.env['LOCALAPPDATA'] || join(app.getPath('home'), 'AppData', 'Local'), 'VRM Pet', 'Cache')
-    : join(userDataDir, 'Cache');
-mkdirSync(sessionDataDir, { recursive: true });
-app.setPath('sessionData', sessionDataDir);
-
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) app.exit(0);
-
-function syncOverlayMouseEvents(): void {
-  win?.setIgnoreMouseEvents(!(overlayInteractive || overlayInputMode), { forward: true });
-}
-
-/* 開發版與安裝版共用使用者資料；測試可用 VRM_PET_DATA_DIR 隔離。 */
-const dataDir = (): string => app.getPath('userData');
-const productDataDir = (): string => join(app.getPath('appData'), 'VRM Pet');
-const sharedAssetRoot = (): string => resolve(characters.filePath) === resolve(productDataDir(), 'runtime-data', 'characters.yaml')
-  ? productDataDir() : dirname(characters.filePath);
-const modelsDir = (): string => join(sharedAssetRoot(), 'models');
-const motionsDir = (): string => join(sharedAssetRoot(), 'motions');
-const defaultVrmPath = (): string => join(modelsDir(), 'AvatarSample_A.vrm');
-const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
-const settings = new SettingsStore(join(runtimeDataDir(), 'app.yaml'));
-let settingsReady = false;
-let characters = new CharacterStore(process.env['VRM_PET_SHARED_CHARACTERS'] ?? join(app.getPath('appData'), 'VRM Pet', 'runtime-data', 'characters.yaml'));
-let characterOperation: Promise<unknown> = Promise.resolve();
-function serializeCharacter<T>(operation: () => Promise<T>): Promise<T> {
-  const result = characterOperation.then(operation);
-  characterOperation = result.catch(() => {});
-  return result;
-}
-let storageError = '';
-function reportStorageError(error: unknown): void {
-  storageError = error instanceof Error ? error.message : String(error);
-  settingsWin?.webContents.send('character-storage-error', storageError);
-}
-function localPet(profile: PetProfile): LocalPet {
-  return { id: profile.id, name: profile.name, enabled: profile.enabled, projects: profile.projects ?? [],
-    workspacePath: profile.workspacePath, state: profile.state, personaVersion: profile.personaVersion };
-}
-function projectFor(profile: PetProfile, path = profile.workspacePath): PetProject | undefined {
-  return profile.projects?.find((p) => p.workspacePath === path);
-}
-function selectProject(profile: PetProfile, path: string): boolean {
-  const project = projectFor(profile, path);
-  if (!project) return false;
-  profile.workspacePath = path;
-  profile.agent = project.agent;
-  projectChangedHook?.(profile.id);
-  scheduleConfigFlush();
-  sendPetProfiles();
-  return true;
-}
-const transcriptsDir = (): string => join(runtimeDataDir(), 'transcripts');
-const transcriptPath = (id: string, workspace = getPet(id)?.workspacePath ?? ''): string => join(transcriptsDir(), `${modelHash(Buffer.from(JSON.stringify([id, workspace])))}.json`);
-const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
-
-/** 兩種版本首次啟動都初始化預設模型；已有檔案時不覆寫。 */
-async function ensureDefaultVrm(): Promise<void> {
-  await mkdir(modelsDir(), { recursive: true });
-  await mkdir(motionsDir(), { recursive: true });
-  // 保留既有模型及角色引用；舊範例只複製，不搬移或覆寫。
-  const legacy = join(dirname(characters.filePath), 'assets', 'AvatarSample_A.vrm');
-  const bundled = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'models', 'AvatarSample_A.vrm');
-  try {
-    await copyFile(existsSync(legacy) ? legacy : bundled, defaultVrmPath(), constants.COPYFILE_EXCL);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  }
-}
-/** 預設工作根目錄：供新寵物及啟動時缺少工作目錄的角色使用。 */
-const workspaceRoot = (): string =>
-  registry.defaultWorkspaceRoot ?? join(app.getPath('documents'), 'PetWorkspaces');
-
-/** 地端重啟腳本只需要這份 PID 紀錄；啟動命令固定寫在腳本內。 */
-function writeSystemPidRecord(): void {
-  mkdirSync(runtimeDataDir(), { recursive: true });
-  writeFileSync(systemPidPath(), `${process.pid}\n`);
-}
-
-function normalizeProfile(value: Partial<PetProfile>, index: number): PetProfile {
-  const id = typeof value.id === 'string' && value.id ? value.id : randomUUID();
-  const profile: PetProfile = {
-    ...value,
-    id,
-    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : t('common.defaultPetName', { n: index + 1 }),
-    enabled: value.enabled !== false,
-    characterReady: false,
-  };
-  // 遷移:舊 codexSessionId → agent(舊欄位保留不刪,循遷移慣例)
-  if (!profile.agent && profile.codexSessionId) {
-    profile.agent = { kind: 'codex', sessionId: profile.codexSessionId };
-  }
-  return profile;
-}
-
-function createProfile(index = pets.size): PetProfile {
-  const slot = pets.size;
-  const offset = slot === 0 ? 0 : (Math.ceil(slot / 2) * 1.15) * (slot % 2 ? 1 : -1);
-  return normalizeProfile(
-    {
-      id: randomUUID(),
-      name: t('common.defaultPetName', { n: index + 1 }),
-      enabled: true,
-      state: { ...DEFAULT_STATE, x: offset }
-    },
-    index
-  );
-}
-
-/** 設定異動立即原子落盤；角色資料先寫入，啟動索引最後更新。 */
-function persistConfigSync(): void {
-  try {
-    if (!settingsReady) return;
-    characters.flush();
-    settings.save({ initialized: true, selectedPetId: registry.selectedPetId,
-      defaultWorkspaceRoot: registry.defaultWorkspaceRoot, locale: registry.locale,
-      pets: [...pets.values()].map(localPet),
-    });
-    storageError = '';
-    settingsWin?.webContents.send('character-storage-error', '');
-  } catch (error) {
-    reportStorageError(error);
-    console.log('[main] config flush failed', error);
-  }
-}
-
-function scheduleConfigFlush(): void {
-  persistConfigSync();
-}
-
-async function loadConfig(): Promise<void> {
-  const boot = await migrateSettings(settings, defaultVrmPath(), characters.filePath, {
-    model: async (path, name) => {
-      await appPrompt({ message: `「${name}」的模型路徑已失效，請重新選擇模型。`, detail: path, buttons: ['選擇模型', '取消'], cancelId: 1 }).then((answer) => { if (answer.response === 1) throw new Error('已取消修復'); });
-      const result = await dialog.showOpenDialog({ title: `修復 ${name} 的模型路徑`, defaultPath: modelsDir(), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
-      return result.filePaths[0] ?? null;
-    },
-    parameters: async (existing, incoming) => {
-      const result = await appPrompt({ message: '同一角色 ID 有不同版本的設定，請選擇要保留的版本。',
-        detail: `既有設定：\n${JSON.stringify(existing, null, 2)}\n\n待匯入設定：\n${JSON.stringify(incoming, null, 2)}`,
-        buttons: [`保留 ${existing.name}`, `採用 ${incoming.name}`, '取消'], cancelId: 2 });
-      return result.response === 0 ? 'existing' : result.response === 1 ? 'incoming' : 'cancel';
-    },
-  }, process.env['VRM_PET_BASELINE_DIR']);
-  characters = new CharacterStore(boot.charactersPath);
-  setLocale(boot.locale && LOCALES.includes(boot.locale as Locale) ? boot.locale as Locale : resolveLocale(app.getLocale()));
-  for (const item of boot.pets) {
-    const profile = normalizeProfile({ ...item, characterId: item.id }, pets.size);
-    profile.agent = projectFor(profile)?.agent;
-    pets.set(item.id, profile);
-  }
-  registry = { schemaVersion: 2, selectedPetId: boot.selectedPetId ?? boot.pets[0]?.id ?? '', petIds: boot.pets.map((p) => p.id),
-    defaultWorkspaceRoot: boot.defaultWorkspaceRoot, locale: boot.locale as Locale | undefined };
-  settingsReady = true;
-}
-
-function getPet(id?: string): PetProfile | null {
-  return pets.get(id ?? registry.selectedPetId) ?? null;
-}
-
-function updatePet(id: string, patch: Partial<PetProfile>): PetProfile | null {
-  const profile = pets.get(id);
-  if (!profile) return null;
-  if (!profile.characterLoaded && Object.keys(patch).some((key) => key !== 'enabled')) return profile;
-  if (patch.enabled === true && !profile.characterReady) return profile;
-  if (CHARACTER_KEYS.some((key) => key in patch)) {
-    if (!profile.enabled || !profile.characterReady) return profile;
-    try {
-      const parameters = characterParameters({ ...profile, ...patch });
-      if (profile.characterId) characters.update(profile.characterId, parameters);
-    } catch (error) { reportStorageError(error); return profile; }
-  }
-  if (patch.agent) {
-    const project = projectFor(profile);
-    if (project) project.agent = patch.agent;
-  }
-  Object.assign(profile, patch, { id: profile.id });
-  // 「休息 → 釋放快取 + 關 agent session」是 disable 的固有副作用:集中在這唯一變更點,
-  // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
-  if (patch.enabled === false) {
-    releasePetCaches(id);
-    clearChatQueueHook?.(id); // 休息 = 放下手邊任務,排隊中的一併清掉(公用池不受影響)
-    void bridge?.closePetSession(id);
-  } else if (patch.enabled === true) {
-    dispatchAllHook?.(); // 喚醒的寵物可以去領公用池的單
-  }
-  if (patch.enabled !== undefined) refreshCursorPollHook?.();
-  if (patch.enabled !== undefined || 'idleMotions' in patch) scheduleIdleMotion(id);
-  scheduleConfigFlush();
-  return profile;
-}
-
-function releasePetCaches(id: string): void {
-  avatarIcons.delete(id);
-  wardrobeLists.delete(id);
-}
-
-async function wakeCharacter(profile: PetProfile): Promise<void> {
-  characters.loadForWake();
-  const saved = characters.get(profile.id);
-  if (profile.characterId && !saved) throw new Error('characters.yaml 缺少此角色，請還原設定');
-  if (saved) {
-    const version = modelHash(Buffer.from(saved.parameters.persona ?? ''));
-    if (profile.personaVersion !== version) {
-      await bridge?.closePetSession(profile.id);
-      for (const project of profile.projects ?? []) if (project.agent) delete project.agent.sessionId;
-    }
-    profile.personaVersion = version;
-    profile.vrmPath = saved.vrmPath;
-    profile.agent = projectFor(profile)?.agent;
-    applyCharacter(profile, saved.parameters);
-  }
-  if (!profile.workspacePath) throw new Error('請先選擇工作目錄');
-  await bindCharacter(profile, profile.workspacePath, profile.vrmPath ?? defaultVrmPath(), true);
-  updatePet(profile.id, { enabled: true });
-}
-
-async function setPetEnabled(id: string, enabled: boolean): Promise<PetProfile | null> {
-  return serializeCharacter(async () => {
-    const profile = getPet(id);
-    if (!profile) return null;
-    if (enabled && !profile.enabled) {
-      try { await wakeCharacter(profile); }
-      catch (error) {
-        profile.enabled = false;
-        profile.characterReady = false;
-        profile.characterError = `角色設定載入失敗：${String(error)}`;
-        await appPrompt({ message: profile.characterError, buttons: ['確定'], cancelId: 0 });
-      }
-    } else if (!enabled) {
-      updatePet(id, { enabled: false });
-      profile.characterReady = false;
-    }
-    persistConfigSync();
-    sendPetProfiles();
-    return profile;
-  });
-}
-
-function sendPetProfiles(): void {
-  const profiles = [...pets.values()];
-  win?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
-  settingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
-  controlWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
-  scheduleControlStatusHook?.(); // 名稱/啟用/工作目錄變更都經過這裡,中控快照跟著重推
-  refreshTray();
-}
-
-function selectPet(id: string): PetProfile | null {
-  const profile = pets.get(id);
-  if (!profile) return null;
-  registry.selectedPetId = id;
-  scheduleConfigFlush();
-  refreshTray();
-  settingsWin?.webContents.send('selected-pet-apply', id);
-  const icons = avatarIcons.get(id);
-  if (icons) settingsWin?.webContents.send('avatar-icons-apply', id, icons);
-  const list = wardrobeLists.get(id);
-  if (list) settingsWin?.webContents.send('wardrobe-list-apply', id, list);
-  return profile;
-}
-
-/** 先完成讀檔及角色 ID 驗證，成功後才改變目前綁定。 */
-async function bindCharacter(profile: PetProfile, workspace: string, path: string, waking = false): Promise<void> {
-  const bytes = await readFile(path);
-  const hash = modelHash(bytes);
-  if (!waking && !profile.characterLoaded) throw new Error('請先喚醒寵物以載入完整設定');
-  characters.flush();
-  const id = profile.id;
-  const initial = characterParameters(profile);
-  const document = characters.resolve(path, hash, initial, !!profile.characterId, id);
-  if (!pets.has(profile.id)) throw new Error('桌寵已移除');
-  profile.workspacePath = workspace;
-  profile.vrmPath = path;
-  profile.characterId = id;
-  profile.characterReady = waking || profile.enabled;
-  profile.characterLoaded = true;
-  profile.characterRevision = (profile.characterRevision ?? 0) + 1;
-  delete profile.characterError;
-  applyCharacter(profile, document.parameters);
-  releasePetCaches(profile.id);
-  scheduleIdleMotion(profile.id);
-  if (!waking) { persistConfigSync(); sendPetProfiles(); }
-  // 完整設定由 profile 廣播套用；模型由 renderer 依角色版本重建，避免兩次載入競態。
-}
-
-async function pushVrm(petId: string, path: string): Promise<void> {
-  await serializeCharacter(async () => {
-    const profile = getPet(petId);
-    if (!profile) return;
-    if (!profile.workspacePath) {
-      await appPrompt({ message: '請先喚醒寵物以載入完整設定', buttons: ['確定'], cancelId: 0 });
-      return;
-    }
-    try { await bindCharacter(profile, profile.workspacePath, path); }
-    catch (error) {
-      await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 });
-    }
-  });
-}
-
-/** 啟動僅還原原先啟用的桌寵；休息中的桌寵不讀 YAML 或模型。 */
-async function initializeCharacters(): Promise<void> {
-  for (const profile of pets.values()) {
-    const enabled = profile.enabled;
-    profile.enabled = false;
-    profile.characterReady = false;
-    if (!enabled) continue;
-    try { await wakeCharacter(profile); }
-    catch (error) {
-      profile.characterError = `角色設定載入失敗（原檔已保留）：${String(error)}`;
-    }
-  }
-  persistConfigSync();
-}
-
-async function chooseVrm(petId: string, parent?: BrowserWindow): Promise<void> {
-  app.focus({ steal: true });
-  const options: Electron.OpenDialogOptions = {
-    defaultPath: modelsDir(),
-    properties: ['openFile'],
-    filters: [{ name: 'VRM', extensions: ['vrm'] }]
-  };
-  // 有父視窗時掛成 sheet(循 chooseWorkspace 慣例):無父的對話框是 app 層級 modal,
-  // 開著時會凍結設定面板等其他視窗,使用者容易以為面板壞掉。
-  const result = parent
-    ? await dialog.showOpenDialog(parent, options)
-    : await dialog.showOpenDialog(options);
-  if (!result.canceled && result.filePaths[0]) await pushVrm(petId, result.filePaths[0]);
-}
-
-async function chooseWorkspace(petId: string, parent?: BrowserWindow): Promise<string | null> {
-  const profile = getPet(petId);
-  if (!profile) return null;
-  app.focus({ steal: true });
-  parent?.focus();
-  const options: Electron.OpenDialogOptions = {
-    title: t('dialog.chooseWorkspace'),
-    buttonLabel: t('common.select'),
-    defaultPath: profile.workspacePath ?? app.getPath('documents'),
-    properties: ['openDirectory', 'createDirectory']
-  };
-  const result = parent
-    ? await dialog.showOpenDialog(parent, options)
-    : await dialog.showOpenDialog(options);
-  const path = result.filePaths[0];
-  if (result.canceled || !path) return profile.workspacePath ?? null;
-  await serializeCharacter(async () => {
-    try {
-      const canonical = realpathSync.native(path);
-      profile.projects ??= [];
-      if (!projectFor(profile, canonical)) profile.projects.push({ workspacePath: canonical });
-      selectProject(profile, canonical);
-      persistConfigSync();
-    }
-    catch (error) { await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 }); }
-  });
-  return profile.workspacePath ?? null;
-}
-
-async function createNewPet(): Promise<PetProfile> {
-  const result = await dialog.showOpenDialog({ title: '選擇新寵物模型', defaultPath: modelsDir(), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
-  if (result.canceled || !result.filePaths[0]) return getPet()!;
-  const profile = createProfile();
-  profile.vrmPath = result.filePaths[0];
-  profile.enabled = false;
-  characters.loadForWake(); // 新增寵物也是一次明確的喚醒操作。
-  ensurePetWorkspace(workspaceRoot(), profile);
-  if (profile.workspacePath) {
-    profile.workspacePath = realpathSync.native(profile.workspacePath);
-    profile.projects = [{ workspacePath: profile.workspacePath }];
-  }
-  pets.set(profile.id, profile);
-  try { await wakeCharacter(profile); }
-  catch (error) { pets.delete(profile.id); throw error; }
-  registry.petIds.push(profile.id);
-  registry.selectedPetId = profile.id;
-  refreshCursorPollHook?.();
-  persistConfigSync();
-  sendPetProfiles();
-  return profile;
-}
-
-function removePet(id: string): boolean {
-  if (pets.size <= 1 || !pets.has(id)) return false;
-  // 移除本世界的角色引用，不刪除其他世界仍使用的共用角色。
-  pets.delete(id);
-  releasePetCaches(id);
-  clearChatQueueHook?.(id);
-  clearTranscriptHook?.(id); // 寵物刪了,對話紀錄不留在磁碟上
-  const idleTimer = idleMotionTimers.get(id);
-  if (idleTimer) clearTimeout(idleTimer);
-  idleMotionTimers.delete(id);
-  void bridge?.closePetSession(id);
-  registry.petIds = registry.petIds.filter((petId) => petId !== id);
-  if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
-  refreshCursorPollHook?.(); // 刪掉最後一隻醒著的寵物時停輪詢
-  persistConfigSync();
-  sendPetProfiles();
-  return true;
-}
-
-function resetState(petId: string): void {
-  const state = { ...DEFAULT_STATE };
-  updatePet(petId, { state });
-  win?.webContents.send('apply-state', petId, state);
-  settingsWin?.webContents.send('apply-state', petId, state);
-}
-
-let motionFiles: string[] = [];
-let motionsDirMissing = false;
-
-async function refreshMotions(): Promise<void> {
-  try {
-    motionFiles = (await readdir(motionsDir()))
-      .filter((file) => file.toLowerCase().endsWith('.vrma'))
-      .sort();
-    motionsDirMissing = false;
-  } catch {
-    motionFiles = [];
-    motionsDirMissing = true;
-  }
-}
-
-/* ── 待機動作:每寵一個 timer,20~60 秒隨機間隔從勾選清單挑一個播放 ──
- * 排程長駐、播放前才檢查當下狀態(啟用/清單/功率檔位),設定改完即生效、不用追著清 timer。 */
-const IDLE_MOTION_MIN_MS = 20_000;
-const IDLE_MOTION_SPAN_MS = 40_000;
-const idleMotionTimers = new Map<string, NodeJS.Timeout>();
-/** 功率檔位 suspended(鎖屏/睡眠)時暫停播放;power 區塊注入實作。 */
-let idleMotionsPaused: () => boolean = () => false;
-/** 全域錯開:同一時間只有一寵播待機動作(多寵同時全速跑會疊 GPU;輪流動也更自然)。
- *  動作長度 main 不知道,以保守窗口互斥;撞到的寵物順延重排。 */
-let idleMotionBusyUntil = 0;
-const IDLE_MOTION_LOCK_MS = 10_000;
-
-function scheduleIdleMotion(petId: string): void {
-  const old = idleMotionTimers.get(petId);
-  if (old) clearTimeout(old);
-  idleMotionTimers.delete(petId);
-  const profile = pets.get(petId);
-  if (!profile || profile.enabled === false || !profile.idleMotions?.length) return;
-  const delay = IDLE_MOTION_MIN_MS + Math.random() * IDLE_MOTION_SPAN_MS;
-  idleMotionTimers.set(petId, setTimeout(() => {
-    void (async () => {
-      const current = pets.get(petId);
-      const list = (current?.idleMotions ?? []).filter((file) => motionFiles.includes(file));
-      if (current && current.enabled !== false && list.length && !idleMotionsPaused()
-        && Date.now() >= idleMotionBusyUntil) {
-        idleMotionBusyUntil = Date.now() + IDLE_MOTION_LOCK_MS;
-        const file = list[Math.floor(Math.random() * list.length)]!;
-        try {
-          // 第三參數 lowPower=true:待機播放以半幀率跑(手動/agent 觸發的播放不帶)
-          win?.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)), true);
-        } catch { /* 檔案剛被移走:這輪跳過,下輪過濾自然排除 */ }
-      }
-      scheduleIdleMotion(petId); // 排下一輪(撞到互斥鎖的這輪不播,順延到下一個隨機間隔)
-    })();
-  }, delay));
-}
-
-function motionMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
-  if (motionsDirMissing) return [{ label: t('tray.noMotionsDir'), enabled: false }];
-  if (!motionFiles.length) return [{ label: t('tray.noMotionFiles'), enabled: false }];
-  const dir = motionsDir();
-  return motionFiles.map((file) => ({
-    label: file.replace(/\.vrma$/i, ''),
-    click: async () => {
-      try {
-        win?.webContents.send('vrma-play', petId, await readFile(join(dir, file)));
-      } catch (error) {
-        console.log('[main] vrma read failed', error);
-      }
-    }
-  }));
-}
-
-/** 設定預設姿勢(選單與設定面板共用):即選即播 + 存檔 + 同步 UI。file=null 清除。 */
-async function setDefaultPose(petId: string, file: string | null): Promise<void> {
-  if (file && !motionFiles.includes(file)) return; // 白名單:只接受 motions/ 裡的檔名
-  updatePet(petId, { defaultPose: file ?? undefined });
-  refreshTray();
-  sendPetProfiles(); // 設定面板的下拉跟著同步
-  if (!file) return;
-  try {
-    win?.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)));
-  } catch (error) {
-    console.log('[main] default pose read failed', error);
-  }
-}
-
-function defaultPoseMenuItems(petId: string): Electron.MenuItemConstructorOptions[] {
-  const current = getPet(petId)?.defaultPose;
-  const none: Electron.MenuItemConstructorOptions = {
-    label: t('common.none'),
-    type: 'radio',
-    checked: !current,
-    click: () => void setDefaultPose(petId, null)
-  };
-  if (motionsDirMissing) return [none];
-  return [
-    none,
-    ...motionFiles.map((file): Electron.MenuItemConstructorOptions => ({
-      label: file.replace(/\.vrma$/i, ''),
-      type: 'radio',
-      checked: file === current,
-      click: () => void setDefaultPose(petId, file)
-    }))
-  ];
-}
-
-function refreshTray(): void {
-  if (registry) tray?.setContextMenu(petMenu(registry.selectedPetId));
-}
-
-/** 只重建指定寵物的 agent/runtime；設定與已持久化 session 保留，下一句可 resume。 */
-async function restartPet(petId: string): Promise<void> {
-  const profile = getPet(petId);
-  if (!profile?.enabled) return;
-  try {
-    // provider 正在等待外部程序時 close 可能拖很久；角色重建不可被它無限卡住。
-    await Promise.race([
-      bridge?.closePetSession(petId) ?? Promise.resolve(),
-      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
-    ]);
-  } finally {
-    win?.webContents.send('pet-runtime-restart', petId);
-  }
-}
-
-function shutdownSync(): void {
-  // 每項各自隔離：某個外部程序或 watcher 清理失敗，不可阻止設定落盤與 app 結束／重啟。
-  const cleanup = (label: string, action: () => void): void => {
-    try { action(); } catch (error) { console.log(`[main] ${label} cleanup failed`, error); }
-  };
-  cleanup('agent bridge', () => bridge?.shutdownSync());
-  cleanup('pet tools', () => petToolsHub?.dispose());
-  cleanup('motions watcher', () => motionsWatcher?.close());
-  cleanup('drag monitor', () => dragMonitor?.dispose());
-  cleanup('config', persistConfigSync);
-}
-
-function restartApp(): void {
-  persistConfigSync();
-  shutdownSync();
-  if (app.isPackaged) {
-    app.relaunch();
-  } else {
-    const scriptPath = join(app.getAppPath(), 'scripts/restart-dev.mjs');
-    const child = spawn('node', [scriptPath, String(process.pid), app.getAppPath()], {
-      cwd: app.getAppPath(), detached: true, stdio: 'ignore', windowsHide: true,
-    });
-    child.unref();
-  }
-  app.exit(0);
-}
-
-function petMenu(requestedId?: string): Menu {
-  const profile = getPet(requestedId) ?? [...pets.values()][0];
-  const petId = profile.id;
-  return Menu.buildFromTemplate([
-    { label: t('tray.currentPet', { name: profile.name }), enabled: false },
-    {
-      label: t('tray.switchPet'),
-      submenu: groupPetsByWorkspace([...pets.values()]).map((group) => ({
-        label: `📁 ${group.name}`,
-        submenu: group.pets.map((item) => ({
-          // 休息中的寵物仍列出(讓使用者知道存在),但灰掉不可選。
-          label: `${item.enabled ? '' : t('common.restingPrefix')}${item.name}`,
-          type: 'radio' as const,
-          checked: item.id === petId,
-          enabled: item.enabled,
-          click: () => selectPet(item.id)
-        }))
-      }))
-    },
-    { type: 'separator' },
-    { label: t('tray.chooseVrm'), click: () => void chooseVrm(petId) },
-    {
-      label: t('tray.motions'),
-      submenu: [
-        { label: t('tray.playMotion'), submenu: motionMenuItems(petId) },
-        { label: t('tray.defaultPose'), submenu: defaultPoseMenuItems(petId) },
-        { type: 'separator' },
-        { label: t('tray.stopMotion'), click: () => win?.webContents.send('vrma-stop', petId) }
-      ]
-    },
-    {
-      // 一般外觀與工作設定共用分頁；高風險沙盒設定刻意排除。
-      label: t('tray.settings'),
-      submenu: [
-        { label: t('tray.settingsProject'), click: () => openSettings('project', petId) },
-        { label: t('tray.settingsLight'), click: () => openSettings('light', petId) },
-        { label: t('tray.settingsChar'), click: () => openSettings('char', petId) },
-        { label: t('tray.settingsMotion'), click: () => openSettings('motion', petId) }
-      ]
-    },
-    { label: t('tray.controlPanel'), click: () => openControlPanel() },
-    { label: t('tray.sandboxSettings'), click: () => openControlPanel('sandbox') },
-    { label: t('tray.resetState'), click: () => resetState(petId) },
-    {
-      label: t('tray.restartPet'),
-      enabled: profile.enabled,
-      click: () => void restartPet(petId)
-    },
-    {
-      label: profile.enabled ? t('tray.restCurrent') : t('tray.wakeCurrent'),
-      click: () => setPetEnabled(petId, !profile.enabled)
-    },
-    { type: 'separator' },
-    {
-      label: t('tray.addPet'),
-      click: async () => {
-        const created = await serializeCharacter(createNewPet);
-        openSettings('project', created.id);
-      }
-    },
-    { label: t('tray.restartSystem'), click: restartApp },
-    // app.exit 不觸發 before-quit,清理要在這裡自己做(已知坑,見 DEVLOG §22)
-    { label: t('tray.quit'), click: () => { shutdownSync(); app.exit(0); } }
-  ]);
-}
-
-function openSettings(tab: 'light' | 'char' | 'motion' | 'project' = 'light', petId?: string): void {
-  if (petId) selectPet(petId);
-  // 設定與中控共用管理用途；切換時關閉另一扇，避免兩邊同時佔用桌面。
-  if (controlWin && !controlWin.isDestroyed()) controlWin.close();
-  if (settingsWin && !settingsWin.isDestroyed()) {
-    settingsWin.webContents.send('switch-tab', tab);
-    settingsWin.webContents.send('selected-pet-apply', registry.selectedPetId);
-    settingsWin.show();
-    settingsWin.focus();
-    return;
-  }
-  settingsWin = new BrowserWindow({
-    width: 480,
-    height: 820,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    alwaysOnTop: true,
-    title: t('window.settings'),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  settingsWin.on('closed', () => (settingsWin = null));
-  const dev = process.env['ELECTRON_RENDERER_URL'];
-  if (dev) settingsWin.loadURL(`${dev}/settings.html?tab=${tab}`);
-  else settingsWin.loadFile(join(__dirname, '../renderer/settings.html'), { query: { tab } });
-  app.focus({ steal: true });
-}
-
-/** 中控面板:多寵狀態總覽、指派任務(綁定/公用池)、佇列撤單、審批代答、沙盒設定分頁、系統操作。
- *  (獨立沙盒視窗已廢棄:沙盒設定併入中控的「沙盒設定」分頁,高風險讀寫通道仍限中控 sender。) */
-function openControlPanel(tab: 'overview' | 'sandbox' = 'overview'): void {
-  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
-  if (controlWin && !controlWin.isDestroyed()) {
-    controlWin.webContents.send('switch-tab', tab);
-    controlWin.show();
-    controlWin.focus();
-    return;
-  }
-  controlWin = new BrowserWindow({
-    width: 760,
-    height: 620,
-    minWidth: 560,
-    minHeight: 420,
-    title: t('window.control'), // 常駐工作視窗:可縮放、不置頂；疊層使用浮動置頂與點擊穿透。
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  controlWin.on('closed', () => (controlWin = null));
-  const dev = process.env['ELECTRON_RENDERER_URL'];
-  if (dev) controlWin.loadURL(`${dev}/control.html?tab=${tab}`);
-  else controlWin.loadFile(join(__dirname, '../renderer/control.html'), { query: { tab } });
-  app.focus({ steal: true });
-}
-
-function createOverlay(): BrowserWindow {
-  const display = screen.getPrimaryDisplay();
-  const overlay = new BrowserWindow({
-    x: display.bounds.x,
-    y: display.bounds.y,
-    width: display.bounds.width,
-    height: display.bounds.height,
-    transparent: true,
-    frame: false,
-    hasShadow: false,
-    resizable: false,
-    movable: false,
-    skipTaskbar: true,
-    backgroundColor: '#00000000',
-    focusable: false,
-    ...overlayPlatformOptions(),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  configureOverlayWindow(overlay);
-  overlay.webContents.on('console-message', (_event, _level, message) => console.log('[overlay]', message));
-  overlay.webContents.on('render-process-gone', (_event, details) => {
-    console.log('[main] renderer gone:', details.reason, '→ 強制恢復穿透並重載');
-    overlayInteractive = false;
-    overlayInputMode = false;
-    overlay.setFocusable(false);
-    overlay.setIgnoreMouseEvents(true, { forward: true });
-    overlay.webContents.reload();
-  });
-  overlay.on('unresponsive', () => {
-    overlayInteractive = false;
-    overlayInputMode = false;
-    overlay.setFocusable(false);
-    overlay.setIgnoreMouseEvents(true, { forward: true });
-  });
-  const dev = process.env['ELECTRON_RENDERER_URL'];
-  if (dev) overlay.loadURL(`${dev}/index.html`);
-  else overlay.loadFile(join(__dirname, '../renderer/index.html'));
-  return overlay;
-}
-
-const TRAY_ICON =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAZklEQVR4nGNgoAFQAOIEIJ4PxPeheD5UTAGfRpiG/wQwzEAMQIxmZEMwnE2sZhhG8U4CGQYkoPufVANQwoEU/2MNB4oNoNgLFAeiAhkGKDCgAYoSEiwciDHkPrr/0YECA5mZiSwAANJTnOH5R44LAAAAAElFTkSuQmCC';
+const paths: Paths = createPaths({
+  get characters() { return characters.characters; },
+  get getPet() { return characters.getPet; },
+});
+const characters: Characters = createCharacters({
+  get runtimeDataDir() { return paths.runtimeDataDir; },
+  get settingsWin() { return windows.settingsWin; },
+  get sendRefFiles() { return references.sendRefFiles; },
+  get defaultVrmPath() { return paths.defaultVrmPath; },
+  get modelsDir() { return paths.modelsDir; },
+  get clearChatQueue() { return chat.clearChatQueue; },
+  get bridge() { return chat.bridge; },
+  get dispatchAll() { return chat.dispatchAll; },
+  get refreshCursorPoll() { return power.refreshCursorPoll; },
+  get scheduleIdleMotion() { return motions.scheduleIdleMotion; },
+  get win() { return windows.win; },
+  get controlWin() { return windows.controlWin; },
+  get scheduleControlStatus() { return control.scheduleControlStatus; },
+  get refreshTray() { return tray.refreshTray; },
+  get clearTranscript() { return chat.clearTranscript; },
+  get cancelIdleMotion() { return motions.cancelIdleMotion; },
+});
+const windows: Windows = createWindows({
+  get selectPet() { return characters.selectPet; },
+  get registry() { return characters.registry; },
+});
+const tray: TrayService = createTray({
+  get registry() { return characters.registry; },
+  get getPet() { return characters.getPet; },
+  get pets() { return characters.pets; },
+  get selectPet() { return characters.selectPet; },
+  get chooseVrm() { return characters.chooseVrm; },
+  get motionMenuItems() { return motions.motionMenuItems; },
+  get defaultPoseMenuItems() { return motions.defaultPoseMenuItems; },
+  get win() { return windows.win; },
+  get openSettings() { return windows.openSettings; },
+  get openControlPanel() { return windows.openControlPanel; },
+  get resetState() { return characters.resetState; },
+  get restartPet() { return characters.restartPet; },
+  get setPetEnabled() { return characters.setPetEnabled; },
+  get serializeCharacter() { return characters.serializeCharacter; },
+  get createNewPet() { return characters.createNewPet; },
+  get restartApp() { return lifecycle.restartApp; },
+  get shutdownSync() { return lifecycle.shutdownSync; },
+});
+const chat: Chat = createChat({
+  get win() { return windows.win; },
+  get transcriptsDir() { return paths.transcriptsDir; },
+  get transcriptPath() { return paths.transcriptPath; },
+  get getPet() { return characters.getPet; },
+  get finishLedgerTask() { return control.finishLedgerTask; },
+  get scheduleControlStatus() { return control.scheduleControlStatus; },
+  get pets() { return characters.pets; },
+  get taskLedger() { return control.taskLedger; },
+  get runningTaskByPet() { return control.runningTaskByPet; },
+  get motionFiles() { return motions.motionFiles; },
+  get motionsDir() { return paths.motionsDir; },
+  get projectFor() { return characters.projectFor; },
+  get petRefFiles() { return references.petRefFiles; },
+  get refKey() { return references.refKey; },
+  get scheduleConfigFlush() { return characters.scheduleConfigFlush; },
+});
+const motions: Motions = createMotions({
+  get motionsDir() { return paths.motionsDir; },
+  get pets() { return characters.pets; },
+  get isIdleMotionPaused() { return power.isIdleMotionPaused; },
+  get win() { return windows.win; },
+  get updatePet() { return characters.updatePet; },
+  get refreshTray() { return tray.refreshTray; },
+  get sendPetProfiles() { return characters.sendPetProfiles; },
+  get getPet() { return characters.getPet; },
+});
+const drop: Drop = createDrop({
+  get pets() { return characters.pets; },
+  get overlayBounds() { return power.overlayBounds; },
+  get win() { return windows.win; },
+  get powerTier() { return power.powerTier; },
+});
+const lifecycle: Lifecycle = createLifecycle({
+  stopBackground: () => {
+    for (const service of [ipcOverlay, ipcPets, ipcReferences, ipcChat, ipcSettings, ipcControl, ipcMenu, power, drop, motions, control, tray]) service.dispose();
+  },
+  stopAgents: () => chat.dispose(),
+  closeWindows: () => windows.dispose(),
+  get persistConfigSync() { return characters.persistConfigSync; },
+  get pets() { return characters.pets; },
+});
+const control: Control = createControl({
+  get bridge() { return chat.bridge; },
+  get pets() { return characters.pets; },
+  get chatQueue() { return chat.chatQueue; },
+  get controlWin() { return windows.controlWin; },
+});
+const ipcOverlay: IpcOverlay = createIpcOverlay({
+  get win() { return windows.win; },
+  get setInteractive() { return windows.setInteractive; },
+  get syncOverlayMouseEvents() { return windows.syncOverlayMouseEvents; },
+  get setInputMode() { return windows.setInputMode; },
+});
+const ipcPets: IpcPets = createIpcPets({
+  get win() { return windows.win; },
+  get settingsWin() { return windows.settingsWin; },
+  get controlWin() { return windows.controlWin; },
+  get pets() { return characters.pets; },
+  get registry() { return characters.registry; },
+  get getPet() { return characters.getPet; },
+  get bridge() { return chat.bridge; },
+  get updatePet() { return characters.updatePet; },
+  get setPetEnabled() { return characters.setPetEnabled; },
+  get serializeCharacter() { return characters.serializeCharacter; },
+  get createNewPet() { return characters.createNewPet; },
+  get removePet() { return characters.removePet; },
+  get selectPet() { return characters.selectPet; },
+  get sendPetProfiles() { return characters.sendPetProfiles; },
+  get avatarIcons() { return characters.avatarIcons; },
+  get wardrobeLists() { return characters.wardrobeLists; },
+  get dataDir() { return paths.dataDir; },
+  get defaultVrmPath() { return paths.defaultVrmPath; },
+});
+const references: References = createReferences({
+  get getPet() { return characters.getPet; },
+  get win() { return windows.win; },
+  get pushVrm() { return characters.pushVrm; },
+});
+const ipcReferences: IpcReferences = createIpcReferences({
+  get dropWindows() { return drop.dropWindows; },
+  get win() { return windows.win; },
+  get pets() { return characters.pets; },
+  get addReferencePaths() { return references.addReferencePaths; },
+  get petRefFiles() { return references.petRefFiles; },
+  get refKey() { return references.refKey; },
+  get sendRefFiles() { return references.sendRefFiles; },
+});
+const ipcChat: IpcChat = createIpcChat({
+  get win() { return windows.win; },
+  get pets() { return characters.pets; },
+  get projectFor() { return characters.projectFor; },
+  get getPet() { return characters.getPet; },
+  get chatKey() { return chat.chatKey; },
+  get chatRevisions() { return chat.chatRevisions; },
+  get bridge() { return chat.bridge; },
+  get liveTranscripts() { return chat.liveTranscripts; },
+  get completedTranscripts() { return chat.completedTranscripts; },
+  get transcriptPath() { return paths.transcriptPath; },
+  get settingsWin() { return windows.settingsWin; },
+  get controlWin() { return windows.controlWin; },
+  get petRefFiles() { return references.petRefFiles; },
+  get refKey() { return references.refKey; },
+  get sendRefFiles() { return references.sendRefFiles; },
+  get chatQueue() { return chat.chatQueue; },
+  get clearTranscript() { return chat.clearTranscript; },
+  get updatePet() { return characters.updatePet; },
+  get sendPetProfiles() { return characters.sendPetProfiles; },
+  get chatDispatcher() { return chat.chatDispatcher; },
+  get markLedgerRemoved() { return control.markLedgerRemoved; },
+});
+const ipcSettings: IpcSettings = createIpcSettings({
+  get win() { return windows.win; },
+  get settingsWin() { return windows.settingsWin; },
+  get controlWin() { return windows.controlWin; },
+  get refreshTray() { return tray.refreshTray; },
+  get tray() { return tray.tray; },
+  get persistConfigSync() { return characters.persistConfigSync; },
+  get storageError() { return characters.storageError; },
+  get pets() { return characters.pets; },
+  get serializeCharacter() { return characters.serializeCharacter; },
+  get getPet() { return characters.getPet; },
+  get characters() { return characters.characters; },
+  get reportStorageError() { return characters.reportStorageError; },
+  get scheduleIdleMotion() { return motions.scheduleIdleMotion; },
+  get sendPetProfiles() { return characters.sendPetProfiles; },
+  get chooseVrm() { return characters.chooseVrm; },
+  get selectProject() { return characters.selectProject; },
+  get chooseWorkspace() { return characters.chooseWorkspace; },
+  get workspaceRoot() { return characters.workspaceRoot; },
+  get registry() { return characters.registry; },
+  get scheduleConfigFlush() { return characters.scheduleConfigFlush; },
+  get bridge() { return chat.bridge; },
+  get refreshMotions() { return motions.refreshMotions; },
+  get motionFiles() { return motions.motionFiles; },
+  get setDefaultPose() { return motions.setDefaultPose; },
+});
+const ipcControl: IpcControl = createIpcControl({
+  get controlWin() { return windows.controlWin; },
+  get pets() { return characters.pets; },
+  get chatQueue() { return chat.chatQueue; },
+  get getPet() { return characters.getPet; },
+  get ledgerSummary() { return control.ledgerSummary; },
+  get taskLedger() { return control.taskLedger; },
+  get chatDispatcher() { return chat.chatDispatcher; },
+  get scheduleControlStatus() { return control.scheduleControlStatus; },
+  get buildControlStatus() { return control.buildControlStatus; },
+  get markLedgerRemoved() { return control.markLedgerRemoved; },
+  get win() { return windows.win; },
+  get restartApp() { return lifecycle.restartApp; },
+  get shutdownSync() { return lifecycle.shutdownSync; },
+});
+const ipcMenu: IpcMenu = createIpcMenu({
+  get win() { return windows.win; },
+  get pets() { return characters.pets; },
+  get selectPet() { return characters.selectPet; },
+  get refreshMotions() { return motions.refreshMotions; },
+  get petMenu() { return tray.petMenu; },
+  get motionFiles() { return motions.motionFiles; },
+  get motionsDir() { return paths.motionsDir; },
+  get openSettings() { return windows.openSettings; },
+  get openControlPanel() { return windows.openControlPanel; },
+  get resetState() { return characters.resetState; },
+  get restartPet() { return characters.restartPet; },
+});
+const power: Power = createPower({
+  get win() { return windows.win; },
+  get pets() { return characters.pets; },
+  get dragMonitor() { return drop.dragMonitor; },
+});
 
 app.whenReady().then(async () => {
-  writeSystemPidRecord();
-  // headless 回歸自驗:不開視窗,跑完即退出(exit code 供 CI 化)。
-  // =1 → MockProvider 全鏈;=claude / =codex → 真 CLI e2e(耗額度,顯式觸發才跑)
+  paths.writeSystemPidRecord();
   const selftestMode = process.env['VRM_PET_AGENT_SELFTEST'];
   if (selftestMode) {
     const pass = selftestMode === 'claude' ? await runClaudeE2E()
       : selftestMode === 'codex' ? await runCodexE2E()
-      : selftestMode === 'agy' ? await runAgyE2E()
-      : await runAgentSelftest();
+        : selftestMode === 'agy' ? await runAgyE2E() : await runAgentSelftest();
     app.exit(pass ? 0 : 1);
     return;
   }
   if (process.platform === 'darwin') app.dock?.hide();
   try {
-    const boot = settings.loadRaw();
-    if (boot.schemaVersion === 2 && typeof boot.charactersPath === 'string') characters = new CharacterStore(boot.charactersPath);
-    await ensureDefaultVrm();
-    await loadConfig();
-  }
-  catch (error) {
+    characters.prepareStore();
+    await paths.ensureDefaultVrm();
+    await characters.loadConfig();
+  } catch (error) {
     await appPrompt({ message: `設定初始化失敗，原檔已保留：${String(error)}`, buttons: ['結束'], cancelId: 0 });
     app.exit(1);
     return;
   }
-  // 顯示視窗前落盤，避免下次啟動再次替同一隻寵物建立目錄。
-  await initializeCharacters();
-
-  app.on('second-instance', () => {
-    openControlPanel();
-  });
-
-  /* ── 串流文字合併(效能優化階段 3)──
-   * provider 的 text delta 是 token 級,每 token 一次 IPC 太密(renderer 每次都全文重渲);
-   * 33ms 合併一次;非 text 事件(done/error/approval…)到達時先 flush 緩衝,嚴格保序。 */
-  const chatTextBuffers = new Map<string, { text: string; workspacePath?: string; revision: number }>();
-  const chatRevisions = new Map<string, number>();
-  const chatKey = (id: string, path?: string): string => JSON.stringify([id, path]);
-  let chatFlushTimer: NodeJS.Timeout | null = null;
-  function flushChatText(): void {
-    if (chatFlushTimer) {
-      clearTimeout(chatFlushTimer);
-      chatFlushTimer = null;
-    }
-    for (const [petId, value] of chatTextBuffers) {
-      win?.webContents.send('chat-event-apply', petId, { kind: 'text', text: value.text }, value.workspacePath, value.revision);
-    }
-    chatTextBuffers.clear();
-  }
-  /* ── 中控任務帳本:只追蹤中控投的任務(泡泡對話不進帳本);記憶體保留、不落盤,重啟即清空。
-   * 佇列的單被領走就消失,「誰收到/在哪執行/執行狀態」的全生命週期靠這份紀錄。 ── */
-  const taskLedger = new Map<string, ControlTaskRecord>();
-  /** petId → 進行中的帳本任務 id(done/error 事件對回任務用;泡泡任務不在帳本,不會進這張表)。 */
-  const runningTaskByPet = new Map<string, string>();
-  const LEDGER_FINISHED_CAP = 50;
-  const ledgerSummary = (text: string): string => (text.length > 80 ? `${text.slice(0, 80)}…` : text);
-  function finishLedgerTask(petId: string, ok: boolean): void {
-    const taskId = runningTaskByPet.get(petId);
-    if (!taskId) return;
-    runningTaskByPet.delete(petId);
-    const record = taskLedger.get(taskId);
-    if (!record) return;
-    record.status = ok ? 'done' : 'failed';
-    record.finishedAt = Date.now();
-    // 已終結(含已移除)超過上限 → 砍最舊,帳本不無限長大
-    const finished = [...taskLedger.values()].filter((r) => r.finishedAt !== undefined);
-    if (finished.length > LEDGER_FINISHED_CAP) {
-      finished.sort((a, b) => a.finishedAt! - b.finishedAt!);
-      for (const old of finished.slice(0, finished.length - LEDGER_FINISHED_CAP)) taskLedger.delete(old.id);
-    }
-  }
-  function markLedgerRemoved(taskId: string): void {
-    const record = taskLedger.get(taskId);
-    if (record?.status === 'queued') {
-      record.status = 'removed';
-      record.finishedAt = Date.now();
-    }
-  }
-
-  /* ── 上次對話紀錄:重啟後泡泡回填,使用者看得到聊到哪(agent session 本來就續著,
-   *    但泡泡是空的)。只留最後一輪,寫在獨立檔案——寵物設定檔會被拖曳位置高頻改寫,
-   *    幾十 KB 的逐字稿混進去每次都要重寫一遍。落盤只發生在 turn 結束。 */
-  const TRANSCRIPT_MAX_CHARS = 40_000;
-  const liveTranscripts = new Map<string, { user: string; reply: string; workspacePath?: string }>();
-
-  function beginTranscript(petId: string, userText: string, workspacePath?: string): void {
-    liveTranscripts.set(petId, { user: userText.slice(0, 2_000), reply: '', workspacePath });
-  }
-  const completedTranscripts = new Map<string, ChatTranscript>();
-  function persistTranscript(petId: string): void {
-    const live = liveTranscripts.get(petId);
-    liveTranscripts.delete(petId);
-    if (!live || (!live.user && !live.reply)) return;
-    const record: ChatTranscript = {
-      user: live.user,
-      reply: live.reply.slice(-TRANSCRIPT_MAX_CHARS),
-      at: Date.now(),
-    };
-    completedTranscripts.set(chatKey(petId, live.workspacePath), record);
-    void mkdir(transcriptsDir(), { recursive: true })
-      .then(() => writeFile(transcriptPath(petId, live.workspacePath), JSON.stringify(record), 'utf8'))
-      .catch(() => {}); // 紀錄是附加價值,寫失敗不該影響對話
-  }
-  clearTranscriptHook = (petId) => {
-    const selected = getPet(petId)?.workspacePath;
-    if (liveTranscripts.get(petId)?.workspacePath === selected) liveTranscripts.delete(petId);
-    completedTranscripts.delete(chatKey(petId, selected));
-    void rm(transcriptPath(petId), { force: true }).catch(() => {});
-  };
-
-  function sendChatEvent(petId: string, event: AgentEvent, workspacePath = bridge?.petStates().find((s) => s.petId === petId && s.running)?.workspacePath ?? getPet(petId)?.workspacePath): void {
-    const key = chatKey(petId, workspacePath);
-    const revision = (chatRevisions.get(key) ?? 0) + 1;
-    chatRevisions.set(key, revision);
-    if (event.kind === 'turnStart') beginTranscript(petId, event.text, workspacePath);
-    else if (event.kind === 'text') {
-      const live = liveTranscripts.get(petId);
-      if (live) live.reply += event.text;
-    } else if (event.kind === 'done' || event.kind === 'error') {
-      persistTranscript(petId);
-    }
-    if (event.kind === 'text') {
-      // text 增量一律不推中控:中控只顯示狀態燈號,33ms 合併節奏的高頻 IPC 不打第二個視窗
-      chatTextBuffers.set(petId, { text: (chatTextBuffers.get(petId)?.text ?? '') + event.text, workspacePath, revision });
-      chatFlushTimer ??= setTimeout(flushChatText, 33);
-      return;
-    }
-    if (event.kind === 'done') finishLedgerTask(petId, event.ok);
-    else if (event.kind === 'error') finishLedgerTask(petId, false);
-    flushChatText();
-    win?.webContents.send('chat-event-apply', petId, event, workspacePath, revision);
-    scheduleControlStatusHook?.(); // 非 text 事件(turnStart/approval/done…)= 狀態燈號可能變了
-  }
-
-  // 寵物工具中樞(v3):agent 經 MCP 呼叫 → socket 回連這裡 → 操縱桌寵
-  petToolsHub = createPetToolsHub({
-    playMotion: async (petId, file) => {
-      if (!pets.has(petId) || !motionFiles.includes(file)) return false;
-      try {
-        win?.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)));
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    showExpression: (petId, name) => {
-      if (!pets.has(petId) || !(PET_EXPRESSIONS as readonly string[]).includes(name)) return false;
-      win?.webContents.send('expression-apply', petId, name);
-      return true;
-    },
-    speak: (petId, text) => {
-      const trimmed = text.trim();
-      if (!pets.has(petId) || !trimmed) return false;
-      // 走同一個合併器:pet_speak 不可與緩衝中的串流文字互相超車
-      sendChatEvent(petId, { kind: 'text', text: `\n${trimmed.slice(0, 200)}\n` });
-      return true;
-    },
-    listMotions: () => motionFiles
-  });
-  /* ── 對話佇列(效能與擴展設計見 chatQueue.ts)──
-   * turn 進行中送出的訊息排隊、turn 完自動接續;佇列變更即廣播給泡泡。
-   * 將來中控面板 = 另一條帶 sender 驗證的 enqueue(source:'control')IPC + 訂閱同一個廣播。 */
-  const chatQueue = createChatQueue((petId) => {
-    if (petId) win?.webContents.send('chat-queue-apply', petId, chatQueue.summaries(petId));
-    scheduleControlStatusHook?.(); // 綁定佇列與公用池(petId=undefined)變更都重推中控快照
-  });
-  queuedTaskCountHook = (id) => chatQueue.size(id);
-  const chatDispatcher = createChatDispatcher({
-    queue: chatQueue,
-    canAccept: (petId) => !!getPet(petId)?.enabled && (bridge?.canAccept(petId) ?? false),
-    // 領公用池的資格:啟用中且已設工作目錄
-    unboundCandidates: () => [...pets.values()]
-      .filter((profile) => profile.enabled !== false && !!profile.workspacePath)
-      .map((profile) => profile.id),
-    workspaceOf: (petId) => pets.get(petId)?.workspacePath,
-    workspacesOf: (petId) => pets.get(petId)?.projects?.map((p) => p.workspacePath) ?? [],
-    runTask: (petId, task) => {
-      // 中控投的任務進帳本:標執行中、補接收者與實際執行位置(公用池單在領走的這一刻才確定)
-      const record = taskLedger.get(task.id);
-      if (record) {
-        const profile = pets.get(petId);
-        record.status = 'running';
-        record.assignee = petId;
-        if (profile?.name) record.assigneeName = profile.name;
-        if (task.workspacePath) record.workspacePath = task.workspacePath;
-        runningTaskByPet.set(petId, task.id);
-      }
-      // turnStart 讓泡泡知道「這一則開始跑了」(beginTurn);非 text 事件,合併器會先 flush 保序
-      sendChatEvent(petId, { kind: 'turnStart', text: task.text }, task.workspacePath);
-      bridge?.chatSend(petId, task.text, task.images, task.workspacePath);
-    }
-  });
-  clearChatQueueHook = (petId) => chatQueue.clear(petId);
-  dispatchAllHook = () => chatDispatcher.dispatchAll();
-
-  bridge = createAgentBridge({
-    // 淺拷貝合併參考檔(ephemeral,不落盤——persist 走 pets.get 的原物件);資料夾以尾斜線標記
-    getPet: (id, workspacePath) => {
-      const profile = pets.get(id);
-      if (!profile) return null;
-      const project = projectFor(profile, workspacePath);
-      if (!project) return null;
-      try { if (realpathSync.native(project.workspacePath) !== project.workspacePath) return null; } catch { return null; }
-      const refs = petRefFiles.get(refKey(id, project.workspacePath));
-      return { ...profile, workspacePath: project.workspacePath, agent: project.agent, refFiles: refs?.map((r) => r.path + (r.isDir ? '/' : '')) };
-    },
-    updatePet: (id, patch, workspacePath) => {
-      const profile = getPet(id);
-      const project = profile && projectFor(profile, workspacePath);
-      if (!profile || !project) return;
-      project.agent = patch.agent;
-      if (profile.workspacePath === project.workspacePath) profile.agent = patch.agent;
-      scheduleConfigFlush();
-    },
-    send: sendChatEvent,
-    providers: createProviders(petToolsHub),
-    // turn 結束(含早退)→ 派發佇列;用 dispatchAll:全域上限釋放的名額可能輪到別隻寵物
-    onTurnFinished: () => chatDispatcher.dispatchAll()
-  });
-
-  /* ── 中控面板快照:全量組裝、50ms trailing debounce 推播 ──
-   * 中控吃整份快照而非逐寵事件差分——量小(寵物十數隻、佇列 ≤10/寵),全量重繪省心且天然避開漏接。 */
-  function buildControlStatus(): ControlStatusSnapshot {
-    const agentStates = new Map((bridge?.petStates() ?? []).map((s) => [s.petId, s]));
-    const petsStatus: ControlPetStatus[] = [...pets.values()].map((profile) => {
-      const agent = agentStates.get(profile.id);
-      const phase: ControlPetStatus['phase'] = profile.enabled === false
-        ? 'resting'
-        : agent?.pendingApproval ? 'awaitingApproval' : agent?.running ? 'working' : 'idle';
-      return {
-        petId: profile.id,
-        projects: profile.projects?.map((p) => p.workspacePath) ?? [],
-        runningWorkspacePath: agent?.running ? agent.workspacePath : undefined,
-        name: profile.name,
-        enabled: profile.enabled !== false,
-        ...(profile.workspacePath ? { workspacePath: profile.workspacePath } : {}),
-        phase,
-        lastActivity: agent?.lastActivity ?? 0, // 從未對話 = 0(renderer 排最後)
-        queue: chatQueue.summaries(profile.id),
-        ...(agent?.pendingApproval ? { pendingApproval: agent.pendingApproval } : {})
-      };
-    });
-    // 帳本:未終結在前,各自新→舊;排序歸 main(帳本是 main 的資料),清醒/休息分組歸 renderer(顯示邏輯)
-    const tasks = [...taskLedger.values()].sort((a, b) => {
-      const aFinished = a.finishedAt !== undefined ? 1 : 0;
-      const bFinished = b.finishedAt !== undefined ? 1 : 0;
-      if (aFinished !== bFinished) return aFinished - bFinished;
-      return b.enqueuedAt - a.enqueuedAt;
-    });
-    return { pets: petsStatus, tasks };
-  }
-  let controlStatusTimer: NodeJS.Timeout | null = null;
-  scheduleControlStatusHook = () => {
-    if (!controlWin || controlStatusTimer) return;
-    controlStatusTimer = setTimeout(() => {
-      controlStatusTimer = null;
-      controlWin?.webContents.send('control-status-apply', buildControlStatus());
-    }, 50);
-  };
-  await refreshMotions();
-  for (const id of pets.keys()) scheduleIdleMotion(id); // 開機排程各寵的待機動作
-  try {
-    // macOS 單次檔案變動常觸發多個 watch 事件:debounce 讓一批變動只做一次 readdir + Tray 重建
-    let motionsDebounce: NodeJS.Timeout | null = null;
-    motionsWatcher = watch(motionsDir(), () => {
-      if (motionsDebounce) clearTimeout(motionsDebounce);
-      motionsDebounce = setTimeout(() => void refreshMotions().then(refreshTray), 300);
-    });
-  } catch { /* 選單會顯示 motions 資料夾不存在 */ }
-
-  win = createOverlay();
-
-  ipcMain.on('set-interactive', (event, value: boolean) => {
-    if (!win || event.sender !== win.webContents) return;
-    overlayInteractive = value;
-    syncOverlayMouseEvents();
-  });
-  ipcMain.handle('set-input-mode', (event, value: boolean) => {
-    if (!win || event.sender !== win.webContents) return;
-    overlayInputMode = value;
-    win.setFocusable(value);
-    syncOverlayMouseEvents();
-    if (value) {
-      app.focus({ steal: true });
-      win.focus();
-    }
-  });
-
-  // 寵物 CRUD 與中繼資料 IPC 已抽到 petIpc.ts(update-pet-meta 的欄位白名單在那裡)
-  registerPetIpc({
-    authorized: (event) => event.sender === win?.webContents || event.sender === settingsWin?.webContents || event.sender === controlWin?.webContents,
-    listPets: () => [...pets.values()],
-    selectedPetId: () => registry.selectedPetId,
-    getPet,
-    updatePet: async (id, patch) => {
-      const { enabled, ...metadata } = patch;
-      if (metadata.agent && bridge?.petStates().some((state) => state.petId === id && state.running && state.workspacePath === getPet(id)?.workspacePath)) return getPet(id);
-      if (Object.keys(metadata).length) updatePet(id, metadata);
-      return enabled === undefined ? getPet(id) : setPetEnabled(id, enabled);
-    },
-    createNewPet: () => serializeCharacter(async () => {
-      try { return await createNewPet(); }
-      catch (error) {
-        await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 });
-        return getPet()!;
-      }
-    }),
-    removePet: (id) => serializeCharacter(async () => removePet(id)),
-    selectPet,
-    sendPetProfiles,
-    closePetSession: (id) => {
-      if (!bridge?.petStates().some((state) => state.petId === id && state.running && state.workspacePath === getPet(id)?.workspacePath)) void bridge?.closePetSession(id, getPet(id)?.workspacePath);
-    },
-  });
-
-  /* ── 參考檔案(拖放到寵物身上;當次對話有效,純記憶體不落盤)──
-   * renderer 經 webUtils 取絕對路徑送來;這裡 stat 驗證存在、判資料夾,注入走 bridge 的 turnOpts。 */
-  const refKey = (id: string, workspacePath = getPet(id)?.workspacePath): string => JSON.stringify([id, workspacePath]);
-  const petRefFiles = new Map<string, { path: string; isDir: boolean }[]>();
-  const sendRefFiles = (petId: string): void =>
-    win?.webContents.send('ref-files-apply', petId, petRefFiles.get(refKey(petId)) ?? []);
-  projectChangedHook = sendRefFiles;
-  const addReferencePaths = async (petId: string, paths: string[]): Promise<void> => {
-      const key = refKey(petId);
-      const list = petRefFiles.get(key) ?? [];
-      let changed = false;
-      for (const path of paths.filter((p): p is string => typeof p === 'string' && isAbsolute(p))) {
-        // .vrm/.vrma 維持原本拖放語意(換模型/播動作)——疊層收不到拖放後,接收窗是它們唯一的拖放入口
-        const lower = path.toLowerCase();
-        if (lower.endsWith('.vrm')) {
-          void pushVrm(petId, path);
-          continue;
-        }
-        if (lower.endsWith('.vrma')) {
-          try {
-            win?.webContents.send('vrma-play', petId, await readFile(path));
-          } catch { /* 檔案讀不到就略過 */ }
-          continue;
-        }
-        if (list.some((item) => item.path === path) || list.length >= 20) continue;
-        try {
-          list.push({ path, isDir: (await stat(path)).isDirectory() });
-          changed = true;
-        } catch {
-          console.log('[main] 參考檔不存在,略過:', path);
-        }
-      }
-      if (changed) {
-        petRefFiles.set(key, list);
-        sendRefFiles(petId);
-      }
-  };
-  ipcMain.on('ref-files-add', (event, petId: string, paths: string[]) => {
-    // 來源:疊層(保留給未來平台)或拖放接收窗
-    const fromDropWin = [...dropWindows.values()].some((w) => !w.isDestroyed() && w.webContents === event.sender);
-    if ((!fromDropWin && event.sender !== win?.webContents) || !pets.has(petId) || !Array.isArray(paths)) return;
-    void addReferencePaths(petId, paths);
-  });
-  ipcMain.handle('choose-ref-files', async (event, petId: string): Promise<void> => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    app.focus({ steal: true });
-    let properties: Electron.OpenDialogOptions['properties'];
-    if (process.platform === 'darwin') {
-      properties = ['openFile', 'openDirectory', 'multiSelections'];
-    } else {
-      // Windows/Linux 的 native dialog 不能同時選檔案與資料夾，先讓使用者選模式。
-      const choice = await appPrompt({
-        message: t('dialog.chooseReferences'),
-        buttons: [t('dialog.chooseFiles'), t('dialog.chooseFolder'), t('quit.cancel')],
-        cancelId: 2,
-      });
-      if (choice.response === 2) return;
-      properties = choice.response === 0 ? ['openFile', 'multiSelections'] : ['openDirectory'];
-    }
-    const result = await dialog.showOpenDialog({
-      title: t('dialog.chooseReferences'),
-      buttonLabel: t('common.select'),
-      properties,
-    });
-    if (!result.canceled) await addReferencePaths(petId, result.filePaths);
-  });
-  ipcMain.on('ref-files-remove', (event, petId: string, path: string) => {
-    if (!win || event.sender !== win.webContents || !petRefFiles.has(refKey(petId))) return;
-    petRefFiles.set(refKey(petId), (petRefFiles.get(refKey(petId)) ?? []).filter((item) => item.path !== path));
-    sendRefFiles(petId);
-  });
-
-  /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
-   *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
-  /** 上次對話紀錄:泡泡建立時 pull(循 chat-queue-get 的慣例,推播漏接也能自癒)。 */
-  ipcMain.handle('chat-transcript-get', async (event, id: string, workspacePath?: string): Promise<ChatTranscript | null> => {
-    if (!win || event.sender !== win.webContents || !pets.has(id)) return null;
-    try {
-      const project = projectFor(getPet(id)!, workspacePath);
-      if (!project) return null;
-      const key = chatKey(id, project.workspacePath);
-      const revision = chatRevisions.get(key) ?? 0;
-      const state = bridge?.petStates().find((s) => s.petId === id && s.workspacePath === project.workspacePath);
-      const extra = { revision, running: !!state?.running, pendingApproval: state?.pendingApproval ?? undefined };
-      const live = liveTranscripts.get(id);
-      if (live?.workspacePath === project.workspacePath) return { user: live.user, reply: live.reply, at: Date.now(), ...extra };
-      const completed = completedTranscripts.get(key);
-      if (completed) return { ...completed, ...extra };
-      const raw = await readFile(transcriptPath(id, project.workspacePath), 'utf8');
-      const parsed = JSON.parse(raw) as Partial<ChatTranscript>;
-      if (typeof parsed.reply !== 'string' && typeof parsed.user !== 'string') return null;
-      return { user: parsed.user ?? '', reply: parsed.reply ?? '', at: parsed.at ?? 0, ...extra };
-    } catch {
-      return null; // 沒有紀錄(第一次對話前)或檔案壞掉,都當作沒有
-    }
-  });
-
-  ipcMain.on('new-session', (event, id: string) => {
-    const fromOurWindow = event.sender === win?.webContents || event.sender === settingsWin?.webContents
-      || event.sender === controlWin?.webContents;
-    if (!fromOurWindow) return;
-    const selected = getPet(id)?.workspacePath;
-    if (bridge?.petStates().some((s) => s.petId === id && s.workspacePath === selected && s.running)) return;
-    petRefFiles.delete(refKey(id)); // 參考檔是「當次對話」的:開新對話一併清空
-    sendRefFiles(id);
-    chatQueue.clearProject(id, selected); // 只清目前專案的待處理對話
-    clearTranscriptHook?.(id); // 上次對話紀錄同理:開新對話 = 從零開始,泡泡不該再回填舊內容
-    const profile = getPet(id);
-    if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
-    const { sessionId: _dropped, ...keep } = profile.agent;
-    updatePet(id, { agent: keep });
-    void bridge?.closePetSession(id, getPet(id)?.workspacePath);
-    sendPetProfiles();
-  });
-
-  // 設定分頁與桌寵右鍵選單共用選檔流程;僅允許這兩個視窗操作既有寵物。
-  ipcMain.handle('character-storage-retry', (event) => {
-    if (event.sender !== settingsWin?.webContents) return '';
-    persistConfigSync();
-    return storageError;
-  });
-  ipcMain.handle('character-storage-status', (event) => event.sender === settingsWin?.webContents ? storageError : '');
-  ipcMain.handle('character-file', async (event, id: string, action: unknown): Promise<CharacterFileResult> => {
-    if (!settingsWin || event.sender !== settingsWin.webContents || !pets.has(id)
-      || (action !== 'import' && action !== 'export')) return { ok: false, message: '無法操作角色設定' };
-    return serializeCharacter(async () => {
-      try {
-        const profile = getPet(id);
-        if (!profile?.enabled || !profile.characterReady || !profile.characterId || profile.characterError) throw new Error(profile?.characterError ?? '請先喚醒寵物再匯入或匯出');
-        const characterId = profile.characterId;
-        const document = characters.get(characterId);
-        if (!document) throw new Error('尚未載入角色設定');
-        const parent = settingsWin!;
-        if (action === 'export') {
-          const result = await dialog.showSaveDialog(parent, { title: '匯出角色設定', defaultPath: 'character.yaml', filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }] });
-          if (result.canceled || !result.filePath) return { ok: false, canceled: true };
-          if (getPet(id)?.characterId !== characterId) throw new Error('角色已變更，請重新操作');
-          characters.flush();
-          atomicYaml(result.filePath, { schemaVersion: 1, modelHash: document.modelHash, parameters: document.parameters });
-        } else {
-          const result = await dialog.showOpenDialog(parent, { title: '匯入角色設定', properties: ['openFile'], filters: [{ name: '角色設定', extensions: ['yaml', 'yml', 'json'] }] });
-          const path = result.filePaths[0];
-          if (result.canceled || !path) return { ok: false, canceled: true };
-          if ((await stat(path)).size > 2_000_000) throw new Error('角色設定檔過大');
-          const imported = parseCharacterExport(parseCharacterYaml(await readFile(path, 'utf8')));
-          if (imported.modelHash !== document.modelHash) throw new Error('設定檔的 VRM 與目前模型不符');
-          const answer = await appPrompt({ message: `以匯入設定覆寫「${profile.name}」的光影與角色參數？`, buttons: ['取消', '覆寫'], cancelId: 0 });
-          if (answer.response !== 1) return { ok: false, canceled: true };
-          if (getPet(id)?.characterId !== characterId) throw new Error('角色已變更，請重新操作');
-          const previous = structuredClone(document.parameters);
-          characters.update(characterId, imported.parameters);
-          try { characters.flush(); }
-          catch (error) {
-            characters.update(characterId, previous);
-            reportStorageError(error);
-            throw error;
-          }
-          applyCharacter(profile, imported.parameters);
-          profile.characterRevision = (profile.characterRevision ?? 0) + 1;
-          scheduleIdleMotion(id);
-          persistConfigSync();
-          sendPetProfiles();
-        }
-        return { ok: true };
-      } catch (error) {
-        return { ok: false, message: error instanceof Error ? error.message : String(error) };
-      }
-    });
-  });
-
-  ipcMain.handle('choose-vrm', async (event, id: string) => {
-    const fromSettings = !!settingsWin && event.sender === settingsWin.webContents;
-    const fromOverlay = !!win && event.sender === win.webContents;
-    if ((!fromSettings && !fromOverlay) || !pets.has(id)) return;
-    // 透明桌面疊層不掛 sheet,沿用 Tray 的獨立對話框;設定視窗則維持 sheet。
-    await chooseVrm(id, fromSettings ? settingsWin ?? undefined : undefined);
-  });
-
-  ipcMain.handle('select-project', (event, id: string, path: string) => {
-    if (![win?.webContents, settingsWin?.webContents, controlWin?.webContents].includes(event.sender)) return false;
-    const profile = getPet(id);
-    return profile && typeof path === 'string' ? selectProject(profile, path) : false;
-  });
-  ipcMain.handle('choose-workspace', (event, id: string) => {
-    const parent = event.sender === settingsWin?.webContents
-      ? settingsWin
-      : event.sender === controlWin?.webContents ? controlWin : undefined;
-    if (!parent || !pets.has(id)) return null;
-    return chooseWorkspace(id, parent);
-  });
-
-  /* ── 全域:新寵物預設工作根目錄 ── */
-  ipcMain.handle('workspace-root-get', () => workspaceRoot());
-
-  ipcMain.handle('choose-workspace-root', async (event): Promise<string> => {
-    // 僅中控面板可變更(全域設定歸中控,循語言下拉的 sender 驗證慣例)
-    if (!controlWin || event.sender !== controlWin.webContents) return workspaceRoot();
-    app.focus({ steal: true }); // 背景 app 的 dialog 會被壓在其他視窗底下
-    controlWin.focus();
-    const result = await dialog.showOpenDialog(controlWin, {
-      title: t('dialog.chooseWorkspaceRoot'),
-      buttonLabel: t('common.select'),
-      defaultPath: workspaceRoot(),
-      properties: ['openDirectory', 'createDirectory']
-    });
-    const path = result.filePaths[0];
-    if (result.canceled || !path) return workspaceRoot();
-    registry.defaultWorkspaceRoot = path;
-      scheduleConfigFlush();
-    controlWin?.webContents.send('workspace-root-apply', path);
-    return path;
-  });
-
-  /* ── 全域:介面語言(i18n)── */
-  ipcMain.handle('locale-get', () => getLocale()); // 各視窗開機都要,不限 sender
-  ipcMain.handle('locale-pref-get', (event) => {
-    if (!controlWin || event.sender !== controlWin.webContents) return '';
-    return registry.locale ?? ''; // '' = 跟隨系統(下拉初始選中用)
-  });
-  ipcMain.handle('locale-set', (event, value: string): Locale => {
-    // 語言下拉在中控面板(循 workspace-root 的單一具名視窗慣例)
-    if (!controlWin || event.sender !== controlWin.webContents) return getLocale();
-    if (value === '') delete registry.locale; // 跟隨系統
-    else if (LOCALES.includes(value as Locale)) registry.locale = value;
-    else return getLocale();
-      scheduleConfigFlush();
-    applyLocaleEverywhere(registry.locale ? (registry.locale as Locale) : resolveLocale(app.getLocale()));
-    return getLocale();
-  });
-  /** 集中套用:main 自己換語言 → 廣播三視窗 → Tray/標題/tooltip 重建 → 清模型清單快取(label 含翻譯)。 */
-  function applyLocaleEverywhere(locale: Locale): void {
-    setLocale(locale);
-    win?.webContents.send('locale-apply', locale);
-    settingsWin?.webContents.send('locale-apply', locale);
-    controlWin?.webContents.send('locale-apply', locale);
-    refreshTray();
-    tray?.setToolTip(t('tray.tooltip'));
-    settingsWin?.setTitle(t('window.settings'));
-    controlWin?.setTitle(t('window.control'));
-    modelListCache.clear(); // claude 模型 label 含翻譯,舊語言快取要作廢
-  }
-
-  /* ── 專案 Codex 沙盒設定──
-   * 設定視窗明確按下後由 main 直接讀寫 <workspace>/.codex/config.toml；不啟動 agent、不跑 shell。 */
-  ipcMain.handle('sandbox-settings-get', async (event, id: string): Promise<ProjectSandboxSettingsResult> => {
-    // 高風險通道只開放中控面板的「沙盒設定」分頁這一個具名視窗
-    if (!controlWin || event.sender !== controlWin.webContents) {
-      return { ok: false, message: t('sandbox.onlyControl') };
-    }
-    const profile = getPet(id);
-    if (!profile?.workspacePath) return { ok: false, message: t('sandbox.needWorkspace') };
-    try {
-      return {
-        ok: true,
-        message: t('sandbox.readOk'),
-        settings: await readProjectSandboxSettings(profile.workspacePath),
-      };
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) };
-    }
-  });
-  ipcMain.handle(
-    'sandbox-settings-set',
-    async (event, id: string, settings: ProjectSandboxSettingsInput): Promise<ProjectSandboxSettingsResult> => {
-      if (!controlWin || event.sender !== controlWin.webContents) {
-        return { ok: false, message: t('sandbox.onlyControl') };
-      }
-      const profile = getPet(id);
-      if (!profile?.workspacePath) return { ok: false, message: t('sandbox.needWorkspace') };
-      try {
-        return {
-          ok: true,
-          message: t('sandbox.writeOk'),
-          settings: await writeProjectSandboxSettings(profile.workspacePath, settings),
-        };
-      } catch (error) {
-        return { ok: false, message: error instanceof Error ? error.message : String(error) };
-      }
-    },
-  );
-
-  // 模型清單:codex 要跟 app-server 要(首次會 lazy 啟動),成功才快取(失敗可能只是還沒登入,下次再試)
-  // 快取 10 分鐘 TTL:CLI 升版新增模型不用重啟 app 才看得到
-  const modelListCache = new Map<string, { at: number; list: unknown[] }>();
-  ipcMain.handle('agent-models', async (_event, kind: string) => {
-    if (kind !== 'codex' && kind !== 'claude' && kind !== 'agy') return [];
-    const cached = modelListCache.get(kind);
-    if (cached && Date.now() - cached.at < 600_000) return cached.list;
-    const list = (await bridge?.listModels(kind)) ?? [];
-    if (list.length) modelListCache.set(kind, { at: Date.now(), list });
-    else if (cached) return cached.list; // 拉失敗時寧可用過期清單也不回空
-    return list;
-  });
-
-  ipcMain.handle('motion-list', async () => {
-    await refreshMotions(); // 面板打開時可能剛放了新檔,跟 popup 前刷新同一個保險
-    return motionFiles;
-  });
-  ipcMain.on('set-default-pose', (_event, petId: string, file: string | null) => {
-    if (!pets.has(petId)) return;
-    void setDefaultPose(petId, typeof file === 'string' ? file : null);
-  });
-
-  // 對話送出改 invoke:回傳 {queued, position, reason?} 讓泡泡同步得知「立即執行/已排入/被拒」。
-  // 「佇列已滿」不可走 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn。
-  ipcMain.handle('chat-send', (event, petId: string, text: string, rawImages: unknown, workspacePath?: string): ChatSendResult => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) {
-      return { queued: false, position: -1, reason: t('reason.invalidRequest') };
-    }
-    const images: ChatImage[] = [];
-    if (Array.isArray(rawImages)) {
-      for (const item of rawImages.slice(0, 4)) {
-        if (!item || typeof item !== 'object') continue;
-        const value = item as Record<string, unknown>;
-        const mimeType = value['mimeType'];
-        const data = value['data'];
-        if (!['image/png', 'image/jpeg', 'image/webp'].includes(String(mimeType))) continue;
-        if (typeof data !== 'string' || data.length > 11_200_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) continue;
-        images.push({
-          mimeType: mimeType as ChatImage['mimeType'],
-          data,
-          name: typeof value['name'] === 'string' ? value['name'].slice(0, 200) : undefined,
-        });
-      }
-    }
-    const trimmed = String(text).slice(0, 1000).trim();
-    if (!trimmed && !images.length) return { queued: false, position: -1, reason: t('reason.emptyMessage') };
-    const profile = getPet(petId)!;
-    const project = projectFor(profile, workspacePath);
-    if (!profile.enabled || !project) return { queued: false, position: -1, reason: '角色休眠或專案未綁定' };
-    const result = chatQueue.enqueue({ assignee: petId, workspacePath: project.workspacePath, text: trimmed, images, source: 'bubble' });
-    if (!result.ok) return { queued: false, position: -1, reason: result.reason };
-    chatDispatcher.dispatch(petId);
-    return { queued: true, position: result.position };
-  });
-  ipcMain.on('chat-queue-remove', (event, petId: string, taskId: string) => {
-    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
-    if (!fromOurWindow) return; // 綁定佇列撤單:泡泡與中控共用
-    if (chatQueue.remove(String(petId), String(taskId))) markLedgerRemoved(String(taskId));
-  });
-  ipcMain.handle('chat-queue-get', (event, petId: string) => {
-    if (!win || event.sender !== win.webContents) return [];
-    return chatQueue.summaries(String(petId));
-  });
-  ipcMain.on('chat-cancel', (event, petId: string, workspacePath?: string) => {
-    if (!win || event.sender !== win.webContents) return;
-    bridge?.chatCancel(petId, workspacePath ?? getPet(petId)?.workspacePath);
-  });
-  ipcMain.on('chat-approval', (event, petId: string, requestId: string, allow: boolean, feedback?: string, workspacePath?: string) => {
-    // 泡泡與中控都可回覆;requestId 與掛著審批的相符性由 bridge 把關(雙 UI race 在源頭擋)
-    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
-    if (!fromOurWindow) return;
-    bridge?.respondApproval(
-      petId,
-      String(requestId),
-      allow === true,
-      typeof feedback === 'string' ? feedback.trim().slice(0, 1000) : undefined,
-      workspacePath,
-    );
-  });
-  ipcMain.on('open-external', (event, url: string) => {
-    if (!win || event.sender !== win.webContents) return;
-    if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url);
-  });
-
-  /* ── 中控面板專用 IPC(sender 一律限 controlWin;系統重啟/結束另供 overlay 右鍵選單使用)──
-   * 指派任務走自己的 enqueue 通道(chat-send 保持泡泡專用);一切失敗回饋走 invoke 回傳,
-   * 絕不發 error 事件——renderer 對 error 無條件 endTurn,會誤終結進行中的 turn(§10 鐵律)。 */
-  ipcMain.handle('control-enqueue', (event, text: string, assignee?: string, restrictWorkspace?: string): ChatSendResult => {
-    if (!controlWin || event.sender !== controlWin.webContents) {
-      return { queued: false, position: -1, reason: t('reason.invalidRequest') };
-    }
-    const trimmed = String(text).slice(0, 1000).trim();
-    if (!trimmed) return { queued: false, position: -1, reason: t('reason.emptyMessage') };
-    let target: string | undefined;
-    if (assignee !== undefined && assignee !== '') {
-      const profile = pets.get(String(assignee));
-      if (!profile) return { queued: false, position: -1, reason: t('reason.petNotFound') };
-      if (profile.enabled === false) {
-        // 投給休息中寵物的綁定單會躺死或在喚醒前被 clear,直接拒收
-        return { queued: false, position: -1, reason: t('reason.petResting') };
-      }
-      target = profile.id;
-    }
-    // 公用池單可限定工作區(= 發佈者指定運行路徑);必須是某寵物實際的工作區,亂傳拒收
-    let restrict: string | undefined;
-    if (!target && typeof restrictWorkspace === 'string' && restrictWorkspace) {
-      const normalized = normalizeWorkspacePath(restrictWorkspace);
-      const known = new Set(
-        [...pets.values()].flatMap((p) => p.projects?.map((project) => project.workspacePath) ?? [])
-      );
-      if (!normalized || !known.has(normalized)) {
-        return { queued: false, position: -1, reason: t('reason.workspaceUnknown') };
-      }
-      restrict = normalized;
-    }
-    const result = chatQueue.enqueue({
-      assignee: target,
-      ...(target ? { workspacePath: getPet(target)?.workspacePath } : {}),
-      ...(restrict ? { restrictWorkspace: restrict } : {}),
-      text: trimmed,
-      images: [],
-      source: 'control'
-    });
-    if (!result.ok || !result.id) return { queued: false, position: -1, reason: result.reason };
-    // 中控投的任務進帳本(status queued;綁定單即知接收者,公用池單記限定工作區)
-    const record: ControlTaskRecord = {
-      id: result.id,
-      text: ledgerSummary(trimmed),
-      source: 'control',
-      status: 'queued',
-      enqueuedAt: Date.now()
-    };
-    if (target) {
-      record.assignee = target;
-      const profile = pets.get(target);
-      if (profile?.name) record.assigneeName = profile.name;
-      if (profile?.workspacePath) record.workspacePath = profile.workspacePath;
-    } else if (restrict) {
-      record.workspacePath = restrict;
-    }
-    taskLedger.set(record.id, record);
-    // enqueue 不自動派發:綁定單派給指定寵;公用池單讓任一合格閒置寵立刻領走
-    if (target) chatDispatcher.dispatch(target);
-    else chatDispatcher.dispatchAll();
-    scheduleControlStatusHook?.();
-    return { queued: true, position: result.position };
-  });
-  ipcMain.handle('control-status-get', (event) => {
-    if (!controlWin || event.sender !== controlWin.webContents) return null;
-    return buildControlStatus(); // 開窗初始化:晚開視窗只靠事件流會漏掉進行中的 turn
-  });
-  ipcMain.handle('chat-unbound-remove', (event, taskId: string): boolean => {
-    if (!controlWin || event.sender !== controlWin.webContents) return false;
-    const removed = chatQueue.removeUnbound(String(taskId)); // 內部 onChanged(undefined) 會自動重推快照
-    if (removed) markLedgerRemoved(String(taskId));
-    return removed;
-  });
-  ipcMain.on('system-restart', (event) => {
-    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
-    if (!fromOurWindow) return;
-    restartApp();
-  });
-  ipcMain.on('system-quit', (event) => {
-    const fromOurWindow = event.sender === win?.webContents || event.sender === controlWin?.webContents;
-    if (!fromOurWindow) return;
-    // app.exit 不觸發 before-quit,清理要自己做(同 Tray 結束;已知坑,見 DEVLOG §22)
-    shutdownSync();
-    app.exit(0);
-  });
-
-  // 外觀 IPC(位置/光影/晃動/服裝/頭像/預設姿勢/模型讀檔)已抽到 appearanceIpc.ts
-  registerAppearanceIpc({
-    overlay: () => win,
-    settings: () => settingsWin,
-    getPet,
-    updatePet,
-    hasPet: (id) => pets.has(id),
-    avatarIcons,
-    wardrobeLists,
-    dataDir,
-    defaultVrmPath,
-  });
-
-  ipcMain.on('show-menu', (event, id: string) => {
-    if (!win || event.sender !== win.webContents || !pets.has(id)) return;
-    selectPet(id);
-    void refreshMotions().then(() => petMenu(id).popup({ window: win! }));
-  });
-
-  /* ── 自繪右鍵選單(overlay DOM)動作 ──
-   * 原生 Menu 無法套用設計語言,寵物右鍵選單改由 renderer 自繪(petMenu.ts);
-   * 動作經這組 IPC 回到 main,走與 Tray 選單完全相同的函式。Tray 仍用原生 petMenu()。 */
-  ipcMain.on('menu-play-motion', async (event, petId: string, file: string) => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    await refreshMotions();
-    if (!motionFiles.includes(file)) return; // 白名單:只接受 motions/ 裡的檔名
-    try {
-      win.webContents.send('vrma-play', petId, await readFile(join(motionsDir(), file)));
-    } catch (error) {
-      console.log('[main] vrma read failed', error);
-    }
-  });
-  ipcMain.on('menu-stop-motion', (event, petId: string) => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    win.webContents.send('vrma-stop', petId);
-  });
-  ipcMain.on('menu-open-settings', (event, tab: string, petId: string) => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    const valid = tab === 'light' || tab === 'char' || tab === 'motion' || tab === 'project';
-    openSettings(valid ? tab : 'light', petId);
-  });
-  ipcMain.on('menu-open-control', (event, tab?: string) => {
-    if (!win || event.sender !== win.webContents) return;
-    openControlPanel(tab === 'sandbox' ? 'sandbox' : undefined);
-  });
-  ipcMain.on('menu-reset-state', (event, petId: string) => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    resetState(petId);
-  });
-  ipcMain.on('menu-restart-pet', (event, petId: string) => {
-    if (!win || event.sender !== win.webContents || !pets.has(petId)) return;
-    void restartPet(petId);
-  });
-
-  let overlayBounds = win.getBounds();
-  // 主顯示器變更(換螢幕/改解析度/闔蓋切外接)時,疊層要跟著鋪滿新的主顯示——
-  // 視窗不會自己調整;不同步的話新螢幕比舊視窗寬的部分成為界外,寵物站在那裡就被切掉。
-  function syncOverlayBounds(): void {
-    if (!win || win.isDestroyed()) return;
-    const target = screen.getPrimaryDisplay().bounds;
-    const current = win.getBounds();
-    if (
-      current.x !== target.x || current.y !== target.y ||
-      current.width !== target.width || current.height !== target.height
-    ) {
-      win.setBounds(target);
-    }
-    overlayBounds = win.getBounds();
-  }
-  syncOverlayBounds();
-  screen.on('display-metrics-changed', syncOverlayBounds);
-  screen.on('display-added', syncOverlayBounds);
-  screen.on('display-removed', syncOverlayBounds);
-
-  /* ── 游標輪詢中央控制 + 功率檔位(效能優化階段 2)──
-   * click-through 視窗收不到被動 mousemove(§平台實證),輪詢是必要之惡;
-   * 但頻率交給功率檔位決定,鎖屏/睡眠/全寵休息時完全停掉。 */
-  let cursorTimer: NodeJS.Timeout | null = null;
-  let cursorPollMs = 30;
-  function setCursorPoll(intervalMs: number | null): void {
-    if (cursorTimer) {
-      clearInterval(cursorTimer);
-      cursorTimer = null;
-    }
-    if (intervalMs === null) return;
-    cursorPollMs = intervalMs;
-    // 心跳不變量:renderer 拖曳看門狗(1200ms 判死)依賴 ≈1s 一次的強制心跳,
-    // 任何輪詢頻率下 sameLimit 都要換算回「約 1 秒」而不是固定次數
-    const sameLimit = Math.max(1, Math.round(1000 / intervalMs));
-    let lastX = -1e9;
-    let lastY = -1e9;
-    let sameCount = 0;
-    cursorTimer = setInterval(() => {
-      if (!win || win.isDestroyed()) return;
-      const point = screen.getCursorScreenPoint();
-      if (point.x === lastX && point.y === lastY && ++sameCount < sameLimit) return;
-      sameCount = 0;
-      lastX = point.x;
-      lastY = point.y;
-      win.webContents.send('cursor', { x: point.x - overlayBounds.x, y: point.y - overlayBounds.y });
-    }, intervalMs);
-  }
-
-  /** 功率檔位:normal(AC)/ eco(電池或微熱)/ critical(過熱)/ suspended(鎖屏/睡眠)。 */
-  const POWER_TIERS = {
-    normal: { pollMs: 30, idleSkip: 6, idleDelayMs: 3000, activeSkip: 1 },
-    eco: { pollMs: 60, idleSkip: 12, idleDelayMs: 1500, activeSkip: 2 },
-    critical: { pollMs: 120, idleSkip: 20, idleDelayMs: 1000, activeSkip: 3 }
-  } as const;
-  type PowerTier = keyof typeof POWER_TIERS | 'suspended';
-  let onBattery = false;
-  let thermal = 'nominal';
-  let screenOff = false; // 鎖屏或系統睡眠
-  let powerTier: PowerTier | null = null; // null = 尚未套用過(開機首套必發)
-
-  function computeTier(): PowerTier {
-    if (screenOff) return 'suspended';
-    if (thermal === 'serious' || thermal === 'critical') return 'critical';
-    if (onBattery || thermal === 'fair') return 'eco';
-    return 'normal';
-  }
-
-  function currentProfilePayload(): Record<string, unknown> {
-    if (powerTier === 'suspended' || powerTier === null) {
-      return { tier: powerTier ?? 'normal', paused: powerTier === 'suspended', ...POWER_TIERS.normal };
-    }
-    return { tier: powerTier, paused: false, ...POWER_TIERS[powerTier] };
-  }
-
-  function anyPetEnabled(): boolean {
-    return [...pets.values()].some((profile) => profile.enabled !== false);
-  }
-
-  function applyPowerTier(): void {
-    const next = computeTier();
-    if (next === powerTier) return;
-    powerTier = next;
-    console.log(`[power] 功率檔位 → ${next}(battery=${onBattery} thermal=${thermal} screenOff=${screenOff})`);
-    win?.webContents.send('power-profile-apply', currentProfilePayload());
-    refreshCursorPoll();
-  }
-
-  /** 輪詢頻率 = 檔位 × 有沒有醒著的寵物(全休息時輪詢沒有意義)。拖曳偵測 helper 同進退。 */
-  function refreshCursorPoll(): void {
-    const alive = powerTier !== 'suspended' && anyPetEnabled();
-    if (!alive) setCursorPoll(null);
-    else setCursorPoll(POWER_TIERS[(powerTier ?? 'normal') as keyof typeof POWER_TIERS].pollMs);
-    dragMonitor?.setActive(alive);
-  }
-  refreshCursorPollHook = refreshCursorPoll; // updatePet(enabled 變更)經此重算
-  idleMotionsPaused = () => powerTier === 'suspended'; // 鎖屏/睡眠不播待機動作
-
-  const updatePowerState = (): void => {
-    onBattery = powerMonitor.isOnBatteryPower();
-    try {
-      thermal = powerMonitor.getCurrentThermalState(); // macOS 專屬;其他平台 unknown
-    } catch {
-      thermal = 'unknown';
-    }
-    applyPowerTier();
-  };
-  powerMonitor.on('on-battery', updatePowerState);
-  powerMonitor.on('on-ac', updatePowerState);
-  powerMonitor.on('thermal-state-change', updatePowerState);
-  powerMonitor.on('lock-screen', () => { screenOff = true; applyPowerTier(); });
-  powerMonitor.on('unlock-screen', () => { screenOff = false; updatePowerState(); });
-  powerMonitor.on('suspend', () => { screenOff = true; applyPowerTier(); });
-  powerMonitor.on('resume', () => { screenOff = false; updatePowerState(); });
-
-  win.webContents.on('did-finish-load', () => {
-    // renderer 重載會失去檔位狀態:重送當前 profile 再重啟輪詢(沿用防疊 timer 的既有防護)
-    win?.webContents.send('power-profile-apply', currentProfilePayload());
-    refreshCursorPoll();
-  });
-  updatePowerState(); // 開機初始化(首套必發 profile)
-
-  /* ── 檔案拖曳 → 寵物接收窗(拖放參考檔案的正式通道)──
-   * 疊層視窗(透明+panel+不可聚焦+screen-saver 層)實測收不到任何拖放事件,連從啟動就
-   * 永遠可互動也一樣(2026-07 實驗)。唯一可行解仿 Finder 彈簧資料夾:偵測到檔案拖曳的
-   * 瞬間,在每隻寵物位置亮出「一般屬性」(不透明/可聚焦/floating)的小接收窗,拖完即收。 */
-  const dropWindows = new Map<string, BrowserWindow>();
-  let dragActive = false;
-
-  function destroyDropWindows(): void {
-    for (const dropWin of dropWindows.values()) {
-      if (!dropWin.isDestroyed()) dropWin.destroy();
-    }
-    dropWindows.clear();
-  }
-
-  const dropPage = (petId: string, name: string): string =>
-    'data:text/html;charset=utf-8,' + encodeURIComponent(`
-    <body style="margin:0;height:100vh;box-sizing:border-box;display:flex;align-items:center;justify-content:center;
-      font:12px system-ui;color:#f4f1fa;background:#38324e;border:1.5px dashed rgba(200,190,235,0.55);
-      border-radius:10px;text-align:center;cursor:copy;letter-spacing:0.02em;">
-      <div style="opacity:0.95;">${t('overlay.dropHint')}<br/><b style="font-size:13px;">${name.replace(/[<>&]/g, '')}</b></div>
-      <script>
-        addEventListener('dragover', (e) => { e.preventDefault(); document.body.style.background = '#4a4170'; });
-        addEventListener('dragleave', () => { document.body.style.background = '#38324e'; });
-        addEventListener('drop', (e) => {
-          e.preventDefault();
-          const paths = [...e.dataTransfer.files].map((f) => window.pet.getFilePath(f)).filter(Boolean);
-          if (paths.length) window.pet.addRefFiles(${JSON.stringify(petId)}, paths);
-        });
-      <\/script>
-    </body>`);
-
-  function showDropWindows(rects: { petId: string; name: string; left: number; top: number; right: number; bottom: number }[]): void {
-    destroyDropWindows();
-    for (const rect of rects) {
-      const profile = pets.get(rect.petId);
-      if (!profile || profile.enabled === false) continue;
-      const width = Math.round(Math.min(Math.max(rect.right - rect.left, 170), 480));
-      const height = Math.round(Math.min(Math.max(rect.bottom - rect.top, 110), 600));
-      const centerX = overlayBounds.x + (rect.left + rect.right) / 2;
-      const centerY = overlayBounds.y + (rect.top + rect.bottom) / 2;
-      const dropWin = new BrowserWindow({
-        width, height,
-        x: Math.round(centerX - width / 2),
-        y: Math.round(centerY - height / 2),
-        frame: false, resizable: false, movable: false, skipTaskbar: true, show: false,
-        webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false }
-      });
-      dropWin.setAlwaysOnTop(true, 'floating');
-      // 半透明用 setOpacity 而非 transparent 視窗——實驗證明 transparent 那組屬性收不到拖放
-      dropWin.setOpacity(0.72);
-      void dropWin.loadURL(dropPage(rect.petId, profile.name));
-      dropWin.once('ready-to-show', () => {
-        if (!dropWin.isDestroyed() && dragActive) dropWin.showInactive(); // 不搶焦點
-      });
-      dropWindows.set(rect.petId, dropWin);
-    }
-  }
-
-  ipcMain.on('pet-rects', (event, rects: { petId: string; name: string; left: number; top: number; right: number; bottom: number }[]) => {
-    if (!win || event.sender !== win.webContents || !Array.isArray(rects) || !dragActive) return;
-    showDropWindows(rects);
-  });
-
-  dragMonitor = createDragMonitor({
-    onStart: () => {
-      if (powerTier === 'suspended' || ![...pets.values()].some((p) => p.enabled !== false)) return;
-      dragActive = true;
-      win?.webContents.send('pet-rects-request'); // 寵物的螢幕矩形只有 renderer 知道(投影後)
-    },
-    onEnd: () => {
-      dragActive = false;
-      // drop 事件與放開左鍵幾乎同時:緩 300ms 讓接收窗先把 drop 處理完再收
-      setTimeout(() => {
-        if (!dragActive) destroyDropWindows();
-      }, 300);
-    }
-  });
-  refreshCursorPoll(); // dragMonitor 建立後同步一次啟停狀態(開機時全寵休息的情境)
-
-  // VRM_PET_PERF_LOG=1:每 5 秒把 renderer 的 render/rAF 比例印到終端機。
-  // 疊層開不了 DevTools(平台限制),這是唯一能在真 overlay 上讀 __perf 的通道;
-  // 比例是節流機制不變量:閒置該 ≈1/idleSkip,持續 ≈1.0 = 有東西一直在喚醒渲染。
-  if (process.env['VRM_PET_PERF_LOG'] === '1') {
-    let last = { raf: 0, ren: 0, pos: 0 };
-    setInterval(() => {
-      void (async () => {
-        try {
-          const perf = await win?.webContents.executeJavaScript('window.__perf') as
-            { rafTicks: number; renderedFrames: number; bubblePositions: number } | undefined;
-          if (!perf) return;
-          const dRaf = perf.rafTicks - last.raf;
-          const dRen = perf.renderedFrames - last.ren;
-          const dPos = perf.bubblePositions - last.pos;
-          last = { raf: perf.rafTicks, ren: perf.renderedFrames, pos: perf.bubblePositions };
-          console.log(`[perf] 5s: rAF=${dRaf} render=${dRen} ratio=${dRaf ? (dRen / dRaf).toFixed(2) : '-'} bubblePos=${dPos}`);
-        } catch { /* renderer 重載間隙 */ }
-      })();
-    }, 5_000);
-  }
-
-  const icon = nativeImage.createFromDataURL(TRAY_ICON);
-  icon.setTemplateImage(true);
-  tray = new Tray(icon);
-  tray.setToolTip(t('tray.tooltip'));
-  tray.setContextMenu(petMenu(registry.selectedPetId));
-  const unresolved = [...pets.values()].find((profile) => profile.characterError);
-  if (unresolved) openSettings('char', unresolved.id);
+  await characters.initializeCharacters();
+  await chat.start();
+  await motions.start();
+  windows.createOverlay();
+  await ipcOverlay.start();
+  await ipcPets.start();
+  await ipcReferences.start();
+  await ipcChat.start();
+  await ipcSettings.start();
+  await ipcControl.start();
+  await ipcMenu.start();
+  await power.start();
+  await drop.start();
+  power.refreshCursorPoll();
+  await tray.start();
+  const unresolved = [...characters.pets.values()].find(profile => profile.characterError);
+  if (unresolved) windows.openSettings('char', unresolved.id);
 });
 
-app.on('window-all-closed', () => { /* 常駐 */ });
-/* ⌘Q 誤觸防護:Tray 與中控的「結束」走 app.exit(明確的點擊,不經這裡),
- * before-quit 只會由 ⌘Q 與系統選單觸發——正好是會手滑的那條路,補一道確認。
- * 用非同步 dialog:同步版會卡住 event loop,登出/關機時整台機器等在這裡。 */
-let quitPromptOpen = false;
-app.on('before-quit', (event) => {
-  if (quitPromptOpen) { event.preventDefault(); return; } // 連按 ⌘Q 不疊開對話框
-  event.preventDefault();
-  quitPromptOpen = true;
-  app.focus({ steal: true }); // 背景 app(dock 隱藏)的 dialog 會被壓在其他視窗底下
-  const awake = [...pets.values()].filter((profile) => profile.enabled).length;
-  void appPrompt({
-    buttons: [t('quit.cancel'), t('quit.confirm')],
-    cancelId: 0, // Esc / ⌘. 等同取消
-    message: t('quit.message'),
-    detail: t('quit.detail', { n: awake }),
-  }).then(({ response }) => {
-    quitPromptOpen = false;
-    // 確認後走 app.exit(同 Tray 慣例):不再回到 before-quit,清理自己做
-    if (response === 1) { shutdownSync(); app.exit(0); }
-  }).catch(() => { quitPromptOpen = false; });
-});
+app.on('second-instance', () => windows.openControlPanel());
+lifecycle.start();

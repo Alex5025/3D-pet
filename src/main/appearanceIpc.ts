@@ -1,4 +1,5 @@
-import { ipcMain, type BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
+import { createResourceScope } from './resourceScope';
 import { join } from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 
@@ -32,6 +33,8 @@ export function registerAppearanceIpc<
     wardrobe?: Record<string, boolean>; vrmPath?: string; defaultPose?: string;
   }
 >(deps: AppearanceIpcDeps<TProfile>): () => void {
+  const scope = createResourceScope();
+  const ipcMain = scope.ipc;
   const { overlay, settings, getPet, updatePet, hasPet, avatarIcons, wardrobeLists, dataDir, defaultVrmPath } = deps;
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);
@@ -121,17 +124,9 @@ export function registerAppearanceIpc<
     }
   });
 
-  const channels = [
-    'get-state', 'save-state', 'set-state', 'avatar-icons',
-    'get-lighting', 'set-lighting', 'get-sway', 'set-sway',
-    'wardrobe-list', 'get-wardrobe', 'set-wardrobe', 'get-boot-vrm', 'get-default-pose',
-  ];
-  return () => {
+  scope.add(() => {
     if (vrmCacheSweep) clearTimeout(vrmCacheSweep);
     vrmReadCache.clear();
-    for (const channel of channels) {
-      ipcMain.removeHandler(channel);
-      ipcMain.removeAllListeners(channel);
-    }
-  };
+  });
+  return () => scope.dispose();
 }
