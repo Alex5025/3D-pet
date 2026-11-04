@@ -9,7 +9,7 @@
 四個行程角色、三個視窗、一條 agent 管線:
 
 ```
-┌─ main(Electron 主行程,1749 行)───────────────────────────────┐
+┌─ main(Electron 主行程,依功能拆分)───────────────────────────────┐
 │  設定落盤 · Tray 選單 · 游標輪詢 · 功率檔位 · 拖曳偵測          │
 │  chatQueue(逐寵 FIFO)→ dispatcher → bridge → Provider        │
 │                                    ↘ petToolsHub(MCP 回連)   │
@@ -25,6 +25,28 @@
 - **overlay** = `index.html` → `main.ts`(多寵 runtime)+ `viewer.ts`(渲染)+ `speechBubble.ts`(對話)
 - **settings** = `settings.html` → `settings.ts`,一次只操作「選中的那隻」
 - **control** = `control.html` → `control.ts`,一次看全部寵物
+
+---
+
+## 主程序模組與生命週期
+
+入口 `src/main/index.ts` 從 1,938 行收斂為 282 行，保留依賴組裝、啟動順序與自驗分支。服務使用明確型別的依賴介面；需要最新視窗或 Store 時，以 getter 取得，避免關閉重開後仍使用舊參照。服務間不反向匯入入口。
+
+| 模組 | 責任 |
+| --- | --- |
+| `runtimeTypes.ts`、`paths.ts` | 主程序內部型別、資料與資產路徑、快取位置、預設模型初始化、PID 與逐字稿路徑。 |
+| `characters.ts` | 角色清單、專案選擇、喚醒／休息、模型綁定、序列化操作及設定儲存。沿用 SettingsStore 與 CharacterStore。 |
+| `windows.ts`、`tray.ts` | 疊層／設定／中控視窗、互斥切換、聚焦與崩潰恢復；系統匣與原生選單。 |
+| `chat.ts`、`control.ts`、`references.ts` | Agent bridge、寵物工具、逐寵派發、串流合併、逐字稿、任務帳本、中控快照及專案參考檔。 |
+| `motions.ts`、`power.ts`、`drop.ts` | 動作清單與監看、預設姿勢與待機排程；功率檔位、游標輪詢；檔案拖曳接收窗。 |
+| `ipc/` | 按 settings、chat、control、menu、overlay、references、pets 分組註冊。pets 組裝既有 petIpc 與 appearanceIpc。拖放的 pet-rects 通道由 drop 服務管理。 |
+| `resourceScope.ts`、`lifecycle.ts` | 追蹤各模組 IPC、事件監聽、計時器及清理工作；統一結束與重啟。 |
+
+建立服務時不開啟視窗或啟動背景工作；所有依賴連接完成後才啟動。資料路徑先於單實例鎖設定，ready 後讀設定、初始化角色，再啟動對話與動作、建立疊層、註冊 IPC、啟動桌面互動及系統匣。headless 自驗分支不建立視窗。
+
+`start()` 對同一實例只執行一次；`dispose()` 可重複呼叫。需要重新啟動時建立新服務實例。結束先停止 IPC、計時器與監看，再關代理、儲存設定及銷毀視窗；單個清理失敗不阻止後續步驟。外觀 IPC 只移除自身註冊的 listener，不使用 removeAllListeners 清掉同通道的其他監聽器。
+
+公開的 preload API、IPC 名稱／參數／回傳值與 YAML 格式未變更。`scripts/fixtures/main-ipc-channels.json` 保存重構前的 60 個通道（含原有角色與外觀模組），`test-main-modules.mjs` 比對註冊類型並驗證視窗授權及資源清理。此測試使用 Electron 替身；原生視窗互動仍需實際桌面驗收。
 
 ---
 

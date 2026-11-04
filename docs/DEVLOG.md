@@ -1067,3 +1067,14 @@ PyCharm → zsh(IDE 內嵌終端機)→ npm run dev → electron-vite → Electr
 Codex 全自動模式改用 granular 政策並宣告 experimentalApi，讓 MCP 確認可送達主程序，避免 never 政策在確認送出前直接拒絕。僅自動接受有效對話的空白表單確認；有輸入欄位或網址的請求仍經介面，未知對話拒絕，保留 workspace-write 沙盒。
 
 新增 npm test 掃描 scripts/test-*.mjs，依檔名執行，失敗即停止；提供 test:characters 與 test:codex 個別入口，接入 pre-push 及桌面 CI。測試暫存目錄改用系統 tmpdir 下的 3D-pet。Codex 測試使用假 app-server，涵蓋新建／恢復、模式切換、允許／拒絕、表單／網址及未知對話，不呼叫真實工具或消耗代理額度。Windows 尚待 CI 驗證。
+
+
+## 65. 主程序依功能拆分（2026-11-04）
+
+`index.ts` 由 1,938 行縮為 282 行，改為組裝路徑、角色、視窗、系統匣、對話、中控、參考檔、動作、省電與拖放服務。IPC 按功能分組，使用依賴注入與動態 getter；預載 API、既有通道授權與設定格式不變。型別先獨立提交，跨服務的搬移在一個可建置提交中完成，測試與文件各自提交。
+
+resourceScope 管理 IPC listener／handler、事件監聽與計時器；start 避免重複註冊，dispose 可重複呼叫。結束流程先停止背景工作，再關代理、儲存設定、關視窗，隔離清理失敗。疊層關閉時清空參照，避免舊視窗繼續被視為合法 sender。
+
+驗證：typecheck、check:i18n、build 及 npm test 通過。新增測試覆蓋 60 個 IPC 通道契約、重複註冊／清理、選模型的 sender 與角色檢查、視窗互斥及重開授權、疊層崩潰恢復、省電事件、真實檔案 watcher 清理，以及隔離 YAML 的角色喚醒／休息與立即儲存。隔離 Electron 的 Mock Agent 自驗 PASS，獨立測試實例日誌確認 VRM 載入與部件解析成功。
+
+限制：原生視窗工具選到了既有的另一個 Electron 實例，未可靠定位隔離測試視窗，因此未宣稱完成原生點擊、動作播放或拖放驗收。Windows 尚未實測；未呼叫真實 AI，未修改日常角色設定。

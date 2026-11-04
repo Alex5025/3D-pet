@@ -93,6 +93,12 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 
 > `.codex/config.toml` 可能包含專案沙盒策略與本機路徑,提交前請確認內容適合分享;憑證、token、API key 不得寫入 repository。
 
+## 主程序模組
+
+`src/main/index.ts` 負責啟動順序與依賴組裝。角色與設定由 `characters.ts` 管理，視窗與系統匣分別由 `windows.ts`、`tray.ts` 管理；對話、中控、動作、省電及拖放各自擁有狀態與清理流程。IPC 按功能放在 `src/main/ipc/`，沿用既有通道與授權規則。
+
+新增功能時，優先修改對應服務與 IPC 模組；只有依賴連接或啟動順序變更才修改入口。完整分工見 [主程序模組與生命週期](docs/SYSTEM-INVENTORY.md#主程序模組與生命週期)。
+
 ## 開發驗證
 
 ```bash
@@ -101,8 +107,11 @@ npm run check:i18n      # 多語系鍵一致性
 npm test                # 依檔名順序執行 scripts/test-*.mjs，失敗即停止
 npm run test:characters # 共用角色、遷移、儲存合併與多專案隔離
 npm run test:codex      # 假 app-server 驗證 Codex 核准流程
+node scripts/test-main-modules.mjs # IPC 契約、視窗授權、角色儲存與資源清理
 npm run build           # 建置 Electron 主程序、預載與介面
 ```
+
+主程序模組測試直接執行正式服務，模擬 Electron 邊界並比對重構前的 IPC 清單；涵蓋重新註冊、視窗重開、省電監聽、動作 watcher，以及角色休息／喚醒與立即儲存。
 
 自動測試使用隔離資料及假代理，不呼叫真實 AI、不消耗訂閱額度。新增可自動執行的測試時，使用 `scripts/test-*.mjs` 命名即可納入 `npm test`。測試暫存資料位於系統暫存目錄下的 `3D-pet/`。
 
