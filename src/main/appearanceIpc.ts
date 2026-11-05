@@ -20,8 +20,8 @@ export interface AppearanceIpcDeps<TProfile> {
   avatarIcons: Map<string, { front: string; side: string }>;
   /** 各寵的服裝材質清單(renderer 解析模型後回報)。 */
   wardrobeLists: Map<string, { key: string; label: string }[]>;
-  /** 運行資料根目錄(motions/ 在其下)。 */
-  dataDir: () => string;
+  /** 共用動作目錄；與動作選單、手動播放使用同一路徑。 */
+  motionsDir: () => string;
   /** 預設模型的實體路徑；沒有自訂 vrmPath 時由 main 讀取，避免 file:// 絕對網址失效。 */
   defaultVrmPath: () => string;
 }
@@ -35,7 +35,7 @@ export function registerAppearanceIpc<
 >(deps: AppearanceIpcDeps<TProfile>): () => void {
   const scope = createResourceScope();
   const ipcMain = scope.ipc;
-  const { overlay, settings, getPet, updatePet, hasPet, avatarIcons, wardrobeLists, dataDir, defaultVrmPath } = deps;
+  const { overlay, settings, getPet, updatePet, hasPet, avatarIcons, wardrobeLists, motionsDir, defaultVrmPath } = deps;
 
   ipcMain.handle('get-state', (_event, id: string) => getPet(id)?.state ?? null);
   ipcMain.on('save-state', (event, id: string, state: unknown) => {
@@ -118,7 +118,7 @@ export function registerAppearanceIpc<
     const file = getPet(id)?.defaultPose;
     if (!file) return null;
     try {
-      return await readFile(join(dataDir(), 'motions', file));
+      return await readFile(join(motionsDir(), file));
     } catch {
       return null;
     }

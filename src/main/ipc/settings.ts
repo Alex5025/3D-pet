@@ -135,7 +135,8 @@ export function createIpcSettings(deps: IpcSettingsDeps) {
       const parent = event.sender === deps.settingsWin?.webContents
         ? deps.settingsWin
         : event.sender === deps.controlWin?.webContents ? deps.controlWin : undefined;
-      if (!parent || !deps.pets.has(id)) return null;
+      const fromOverlay = !!deps.win && event.sender === deps.win.webContents;
+      if ((!parent && !fromOverlay) || !deps.pets.has(id)) return null;
       return deps.chooseWorkspace(id, parent);
     });
 

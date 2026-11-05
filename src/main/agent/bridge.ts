@@ -51,6 +51,8 @@ interface PetAgentState {
   kind: AgentKind;
   sessionId: string | null;
   running: boolean;
+  closed?: boolean;
+  finished?: Promise<void>;
   /** 有審批請求掛著等使用者點頭:看門狗暫停計時(等人不是卡死)。 */
   awaitingApproval: boolean;
   /** 掛著的審批內容(中控面板晚開窗要能拿到 description;回覆或 turn 終結時清空)。 */
@@ -111,6 +113,8 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
 
     const state = stateFor(petId, kind, profile.workspacePath);
     state.running = true;
+    let finish!: () => void;
+    state.finished = new Promise<void>((resolve) => { finish = resolve; });
     let terminated = false; // 保證每 turn 恰一個終結事件(done 或 error)
     const emit = (event: AgentEvent): void => {
       if (event.kind === 'done' || event.kind === 'error') {
@@ -152,6 +156,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
           }
         }
       }
+      if (state.closed) return;
       // startSession 回傳的是 handle,不持久化;真 id 只從 session 事件回存
       const turnOpts = {
         model: profile.agent?.model,
@@ -163,6 +168,7 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
         images,
       };
       for await (const event of provider.sendMessage(state.sessionId, text, turnOpts)) {
+        if (state.closed) break;
         state.lastActivity = Date.now();
         noticed = false;
         if (event.kind === 'approval') {
@@ -173,7 +179,10 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
           state.sessionId = event.sessionId;
           if (profile.agent?.kind !== kind || profile.agent?.sessionId !== event.sessionId) {
             // 展開既有 agent 設定再蓋 sessionId:回存不可洗掉 model/effort/permission
-            deps.updatePet(petId, { agent: { ...profile.agent, kind, sessionId: event.sessionId } }, profile.workspacePath);
+            const latest = deps.getPet(petId, profile.workspacePath);
+            if (latest && (latest.agent?.kind ?? DEFAULT_KIND) === kind) {
+              deps.updatePet(petId, { agent: { ...latest.agent, kind, sessionId: event.sessionId } }, profile.workspacePath);
+            }
           }
         }
         emit(event);
@@ -184,10 +193,12 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
     } catch (error) {
       emit({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
     } finally {
+      emit({ kind: 'done', ok: false });
       clearInterval(watchdog);
       state.running = false;
       state.awaitingApproval = false;
       state.pendingApproval = null; // turn 終結 = 審批必然已了結或作廢
+      finish();
     }
   }
 
@@ -240,10 +251,12 @@ export function createAgentBridge(deps: AgentBridgeDeps): AgentBridge {
       try {
         const targets = [...states.entries()].filter(([, s]) => s.petId === petId && (!workspacePath || s.workspacePath === workspacePath));
         for (const [key, state] of targets) {
+          state.closed = true;
           if (state.sessionId) {
             if (state.running) await deps.providers[state.kind].cancel(state.sessionId).catch(() => undefined);
-            await deps.providers[state.kind].closeSession(state.sessionId).catch(() => undefined);
           }
+          await state.finished;
+          if (state.sessionId) await deps.providers[state.kind].closeSession(state.sessionId).catch(() => undefined);
           states.delete(key);
         }
       } finally {

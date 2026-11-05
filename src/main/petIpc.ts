@@ -27,8 +27,8 @@ export interface PetIpcDeps<TProfile extends { name: string; agent?: AgentBindin
   selectPet: (id: string) => TProfile | null;
   /** 廣播寵物清單給各視窗。 */
   sendPetProfiles: () => void;
-  /** 關掉某寵的 agent session(換 agent 種類或清空 sessionId 時)。 */
-  closePetSession: (id: string) => void;
+  /** 設定變更時中斷並釋放 session；保留設定內的對話 ID 供下次恢復。 */
+  closePetSession: (id: string) => void | Promise<void>;
 }
 
 /** 把 renderer 送來的 patch 過濾成只含合法欄位的更新;回傳 null 代表沒有可套用的變更。
@@ -62,10 +62,12 @@ export function sanitizePetMeta<TProfile extends { name: string; agent?: AgentBi
       ...(effort ? { effort } : {}),
       ...(permission ? { permission } : {})
     };
-    // 換 agent 種類 = 換家,不共享 session;sessionId 被清空(「開新對話」鈕或手動清欄位)
-    // 也要關——光清 profile 不夠,bridge 記憶體裡還握著舊 session,下一句仍會續用舊對話。
-    closeSession = (!!profile.agent?.kind && profile.agent.kind !== patch.agent.kind)
-      || (!!profile.agent?.sessionId && !sessionId);
+    // 設定變更即停止使用舊設定的 turn；同家保留 sessionId，下次送出恢復對話。
+    closeSession = (profile.agent?.kind ?? 'codex') !== patch.agent.kind
+      || (!!profile.agent?.sessionId && !sessionId)
+      || (profile.agent?.model ?? '') !== model
+      || (profile.agent?.effort ?? '') !== effort
+      || profile.agent?.permission !== permission;
   }
   return { next: next as Partial<TProfile>, closeSession };
 }
@@ -88,9 +90,9 @@ export function registerPetIpc<TProfile extends { name: string; agent?: AgentBin
     const profile = deps.getPet(id);
     if (!profile || (characterId && profile.characterId !== characterId)) return null;
     const { next, closeSession } = sanitizePetMeta(profile, patch);
-    if (closeSession) deps.closePetSession(id);
     const updated = await deps.updatePet(id, next); // enabled=false 時的快取釋放已內建於 updatePet
     deps.sendPetProfiles();
+    if (updated && closeSession) await deps.closePetSession(id);
     return updated;
   });
 

@@ -314,7 +314,7 @@ function refreshAgentControls(petId: string): void {
   runtime.bubble.setAgentControls({ ...info, models: [] }); // 先畫出來,清單到了再補
   void agentModels(kind).then((models) => {
     const current = runtimes.get(petId);
-    if (current?.profile.agent?.kind !== agent?.kind || current?.profile.workspacePath !== workspacePath) return; // 等待期間換了家
+    if (current?.profile.agent !== agent || current?.profile.workspacePath !== workspacePath) return; // 丟棄較早設定的非同步結果
     current?.bubble.setAgentControls({ ...info, models });
   });
 }
@@ -396,6 +396,8 @@ function addRuntime(profile: PetProfile): void {
                 effort: patch.effort ?? agent.effort,
                 permission: (patch.permission ?? agent.permission) as typeof agent.permission,
               },
+        }).catch((error: unknown) => {
+          runtimes.get(profile.id)?.bubble.showError(String(error));
         });
       }
     })

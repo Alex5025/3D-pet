@@ -23,7 +23,7 @@ export interface IpcPetsDeps {
   readonly sendPetProfiles: () => void;
   readonly avatarIcons: Map<string, { front: string; side: string; }>;
   readonly wardrobeLists: Map<string, { key: string; label: string; }[]>;
-  readonly dataDir: () => string;
+  readonly motionsDir: () => string;
   readonly defaultVrmPath: () => string;
 }
 
@@ -42,7 +42,6 @@ export function createIpcPets(deps: IpcPetsDeps) {
       getPet: deps.getPet,
       updatePet: async (id, patch) => {
         const { enabled, ...metadata } = patch;
-        if (metadata.agent && deps.bridge?.petStates().some((state) => state.petId === id && state.running && state.workspacePath === deps.getPet(id)?.workspacePath)) return deps.getPet(id);
         if (Object.keys(metadata).length) deps.updatePet(id, metadata);
         return enabled === undefined ? deps.getPet(id) : deps.setPetEnabled(id, enabled);
       },
@@ -57,7 +56,7 @@ export function createIpcPets(deps: IpcPetsDeps) {
       selectPet: deps.selectPet,
       sendPetProfiles: deps.sendPetProfiles,
       closePetSession: (id) => {
-        if (!deps.bridge?.petStates().some((state) => state.petId === id && state.running && state.workspacePath === deps.getPet(id)?.workspacePath)) void deps.bridge?.closePetSession(id, deps.getPet(id)?.workspacePath);
+        return deps.bridge?.closePetSession(id, deps.getPet(id)?.workspacePath);
       },
     }));
 
@@ -70,7 +69,7 @@ export function createIpcPets(deps: IpcPetsDeps) {
       hasPet: (id) => deps.pets.has(id),
       avatarIcons: deps.avatarIcons,
       wardrobeLists: deps.wardrobeLists,
-      dataDir: deps.dataDir,
+      motionsDir: deps.motionsDir,
       defaultVrmPath: deps.defaultVrmPath,
     }));
   }

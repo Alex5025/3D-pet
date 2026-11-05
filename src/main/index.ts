@@ -139,7 +139,7 @@ const ipcPets: IpcPets = createIpcPets({
   get sendPetProfiles() { return characters.sendPetProfiles; },
   get avatarIcons() { return characters.avatarIcons; },
   get wardrobeLists() { return characters.wardrobeLists; },
-  get dataDir() { return paths.dataDir; },
+  get motionsDir() { return paths.motionsDir; },
   get defaultVrmPath() { return paths.defaultVrmPath; },
 });
 const references: References = createReferences({

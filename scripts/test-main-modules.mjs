@@ -86,6 +86,42 @@ try {
     assert.equal(api.ipcMain.handlers.size, 0);
     assert.equal(api.ipcMain.eventNames().length, 0);
   }
+  // 執行中的泡泡設定也必須保存，並在新設定寫入後等待舊 session 關閉。
+  const activePet = { id: 'fox', name: '狐狸', workspacePath: '/project', agent: { kind: 'codex', sessionId: 'existing' } };
+  const sharedMotions = join(scratch, 'shared-motions');
+  await mkdir(sharedMotions);
+  const poseData = Buffer.from('共用預設姿勢');
+  await writeFile(join(sharedMotions, 'default.vrma'), poseData);
+  activePet.defaultPose = 'default.vrma';
+  const petWindow = { webContents: {} };
+  const changes = [];
+  const petIpc = api.createIpcPets(new Proxy({
+    win: petWindow, getPet: () => activePet, motionsDir: () => sharedMotions,
+    updatePet: (_id, patch) => { Object.assign(activePet, patch); changes.push('saved'); return activePet; },
+    sendPetProfiles: () => changes.push('broadcast'),
+    bridge: {
+      petStates: () => [{ petId: 'fox', workspacePath: '/project', running: true }],
+      closePetSession: async () => { assert.equal(activePet.agent.model, 'new-model'); await Promise.resolve(); changes.push('closed'); },
+    },
+  }, { get(target, key) { return key in target ? target[key] : defaults[key]; } }));
+  await petIpc.start();
+  const readPose = api.ipcMain.handlers.get('get-default-pose');
+  assert.deepEqual(await readPose({}, 'fox'), poseData, '啟動姿勢必須讀共用動作目錄，不依賴 worktree 資料目錄');
+  activePet.defaultPose = undefined;
+  assert.equal(await readPose({}, 'fox'), null, '未指定姿勢不載入');
+  activePet.defaultPose = 'missing.vrma';
+  assert.equal(await readPose({}, 'fox'), null, '缺少動作不阻止模型啟動');
+
+  await api.ipcMain.handlers.get('update-pet-meta')({ sender: petWindow.webContents }, 'fox', {
+    agent: { kind: 'codex', sessionId: 'existing', model: 'new-model', effort: 'high', permission: 'auto' },
+  });
+  assert.deepEqual(changes, ['saved', 'broadcast', 'closed']);
+  assert.equal(activePet.agent.effort, 'high');
+  assert.equal(activePet.agent.permission, 'auto');
+  changes.length = 0;
+  await api.ipcMain.handlers.get('update-pet-meta')({ sender: petWindow.webContents }, 'fox', { agent: { ...activePet.agent } });
+  assert.deepEqual(changes, ['saved', 'broadcast'], '重選相同設定不中斷');
+  petIpc.dispose();
   const registry = { selectedPetId: 'fox' };
   const windows = api.createWindows({ registry, selectPet() {} });
   assert.equal(api.BrowserWindow.instances.length, 0, '建立服務不開視窗');
@@ -96,8 +132,14 @@ try {
     get win() { return windows.win; }, get settingsWin() { return windows.settingsWin; },
     get controlWin() { return windows.controlWin; }, pets: new Map([['fox', {}]]),
     chooseVrm: async (...args) => { calls.push(args); },
+    chooseWorkspace: async (...args) => { calls.push(args); },
   }, { get(target, key) { return key in target ? target[key] : defaults[key]; } }));
   await settings.start();
+  const workspace = api.ipcMain.handlers.get('choose-workspace');
+  await workspace({ sender: overlay.webContents }, 'fox');
+  assert.deepEqual(calls.pop(), ['fox', undefined], '泡泡可立即選工作目錄');
+  await workspace({ sender: {} }, 'fox');
+  assert.equal(calls.length, 0);
   const choose = api.ipcMain.handlers.get('choose-vrm');
   await choose({ sender: overlay.webContents }, 'fox');
   assert.deepEqual(calls.pop(), ['fox', undefined], '疊層不作為 sheet 父窗');
@@ -187,7 +229,7 @@ try {
     charactersPath, selectedPetId: 'fox', pets: [{ id: 'fox', name: '測試角色', enabled: true,
       workspacePath: project, projects: [{ workspacePath: project }] }] }));
   const characterService = api.createCharacters(new Proxy({
-    runtimeDataDir: () => runtime, defaultVrmPath: () => model, modelsDir: () => scratch,
+    history: undefined, runtimeDataDir: () => runtime, defaultVrmPath: () => model, modelsDir: () => scratch,
     bridge: null, win: null, settingsWin: null, controlWin: null,
   }, { get(target, key) { return key in target ? target[key] : defaults[key]; } }));
   characterService.prepareStore(); await characterService.loadConfig();

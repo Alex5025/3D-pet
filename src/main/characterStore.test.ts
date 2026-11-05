@@ -161,6 +161,17 @@ async function run(): Promise<void> {
   assert.ok(bridge.petStates()[0]?.awaitingApproval, '錯誤專案不能批准');
   bridge.respondApproval('fox', request, true, undefined, x);
   await waitUntil(() => events.filter((e) => e.kind === 'done').length === 4);
+  // 正在執行時換設定：等舊 turn 收尾，才允許下一則使用保留的 session。
+  queue.enqueue({ assignee: 'fox', workspacePath: x, text: 'SLOW CHANGE', images: [], source: 'bubble' }); dispatcher.dispatchAll();
+  await waitUntil(() => mock.log.some((line) => line.endsWith(':SLOW CHANGE')));
+  agents.set(x, { ...agents.get(x)!, model: 'new-model', effort: 'high', permission: 'auto' });
+  const closing = bridge.closePetSession('fox', x);
+  assert.equal(bridge.canAccept('fox'), false);
+  await closing;
+  assert.equal(bridge.canAccept('fox'), true);
+  assert.equal(events.filter((e) => e.kind === 'done').length, 5, '舊 turn 已終結才完成關閉');
+  assert.equal(agents.get(x)?.model, 'new-model');
+  assert.ok(agents.get(x)?.sessionId, '切設定保留對話 ID');
   await bridge.dispose();
   console.log('通過：共用角色、跨世界版本與鎖、遷移選擇、多專案串行、固定目錄、session 與審批隔離');
 }
