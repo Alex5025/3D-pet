@@ -19,3 +19,6 @@ extract-yourmom/vrma/
 /runtime_data/*
 !/runtime_data/README.md
 /3D-pet/instances/
+/worktrees/
+
+/VRM_角色資料*
