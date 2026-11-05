@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 
 const oldPid = Number.parseInt(process.argv[2] ?? '', 10);
 const projectDir = process.argv[3];
@@ -19,8 +20,7 @@ const waitForExit = () => new Promise((resolve) => {
 });
 
 await waitForExit();
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const child = spawn(npm, ['run', 'dev'], {
+const child = spawn('node', [join(projectDir, 'scripts/run-logged.mjs')], {
   cwd: projectDir,
   detached: true,
   stdio: 'ignore',

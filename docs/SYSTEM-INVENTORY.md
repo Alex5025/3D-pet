@@ -53,7 +53,7 @@
 ## 1. 使用者流程(User Flows)
 
 ### F1. 開機到看見寵物
-`npm run start` → Vite 讀 `runtime-data/app.yaml` 的固定 port；main 讀精簡角色清單、語言與預設工作根目錄
+`npm run start` → Vite 讀工作樹 `runtime_data/app.yaml` 的固定 port；main 讀精簡角色清單、語言與預設工作根目錄
 → 僅對原先啟用的角色執行喚醒，讀取 `characters.yaml` → 建疊層視窗 → renderer 對每隻成功喚醒的寵物建 runtime
 → `getBootVrm` 取模型 buffer → 載入 → 套 state/lighting/sway/wardrobe → `getDefaultPose` 播開機姿勢
 → pull `getChatQueue` 與 `getChatTranscript` 回填泡泡。
@@ -175,9 +175,9 @@ Codex 全自動使用 workspace-write 與 granular 政策：只開啟 MCP elicit
 
 | 檔案 | 內容 | 寫入時機 |
 |---|---|---|
-| 各實例 `runtime-data/app.yaml` | 固定 port、共用角色檔路徑、啟用角色、專案清單、各專案 Agent session、位置 | 異動送達主程序後立即原子替換 |
+| 工作樹 `runtime_data/app.yaml` | 固定 port、共用角色檔路徑、啟用角色、專案清單、各專案 Agent session、位置 | 異動送達主程序後立即原子替換 |
 | 共用 `characters.yaml` | 穩定角色 ID、模型路徑／SHA-256、個性、光影、動作；不含工作目錄與 session | 喚醒載入；儲存時讀取並合併欄位異動，以跨程序鎖、版本檢查及原子替換寫入 |
-| 各實例 `runtime-data/transcripts/<角色與專案雜湊>.json` | 各角色、各專案的上一輪對話 | turn 結束時 |
+| 工作樹 `runtime_data/history.sqlite` | 近 30 天對話與前兩次設定版本 | 串流每秒、turn 結束及設定更新時 |
 | 工作目錄的 `.codex/config.toml` | 沙盒策略 | 中控套用時,main 直寫 |
 
 **不落盤**:參考檔案清單、任務帳本、佇列。
@@ -224,11 +224,11 @@ flowchart TB
 
 共用角色預設位於產品資料目錄 `VRM Pet/runtime-data/characters.yaml`（schemaVersion 3）。每個角色使用穩定 ID；SHA-256 僅識別 VRM 檔案，不作角色查重。不同角色可使用同一 VRM，各自保存個性、光影、服裝與動作參數。改名、更換 VRM 或切換 AI 模型不改變角色 ID。AI 模型保存在本地專案 Agent 綁定。共用角色沒有工作目錄或 session；預設範例模型位於共用產品資料目錄的 `models/`；舊 `runtime-data/assets/` 檔案與既有角色引用保留。自訂共用角色檔時，模型與動作放在該 YAML 同層的 `models/`、`motions/`。
 
-linked worktree 的本地資料位於 `/tmp/3D-pet/instances/<工作樹實體路徑雜湊>/`，可用 `node scripts/data-dir.mjs` 查詢。各自的 `app.yaml`（schemaVersion 2）保存固定 port、`charactersPath`、啟用角色、負責專案、選取專案、位置與各專案的 Agent 綁定。角色名稱是啟動清單的顯示快取；完整參數只存在共用檔。
+linked worktree 的設定與 SQLite 位於工作樹根目錄的 `runtime_data/`，可用 `node scripts/data-dir.mjs config` 查詢。各自的 `app.yaml`（schemaVersion 2）保存固定 port、`charactersPath`、啟用角色、負責專案、選取專案、位置與各專案的 Agent 綁定。角色名稱是啟動清單的顯示快取；完整參數只存在共用檔。
 
 首次初始化預設複製正式版的專案分配，不繼承 session／對話，角色全部休眠；所有世界引用已存在的共用角色 ID，不再複製個性。`VRM_PET_DATA_DIR` 覆寫本地目錄；`VRM_PET_BASELINE_DIR` 指定首次分配來源；`VRM_PET_SHARED_CHARACTERS` 指定首次初始化使用的共用檔。初始化完成後，以 `app.yaml` 的 `charactersPath` 為準。測試應同時隔離本地目錄和共用角色檔，避免寫到正式資料。
 
-`npm run dev` 顯示實例路徑、port 與設定位置。port 預設 5173，改成 5174 等固定值後重新啟動。Vite 僅綁定 127.0.0.1，撞 port 明確失敗，不自動跳號。predev 不終止既有實例。`/tmp` 可能被清除，長期使用的本地資料應另行備份。
+`npm run dev` 顯示實例路徑、port 與設定位置。port 預設 5173，改成 5174 等固定值後重新啟動。Vite 僅綁定 127.0.0.1，撞 port 明確失敗，不自動跳號。predev 不終止既有實例。本地設定及對話不再放在 `/tmp`，刪除工作樹前仍需備份 `runtime_data/`。
 
 ### 多專案執行
 
@@ -255,4 +255,17 @@ macOS 模型預設為 `~/Library/Application Support/VRM Pet/models/`，動作�
 
 Windows NSIS 預設採單一使用者安裝，程式位於 `%LOCALAPPDATA%\Programs\VRM Pet`，允許更改安裝位置。模型與動作位於 `%APPDATA%\VRM Pet\models`、`motions`；角色及啟動 YAML 位於其 `runtime-data`。Chromium 快取位於 `%LOCALAPPDATA%\VRM Pet\Cache`。標準解除安裝不刪除使用者資料，更新亦保留；明確指定解除安裝器的 `--delete-app-data` 參數則不在保留保證內。
 
-Windows linked worktree 的執行資料使用 `%TEMP%\3D-pet\instances\<實體路徑雜湊>`；設定 `VRM_PET_DATA_DIR` 時，快取位於該實例的 `Cache`，避免測試實例互相干擾。macOS 工作樹維持 `/tmp/3D-pet/instances/`。Windows 安裝與解除安裝尚需 Windows 實機驗收。
+Windows 與 macOS 的 linked worktree 都將設定放在 `runtime_data/`、快取放在 `3D-pet/instances/Cache/`，實例互不干擾。Windows 安裝與解除安裝尚需 Windows 實機驗收。
+
+### 本地設定與歷史儲存
+
+- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（含 SQLite 的 WAL／SHM 檔）。
+- 日誌、PID、快取及臨時附件：`<worktree>/3D-pet/instances/`，均不進 Git。只有 Unix socket 路徑超過平台長度限制時，通訊暫存退回 `/tmp/3D-pet/instances/`。
+- 對話保存最近 30 天，每秒保存串流、結束立即保存；開新對話保留舊歷史，但泡泡只回填目前對話最後一輪。不保存附件二進位或完整工具輸出。
+- `app.yaml` 仍是設定唯一依據；SQLite 只保留前兩次不同版本，不包含目前版本。原有共用角色備份與遷移備份不裁剪。
+- 日誌按 UTC 日分檔，啟動及每日清除超過 30 天的日期檔；同日檔以整日保留。只清理本專案已知日誌檔名。
+- 首次啟動自動從舊 `/tmp` 工作樹實例複製設定及匯入期限內的對話；舊實例須先結束。已有新設定不覆蓋，來源檔與舊備份保留；舊 JSON 只有最後一輪，無法恢復更早內容。
+- `VRM_PET_DATA_DIR` 覆寫根目錄，之下建立 `runtime_data/` 與 `3D-pet/instances/`；共用角色與資產不受影響。測試另設 `VRM_PET_SHARED_CHARACTERS`。
+- 安裝版未指定覆寫時，設定仍在系統產品資料目錄的 `runtime-data/`，共用角色、模型與動作位置不變。
+- 可用 `node scripts/data-dir.mjs config`、`database`、`logs` 或 `pid` 查詢精確路徑。
+- `npm ci` 及 `postinstall` 會為 Electron 重建 SQLite 原生模組；升級 Electron 時，須同步 `.npmrc` 的 `target`。儲存整合測試在 Electron 中執行，避免與系統 Node ABI 混用。

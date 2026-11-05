@@ -1,17 +1,21 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseDocument, stringify } from 'yaml';
-import { dataDir, linkedWorktree, productionDataDir, projectDir } from './data-dir.mjs';
+import { dataDir, linkedWorktree, productionDataDir, projectDir, layout } from './data-dir.mjs';
+
+import { legacyDataDir, prepareStorage } from './storage-layout.mjs';
 
 /** 在 Vite 綁定 port 前建立可編輯的啟動設定；此處不讀角色檔。 */
 export function configureInstance() {
   const explicitDirectory = !!process.env.VRM_PET_DATA_DIR;
   const directory = dataDir();
-  process.env.VRM_PET_DATA_DIR = directory;
+  const paths = layout();
+  prepareStorage(paths, legacyDataDir(projectDir));
+  if (explicitDirectory || linkedWorktree()) process.env.VRM_PET_DATA_DIR = directory;
   if (linkedWorktree() && !explicitDirectory && directory !== productionDataDir()) {
     process.env.VRM_PET_BASELINE_DIR = productionDataDir();
   }
-  const runtime = join(directory, 'runtime-data');
+  const runtime = paths.runtime;
   mkdirSync(runtime, { recursive: true });
   const path = join(runtime, 'app.yaml');
   if (!existsSync(path)) {

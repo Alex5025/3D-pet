@@ -2,8 +2,11 @@ import { app } from 'electron';
 import { constants, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { CharacterStore, modelHash } from './characterStore';
+import { CharacterStore } from './characterStore';
 import { createResourceScope } from './resourceScope';
+import { runtimeLayout, installRuntimeLogging } from './runtimeStorage';
+import { HistoryStore } from './historyStore';
+import { legacyDataDir, prepareStorage, pruneLogs } from '../../scripts/storage-layout.mjs';
 import type { PetProfile } from './runtimeTypes';
 
 export interface PathsDeps {
@@ -14,9 +17,8 @@ export interface PathsDeps {
 /** paths 的狀態與資源由此實例管理；建立時不註冊 IPC 或啟動背景工作。 */
 export function createPaths(deps: PathsDeps) {
   const scope = createResourceScope();
-
-  /* 開發版與安裝版共用使用者資料；測試可用 VRM_PET_DATA_DIR 隔離。 */
-  const dataDir = (): string => app.getPath('userData');
+  const layout = runtimeLayout();
+  const history = new HistoryStore(layout.database);
 
   const productDataDir = (): string => join(app.getPath('appData'), 'VRM Pet');
 
@@ -29,13 +31,8 @@ export function createPaths(deps: PathsDeps) {
 
   const defaultVrmPath = (): string => join(modelsDir(), 'AvatarSample_A.vrm');
 
-  const runtimeDataDir = (): string => join(dataDir(), 'runtime-data');
-
-  const transcriptsDir = (): string => join(runtimeDataDir(), 'transcripts');
-
-  const transcriptPath = (id: string, workspace = deps.getPet(id)?.workspacePath ?? ''): string => join(transcriptsDir(), `${modelHash(Buffer.from(JSON.stringify([id, workspace])))}.json`);
-
-  const systemPidPath = (): string => join(runtimeDataDir(), 'pet-system.pid');
+  const runtimeDataDir = (): string => layout.runtime;
+  const systemPidPath = (): string => layout.pid;
 
   /** 兩種版本首次啟動都初始化預設模型；已有檔案時不覆寫。 */
   async function ensureDefaultVrm(): Promise<void> {
@@ -53,22 +50,25 @@ export function createPaths(deps: PathsDeps) {
 
   /** 地端重啟腳本只需要這份 PID 紀錄；啟動命令固定寫在腳本內。 */
   function writeSystemPidRecord(): void {
-    mkdirSync(runtimeDataDir(), { recursive: true });
+    mkdirSync(layout.instance, { recursive: true });
     writeFileSync(systemPidPath(), `${process.pid}\n`);
   }
   function start() {
     if (!scope.start()) return;
-
+    history.initialize();
+    scope.add(installRuntimeLogging());
+    scope.interval(() => {
+      try { history.prune(); pruneLogs(layout.logs); } catch (error) { console.error('[storage] 清理失敗', error); }
+    }, 86400000);
+    scope.add(() => history.close());
   }
   return {
-    get dataDir() { return dataDir; },
     get runtimeDataDir() { return runtimeDataDir; },
     get writeSystemPidRecord() { return writeSystemPidRecord; },
     get ensureDefaultVrm() { return ensureDefaultVrm; },
     get defaultVrmPath() { return defaultVrmPath; },
     get modelsDir() { return modelsDir; },
-    get transcriptsDir() { return transcriptsDir; },
-    get transcriptPath() { return transcriptPath; },
+    get history() { return history; },
     get motionsDir() { return motionsDir; },
     start,
     dispose: () => scope.dispose(),
@@ -77,19 +77,10 @@ export function createPaths(deps: PathsDeps) {
 export type Paths = ReturnType<typeof createPaths>;
 
 export function configureDataPaths(): void {
-  // 固定產品目錄，避免開發版套件名稱與安裝版產品名稱造成兩份資料。
-  const userDataDir = process.env['VRM_PET_DATA_DIR']
-    ? resolve(process.env['VRM_PET_DATA_DIR'])
-    : join(app.getPath('appData'), 'VRM Pet');
-  mkdirSync(userDataDir, { recursive: true });
-  app.setPath('userData', userDataDir);
-  // Chromium 快取與使用者設定分開；開發實例的快取仍保持隔離。
-  const sessionDataDir = process.env['VRM_PET_DATA_DIR']
-    ? join(userDataDir, 'Cache')
-    : process.platform === 'win32'
-      ? join(process.env['LOCALAPPDATA'] || join(app.getPath('home'), 'AppData', 'Local'), 'VRM Pet', 'Cache')
-      : join(userDataDir, 'Cache');
-  mkdirSync(sessionDataDir, { recursive: true });
-  app.setPath('sessionData', sessionDataDir);
-
+  const layout = runtimeLayout();
+  prepareStorage(layout, app.isPackaged && !process.env['VRM_PET_DATA_DIR'] ? layout.base : legacyDataDir(app.getAppPath()));
+  // Chromium 的 userData 也屬於可重建資料，不能與 app.yaml 混在一起。
+  mkdirSync(layout.cache, { recursive: true });
+  app.setPath('userData', layout.instance);
+  app.setPath('sessionData', layout.cache);
 }

@@ -4,13 +4,12 @@ set -u
 unsetopt BG_NICE
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PET_DATA_DIR="$(node "$PROJECT_DIR/scripts/data-dir.mjs")" || exit 1
-PID_FILE="$PET_DATA_DIR/runtime-data/pet-system.pid"
-LOG_FILE="$PET_DATA_DIR/runtime-data/pet-system-restart.log"
-mkdir -p "$PET_DATA_DIR/runtime-data"
+PID_FILE="$(node "$PROJECT_DIR/scripts/data-dir.mjs" pid)" || exit 1
+LOG_DIR="$(node "$PROJECT_DIR/scripts/data-dir.mjs" logs)" || exit 1
+mkdir -p "$LOG_DIR"
 
 log() {
-  print -r -- "$(date '+%Y-%m-%dT%H:%M:%S%z') $1" >> "$LOG_FILE"
+  print -r -- "$(date '+%Y-%m-%dT%H:%M:%S%z') $1" >> "$LOG_DIR/restart-$(date -u +%F).log"
 }
 
 if [[ ! -f "$PID_FILE" ]]; then
@@ -41,5 +40,5 @@ fi
 sleep 0.5
 log "從 $PROJECT_DIR 重新執行 npm run dev"
 cd "$PROJECT_DIR" || exit 1
-nohup npm run dev >> "$LOG_FILE" 2>&1 &
+nohup node scripts/run-logged.mjs >/dev/null 2>&1 &
 log "重啟指令已送出，launcher PID $!"

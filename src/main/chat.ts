@@ -1,6 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { realpathSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import type { HistoryStore, SavedTurn, TurnStatus } from './historyStore';
 import { join } from 'node:path';
 import type { AgentEvent } from '../shared/agentEvents';
 import type { ChatTranscript, ControlTaskRecord } from '../shared/chat';
@@ -16,8 +18,7 @@ import type { PetProfile } from './runtimeTypes';
 
 export interface ChatDeps {
   readonly win: BrowserWindow | null;
-  readonly transcriptsDir: () => string;
-  readonly transcriptPath: (id: string, workspace?: string) => string;
+  readonly history: HistoryStore;
   readonly getPet: (id?: string | undefined) => PetProfile | null;
   readonly finishLedgerTask: (petId: string, ok: boolean) => void;
   readonly scheduleControlStatus: (() => void);
@@ -62,39 +63,52 @@ export function createChat(deps: ChatDeps) {
     chatTextBuffers.clear();
   }
 
-  /* ── 上次對話紀錄:重啟後泡泡回填,使用者看得到聊到哪(agent session 本來就續著,
-   *    但泡泡是空的)。只留最後一輪,寫在獨立檔案——寵物設定檔會被拖曳位置高頻改寫,
-   *    幾十 KB 的逐字稿混進去每次都要重寫一遍。落盤只發生在 turn 結束。 */
-  const TRANSCRIPT_MAX_CHARS = 40_000;
-
+  // 每輪獨立保存；串流定期落盤，關閉時寫入中斷狀態。
   const liveTranscripts = new Map<string, { user: string; reply: string; workspacePath?: string; }>();
-
-  function beginTranscript(petId: string, userText: string, workspacePath?: string): void {
-    liveTranscripts.set(petId, { user: userText.slice(0, 2_000), reply: '', workspacePath });
-  }
-
+  const turns = new Map<string, SavedTurn>();
   const completedTranscripts = new Map<string, ChatTranscript>();
-
-  function persistTranscript(petId: string): void {
-    const live = liveTranscripts.get(petId);
-    liveTranscripts.delete(petId);
-    if (!live || (!live.user && !live.reply)) return;
-    const record: ChatTranscript = {
-      user: live.user,
-      reply: live.reply.slice(-TRANSCRIPT_MAX_CHARS),
-      at: Date.now(),
-    };
-    completedTranscripts.set(chatKey(petId, live.workspacePath), record);
-    void mkdir(deps.transcriptsDir(), { recursive: true })
-      .then(() => writeFile(deps.transcriptPath(petId, live.workspacePath), JSON.stringify(record), 'utf8'))
-      .catch(() => { }); // 紀錄是附加價值,寫失敗不該影響對話
+  let storageFailure = '';
+  function reportHistoryError(petId: string, error: unknown): void {
+    const message = `對話紀錄儲存失敗：${String(error)}`;
+    if (storageFailure !== message) {
+      console.error('[history]', message);
+      deps.win?.webContents.send('chat-event-apply', petId, { kind: 'tool', name: message }, turns.get(petId)?.workspace);
+    }
+    storageFailure = message;
   }
-
+  function saveLive(petId: string, status: TurnStatus = 'running'): void {
+    const live = liveTranscripts.get(petId);
+    const turn = turns.get(petId);
+    if (!live || !turn) return;
+    try {
+      if (!turn.conversation) turn.conversation = deps.history.conversation(petId, turn.workspace);
+      Object.assign(turn, { user: live.user, reply: live.reply, updatedAt: Date.now(), status });
+      deps.history.saveTurn(turn);
+      storageFailure = '';
+    } catch (error) { reportHistoryError(petId, error); }
+  }
+  function beginTranscript(petId: string, userText: string, workspacePath?: string): void {
+    liveTranscripts.set(petId, { user: userText, reply: '', workspacePath });
+    const profile = deps.getPet(petId);
+    const provider = profile && deps.projectFor(profile, workspacePath)?.agent?.kind || 'codex';
+    const now = Date.now();
+    turns.set(petId, { id: randomUUID(), petId, workspace: workspacePath ?? '', conversation: '', provider,
+      user: userText, reply: '', at: now, updatedAt: now, status: 'running' });
+    saveLive(petId);
+  }
+  function persistTranscript(petId: string, status: TurnStatus): void {
+    const live = liveTranscripts.get(petId);
+    if (!live) return;
+    saveLive(petId, status);
+    completedTranscripts.set(chatKey(petId, live.workspacePath), { user: live.user, reply: live.reply, at: turns.get(petId)?.at ?? Date.now() });
+    liveTranscripts.delete(petId);
+    turns.delete(petId);
+  }
   const clearTranscript = (petId: string) => {
     const selected = deps.getPet(petId)?.workspacePath;
-    if (liveTranscripts.get(petId)?.workspacePath === selected) liveTranscripts.delete(petId);
+    deps.history.newConversation(petId, selected ?? '');
+    if (liveTranscripts.get(petId)?.workspacePath === selected) { liveTranscripts.delete(petId); turns.delete(petId); }
     completedTranscripts.delete(chatKey(petId, selected));
-    void rm(deps.transcriptPath(petId), { force: true }).catch(() => { });
   };
 
   function sendChatEvent(petId: string, event: AgentEvent, workspacePath = bridge?.petStates().find((s) => s.petId === petId && s.running)?.workspacePath ?? deps.getPet(petId)?.workspacePath): void {
@@ -106,7 +120,7 @@ export function createChat(deps: ChatDeps) {
       const live = liveTranscripts.get(petId);
       if (live) live.reply += event.text;
     } else if (event.kind === 'done' || event.kind === 'error') {
-      persistTranscript(petId);
+      persistTranscript(petId, event.kind === 'error' ? 'failed' : event.ok ? 'completed' : 'interrupted');
     }
     if (event.kind === 'text') {
       // text 增量一律不推中控:中控只顯示狀態燈號,33ms 合併節奏的高頻 IPC 不打第二個視窗
@@ -162,6 +176,7 @@ export function createChat(deps: ChatDeps) {
   const dispatchAll = () => chatDispatcher.dispatchAll();
   async function start() {
     if (!scope.start()) return;
+    scope.interval(() => { for (const petId of liveTranscripts.keys()) saveLive(petId); }, 1000);
 
     // 寵物工具中樞(v3):agent 經 MCP 呼叫 → socket 回連這裡 → 操縱桌寵
     petToolsHub = createPetToolsHub({
@@ -217,6 +232,7 @@ export function createChat(deps: ChatDeps) {
   scope.add(() => { petToolsHub?.dispose(); petToolsHub = null; });
   scope.add(() => { bridge?.shutdownSync(); bridge = null; });
   scope.add(flushChatText);
+  scope.add(() => { for (const petId of liveTranscripts.keys()) persistTranscript(petId, 'interrupted'); });
   return {
     get clearChatQueue() { return clearChatQueue; },
     get bridge() { return bridge; },

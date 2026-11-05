@@ -1,5 +1,7 @@
 import { cpSync, copyFileSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import type { HistoryStore } from './historyStore';
+import { stringify } from 'yaml';
 import { randomUUID } from 'node:crypto';
 import { atomicYaml, characterParameters, modelHash, parseCharacterYaml, parseStoredCharacter, signature, writeCharacters } from './characterStore';
 import type { CharacterDocument, CharacterParameters } from '../shared/character';
@@ -46,9 +48,10 @@ export function parseBoot(raw: unknown): BootSettings {
 export class SettingsStore {
   private sourceSignature: string | null = null;
   private cached: Record<string, unknown> = { schemaVersion: 1, initialized: false, port: 5173, pets: [] };
-  constructor(readonly filePath: string) {}
+  constructor(readonly filePath: string, private readonly history?: HistoryStore) {}
   loadRaw(): Record<string, unknown> {
     const before = signature(this.filePath);
+    this.history?.reconcileSettings(before === null ? null : readFileSync(this.filePath, 'utf8'));
     if (before !== null) {
       const raw = parseCharacterYaml(readFileSync(this.filePath, 'utf8'));
       if (!record(raw) || ![1, 2].includes(Number(raw.schemaVersion))) throw new Error('app.yaml 版本無效');
@@ -64,7 +67,11 @@ export class SettingsStore {
     if (JSON.stringify(next) === JSON.stringify(this.cached) && this.sourceSignature !== null) return;
     if (signature(this.filePath) !== this.sourceSignature) throw new Error('app.yaml 已被外部修改，未覆寫；請重啟實例以套用');
     mkdirSync(dirname(this.filePath), { recursive: true });
+    const previous = existsSync(this.filePath) ? readFileSync(this.filePath, 'utf8') : null;
+    this.history?.reconcileSettings(previous);
+    this.history?.prepareSettings(previous, stringify(next, { lineWidth: 0, aliasDuplicateObjects: false }));
     atomicYaml(this.filePath, next);
+    this.history?.reconcileSettings(readFileSync(this.filePath, 'utf8'));
     this.sourceSignature = signature(this.filePath);
     this.cached = structuredClone(next) as unknown as Record<string, unknown>;
   }
@@ -82,7 +89,7 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
   const hasOwn = boot.initialized === true || ['app.json', 'characters.yaml', 'config.json', 'pets'].some((n) => existsSync(join(runtime, n)));
   const sourceData = !hasOwn && baseline ? baseline : ownData;
   const copying = sourceData !== ownData;
-  const source = join(sourceData, 'runtime-data');
+  const source = copying ? join(sourceData, 'runtime-data') : runtime;
   const watched = new Map<string, string | null>();
   const read = (path: string, yaml = false): unknown => {
     const before = signature(path); watched.set(path, before);

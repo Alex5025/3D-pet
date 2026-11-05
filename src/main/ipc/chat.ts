@@ -1,5 +1,6 @@
 import { BrowserWindow, shell } from 'electron';
-import { readFile } from 'node:fs/promises';
+import type { HistoryStore } from '../historyStore';
+import { RETENTION_MS } from '../../../scripts/storage-layout.mjs';
 import type { ChatImage, ChatSendResult, ChatTranscript } from '../../shared/chat';
 import { t } from '../../shared/i18n';
 import type { PetProject } from '../../shared/projects';
@@ -18,7 +19,7 @@ export interface IpcChatDeps {
   readonly bridge: AgentBridge | null;
   readonly liveTranscripts: Map<string, { user: string; reply: string; workspacePath?: string | undefined; }>;
   readonly completedTranscripts: Map<string, ChatTranscript>;
-  readonly transcriptPath: (id: string, workspace?: string) => string;
+  readonly history: HistoryStore;
   readonly settingsWin: BrowserWindow | null;
   readonly controlWin: BrowserWindow | null;
   readonly petRefFiles: Map<string, { path: string; isDir: boolean; }[]>;
@@ -54,13 +55,13 @@ export function createIpcChat(deps: IpcChatDeps) {
         const live = deps.liveTranscripts.get(id);
         if (live?.workspacePath === project.workspacePath) return { user: live.user, reply: live.reply, at: Date.now(), ...extra };
         const completed = deps.completedTranscripts.get(key);
-        if (completed) return { ...completed, ...extra };
-        const raw = await readFile(deps.transcriptPath(id, project.workspacePath), 'utf8');
-        const parsed = JSON.parse(raw) as Partial<ChatTranscript>;
-        if (typeof parsed.reply !== 'string' && typeof parsed.user !== 'string') return null;
-        return { user: parsed.user ?? '', reply: parsed.reply ?? '', at: parsed.at ?? 0, ...extra };
-      } catch {
-        return null; // 沒有紀錄(第一次對話前)或檔案壞掉,都當作沒有
+        if (completed && completed.at >= Date.now() - RETENTION_MS) return { ...completed, ...extra };
+        const stored = deps.history.latest(id, project.workspacePath);
+        return stored ? { ...stored, ...extra } : null;
+      } catch (error) {
+        console.error('[history] 讀取失敗', error);
+        deps.win?.webContents.send('chat-event-apply', id, { kind: 'tool', name: `對話紀錄讀取失敗：${String(error)}` }, workspacePath);
+        return null;
       }
     });
 
@@ -70,10 +71,15 @@ export function createIpcChat(deps: IpcChatDeps) {
       if (!fromOurWindow) return;
       const selected = deps.getPet(id)?.workspacePath;
       if (deps.bridge?.petStates().some((s) => s.petId === id && s.workspacePath === selected && s.running)) return;
+      try { deps.clearTranscript?.(id); } // 舊歷史保留，切換目前對話索引。
+      catch (error) {
+        console.error('[history] 建立新對話失敗', error);
+        deps.win?.webContents.send('chat-event-apply', id, { kind: 'tool', name: `建立新對話失敗：${String(error)}` }, selected);
+        return;
+      }
       deps.petRefFiles.delete(deps.refKey(id)); // 參考檔是「當次對話」的:開新對話一併清空
       deps.sendRefFiles(id);
       deps.chatQueue.clearProject(id, selected); // 只清目前專案的待處理對話
-      deps.clearTranscript?.(id); // 上次對話紀錄同理:開新對話 = 從零開始,泡泡不該再回填舊內容
       const profile = deps.getPet(id);
       if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
       const { sessionId: _dropped, ...keep } = profile.agent;

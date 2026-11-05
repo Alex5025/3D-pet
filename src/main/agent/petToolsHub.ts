@@ -1,8 +1,7 @@
+import { agentTempDirectory } from '../runtimeStorage';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { helperScriptPath, localSocketPath } from '../platform';
 
 /**
@@ -33,7 +32,7 @@ export const PET_EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised',
 
 export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
   const token = randomUUID();
-  const dir = mkdtempSync(join(tmpdir(), 'vrm-pet-tools-'));
+  const dir = agentTempDirectory('tools-', true);
   const socketPath = localSocketPath(`tools-${token}`, dir);
   const scriptPath = helperScriptPath('petToolsServer.mjs');
 

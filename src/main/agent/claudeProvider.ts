@@ -1,9 +1,9 @@
+import { agentTempDirectory } from '../runtimeStorage';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { t } from '../../shared/i18n';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { helperScriptPath, localSocketPath } from '../platform';
@@ -72,7 +72,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
    * claude 的 --permission-prompt-tool 把權限詢問導向我們的 MCP 腳本(permPromptServer.mjs),
    * 腳本經本機 socket 回連這裡 → 轉成 approval 事件 → 使用者在泡泡按 允許/拒絕 → 回寫 socket。 */
   const permToken = randomUUID();
-  const permDir = mkdtempSync(join(tmpdir(), 'vrm-pet-perm-'));
+  const permDir = agentTempDirectory('perm-', true);
   const permSocketPath = localSocketPath(`perm-${permToken}`, permDir);
   let permServer: Server | null = null;
   /** turnKey → 該 turn 的事件佇列(審批事件路由)。 */

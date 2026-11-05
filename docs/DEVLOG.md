@@ -1078,3 +1078,9 @@ resourceScope 管理 IPC listener／handler、事件監聽與計時器；start �
 驗證：typecheck、check:i18n、build 及 npm test 通過。新增測試覆蓋 60 個 IPC 通道契約、重複註冊／清理、選模型的 sender 與角色檢查、視窗互斥及重開授權、疊層崩潰恢復、省電事件、真實檔案 watcher 清理，以及隔離 YAML 的角色喚醒／休息與立即儲存。隔離 Electron 的 Mock Agent 自驗 PASS，獨立測試實例日誌確認 VRM 載入與部件解析成功。
 
 限制：原生視窗工具選到了既有的另一個 Electron 實例，未可靠定位隔離測試視窗，因此未宣稱完成原生點擊、動作播放或拖放驗收。Windows 尚未實測；未呼叫真實 AI，未修改日常角色設定。
+
+## 2026-11-04：工作樹資料持久化與 SQLite 歷史
+
+工作樹設定移至 `runtime_data/app.yaml`，近 30 天對話及前兩次設定版本存入同目錄 SQLite。對話串流每秒保存，退出／重啟保留中斷狀態，開新對話不立即刪除舊歷史。設定採待完成紀錄搭配 YAML 原子替換，重啟可對齊版本。
+
+日誌、PID、快取與臨時附件分離至 `3D-pet/instances/`，日誌按 UTC 日輪替並清理超過 30 天的日期檔。啟動、重啟、清理與 Electron 共用路徑規則。舊 `/tmp` 實例設定與對話只複製／匯入，原檔保留，不覆蓋已存在的新設定。SQLite 原生模組依 Electron ABI 重建與解包。

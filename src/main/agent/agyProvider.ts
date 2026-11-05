@@ -1,6 +1,6 @@
+import { agentTempDirectory } from '../runtimeStorage';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { t } from '../../shared/i18n';
@@ -72,7 +72,7 @@ export function createAgyProvider(): AgentProvider {
   const appliedContext = new Map<string, string>();
   /** listModels 摺疊出的「基底模型 → 可用力度」(gemini-3.7-flash 之類):基底模型必帶 --effort。 */
   const collapsedBases = new Map<string, string[]>();
-  const imageDir = mkdtempSync(join(tmpdir(), 'vrm-pet-agy-'));
+  const imageDir = agentTempDirectory('images-');
   let pendingSeq = 0;
   let pastedImageSeq = 0;
 

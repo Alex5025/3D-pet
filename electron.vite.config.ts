@@ -30,13 +30,13 @@ export default defineConfig(({ command }) => ({
   main: {
     build: {
       lib: { entry: resolve(__dirname, 'src/main/index.ts') },
-      rollupOptions: { external: ['electron'] }
+      rollupOptions: { external: ['electron', 'better-sqlite3'] }
     }
   },
   preload: {
     build: {
       lib: { entry: resolve(__dirname, 'src/preload/index.ts') },
-      rollupOptions: { external: ['electron'] }
+      rollupOptions: { external: ['electron', 'better-sqlite3'] }
     }
   },
   renderer: {

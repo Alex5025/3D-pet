@@ -11,11 +11,11 @@ set -u
 unsetopt BG_NICE
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PET_DATA_DIR="$(node "$PROJECT_DIR/scripts/data-dir.mjs")" || exit 1
-LOG_FILE="$PET_DATA_DIR/runtime-data/pet-system.log"
-PID_FILE="$PET_DATA_DIR/runtime-data/pet-system.pid"
+LOG_DIR="$(node "$PROJECT_DIR/scripts/data-dir.mjs" logs)" || exit 1
+LOG_FILE="$LOG_DIR/launcher-$(date -u +%F).log"
+PID_FILE="$(node "$PROJECT_DIR/scripts/data-dir.mjs" pid)" || exit 1
 
-mkdir -p "$PET_DATA_DIR/runtime-data"
+mkdir -p "$LOG_DIR"
 
 # 已在運行就不重複啟動；PID 與日誌只屬於目前實例。
 if [[ -f "$PID_FILE" ]]; then
@@ -31,9 +31,9 @@ print -r -- "$(date '+%Y-%m-%dT%H:%M:%S%z') 啟動寵物系統(脫離終端機)"
 
 # setsid 在 macOS 不是內建指令,有裝才用;沒有時 nohup + disown 已足以擋掉 SIGHUP
 if command -v setsid > /dev/null 2>&1; then
-  setsid nohup npm run dev >> "$LOG_FILE" 2>&1 &
+  setsid nohup node scripts/run-logged.mjs >/dev/null 2>&1 &
 else
-  nohup npm run dev >> "$LOG_FILE" 2>&1 &
+  nohup node scripts/run-logged.mjs >/dev/null 2>&1 &
 fi
 LAUNCHER_PID=$!
 disown 2>/dev/null

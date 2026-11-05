@@ -67,17 +67,17 @@ npm run dev     # shared development command for macOS and Windows
 - **Right-click the pet (or the tray icon)**: switch/add pets, choose a VRM file, motions, settings, **Control Panel**, sandbox settings, reset position, rest/wake, restart a pet or the whole system.
 - **Settings panel** tabs: Lighting / Character (name, persona, sway, outfit) / Motion (default pose, idle motions) / Work (agent, model, effort, permissions, workspace).
 
-Put models in `models/` and motions (.vrma) in `motions/`; runtime data lives in `runtime-data/` (all git-ignored).
+模型與動作存放在共用產品資料目錄；工作樹設定與歷史位於 `runtime_data/`，詳細規則見「本地設定與歷史儲存」。
 
 > `.codex/config.toml` may contain project sandbox policy and local paths. Review before committing; credentials, tokens, and API keys must never enter the repository.
 
 ## Launch Parameters (Environment Variables)
 
-Behavior can be tuned at launch via environment variables, e.g. `VRM_PET_DATA_DIR=/tmp/pets npm run dev`:
+Behavior can be tuned at launch via environment variables, e.g. `VRM_PET_DATA_DIR=/tmp/3D-pet/test-instance npm run dev`:
 
 | Variable | Value | Effect |
 |---|---|---|
-| `VRM_PET_DATA_DIR` | path | Root directory for runtime data (`config.json`, `models/`, `motions/`, `runtime-data/` all live under it). Default: project root in dev, system `userData` when packaged. Point it at `$(mktemp -d)` for fully isolated test runs that never touch your daily pets' settings |
+| `VRM_PET_DATA_DIR` | 路徑 | 覆寫本地資料根目錄；設定與 SQLite 在 `runtime_data/`，日誌等在 `3D-pet/instances/`。不隔離共用角色與資產，測試另設 `VRM_PET_SHARED_CHARACTERS` |
 | `VRM_PET_AGENT_SELFTEST` | `1` \| `claude` \| `codex` \| `agy` | Headless regression self-test (no window, exits when done). `1` = MockProvider full-chain test, no quota; `claude`/`codex`/`agy` = e2e against the real CLI, **consumes subscription quota**, runs only when explicitly requested |
 | `VRM_PET_AGENT_MOCK` | `1` | All pets use a fake agent (scripted events) while the full UI runs normally — verify the UI without spending quota |
 | `VRM_PET_AGENT_DEBUG` | `1` | Dump agent child-process argv and payloads to the terminal, for debugging integrations |
@@ -117,3 +117,16 @@ Browser verification pages (with the dev server running): `/vrmtest.html` for re
 ## License
 
 Code is under the [MIT License](LICENSE). The sample VRM model (`AvatarSample_A`) is the official VRoid sample, used under its original license; models and motion files you add yourself follow their respective authors' licenses.
+
+### 本地設定與歷史儲存
+
+- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（含 SQLite 的 WAL／SHM 檔）。
+- 日誌、PID、快取及臨時附件：`<worktree>/3D-pet/instances/`，均不進 Git。只有 Unix socket 路徑超過平台長度限制時，通訊暫存退回 `/tmp/3D-pet/instances/`。
+- 對話保存最近 30 天，每秒保存串流、結束立即保存；開新對話保留舊歷史，但泡泡只回填目前對話最後一輪。不保存附件二進位或完整工具輸出。
+- `app.yaml` 仍是設定唯一依據；SQLite 只保留前兩次不同版本，不包含目前版本。原有共用角色備份與遷移備份不裁剪。
+- 日誌按 UTC 日分檔，啟動及每日清除超過 30 天的日期檔；同日檔以整日保留。只清理本專案已知日誌檔名。
+- 首次啟動自動從舊 `/tmp` 工作樹實例複製設定及匯入期限內的對話；舊實例須先結束。已有新設定不覆蓋，來源檔與舊備份保留；舊 JSON 只有最後一輪，無法恢復更早內容。
+- `VRM_PET_DATA_DIR` 覆寫根目錄，之下建立 `runtime_data/` 與 `3D-pet/instances/`；共用角色與資產不受影響。測試另設 `VRM_PET_SHARED_CHARACTERS`。
+- 安裝版未指定覆寫時，設定仍在系統產品資料目錄的 `runtime-data/`，共用角色、模型與動作位置不變。
+- 可用 `node scripts/data-dir.mjs config`、`database`、`logs` 或 `pid` 查詢精確路徑。
+- `npm ci` 及 `postinstall` 會為 Electron 重建 SQLite 原生模組；升級 Electron 時，須同步 `.npmrc` 的 `target`。儲存整合測試在 Electron 中執行，避免與系統 Node ABI 混用。

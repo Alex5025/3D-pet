@@ -1,3 +1,4 @@
+import type { HistoryStore } from './historyStore';
 import { BrowserWindow, app, dialog } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -15,6 +16,7 @@ import { SettingsStore, migrateSettings } from './settingsStore';
 import { ensurePetWorkspace } from './workspaceDefaults';
 
 export interface CharactersDeps {
+  readonly history?: HistoryStore;
   readonly runtimeDataDir: () => string;
   readonly settingsWin: BrowserWindow | null;
   readonly sendRefFiles: ((id: string) => void);
@@ -47,7 +49,7 @@ export function createCharacters(deps: CharactersDeps) {
 
   const wardrobeLists = new Map<string, { key: string; label: string; }[]>();
 
-  const settings = new SettingsStore(join(deps.runtimeDataDir(), 'app.yaml'));
+  const settings = new SettingsStore(join(deps.runtimeDataDir(), 'app.yaml'), deps.history);
 
   let settingsReady = false;
 
@@ -162,6 +164,7 @@ export function createCharacters(deps: CharactersDeps) {
         return result.response === 0 ? 'existing' : result.response === 1 ? 'incoming' : 'cancel';
       },
     }, process.env['VRM_PET_BASELINE_DIR']);
+    deps.history?.importFromMarker(deps.runtimeDataDir(), boot);
     characters = new CharacterStore(boot.charactersPath);
     setLocale(boot.locale && LOCALES.includes(boot.locale as Locale) ? boot.locale as Locale : resolveLocale(app.getLocale()));
     for (const item of boot.pets) {

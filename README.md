@@ -86,7 +86,7 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 - `characters.yaml` 集中保存各角色的名稱、VRM 路徑、個性、光影、服裝、擺動與動作設定。不同角色以獨立 ID 識別，即使使用相同 VRM，參數也不合併。
 - 同一角色在不同開發工作樹共用基礎參數；AI 模型與 Agent session 屬於本地專案執行設定，不影響角色身分。
 - 正常啟動讀取本地 `app.yaml`；喚醒角色時才讀取共用角色參數，首次初始化及遷移例外。其他已喚醒實例不即時套用變更，需下次喚醒才重新載入。
-- `app.yaml` 保存 port、角色引用、負責專案與 Agent 綁定。開發工作樹的本地資料在 macOS 位於 `/tmp/3D-pet/instances/<工作樹實體路徑雜湊>/`，Windows 位於 `%TEMP%\3D-pet\instances\<雜湊>\`；設定檔位於其中的 `runtime-data/`。
+- `app.yaml` 保存 port、角色引用、負責專案與 Agent 綁定，位於工作樹根目錄的 `runtime_data/`。
 - 介面設定異動立即儲存。寫入時讀取檔案並合併不同欄位的異動，以保留外部編輯；這不會即時套用其他實例的角色參數。同一欄位有不同修改時，保留檔案並提示衝突。
 - 儲存失敗仍會在設定頁顯示錯誤與重試操作。詳細目錄與遷移方式見 [系統架構與資料清單](docs/SYSTEM-INVENTORY.md)。
 
@@ -119,11 +119,11 @@ pre-commit 執行機密、型別及語系鍵檢查；pre-push 執行所有追蹤
 
 ## 啟動參數(環境變數)
 
-啟動時可用環境變數調整行為,例如 `VRM_PET_DATA_DIR=/tmp/pets npm run dev`:
+啟動時可用環境變數調整行為,例如 `VRM_PET_DATA_DIR=/tmp/3D-pet/test-instance npm run dev`:
 
 | 變數 | 值 | 作用 |
 |---|---|---|
-| `VRM_PET_DATA_DIR` | 路徑 | 覆寫本地執行資料目錄（啟動設定、對話及快取）；不會自動隔離共用角色與資產。隔離測試時，另設 `VRM_PET_SHARED_CHARACTERS` 指向測試用角色 YAML |
+| `VRM_PET_DATA_DIR` | 路徑 | 覆寫本地資料根目錄；設定與 SQLite 在 `runtime_data/`，日誌等在 `3D-pet/instances/`。不隔離共用角色與資產，測試另設 `VRM_PET_SHARED_CHARACTERS` |
 | `VRM_PET_AGENT_SELFTEST` | `1` \| `claude` \| `codex` \| `agy` | Headless 回歸自驗(不開視窗,跑完即退出)。`1`=MockProvider 全鏈自驗,不耗額度;`claude`/`codex`/`agy`=對真 CLI 跑 e2e,**會耗訂閱額度**,顯式觸發才跑 |
 | `VRM_PET_AGENT_MOCK` | `1` | 所有寵物改用假 agent(照腳本吐事件),正常開視窗走完整 UI 鏈路,驗 UI 不耗額度 |
 | `VRM_PET_AGENT_DEBUG` | `1` | 把 agent 子行程的 argv 與收發 payload 印到終端機,除錯串接問題用 |
@@ -167,3 +167,16 @@ npm run check:secrets:all                                                 # 掃�
 ## 授權
 
 程式碼採 [MIT License](LICENSE)。VRM 範例模型(`AvatarSample_A`)為 VRoid 官方範例,依其原始授權使用;自行放入的模型與動作檔依各自作者授權。
+
+### 本地設定與歷史儲存
+
+- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（含 SQLite 的 WAL／SHM 檔）。
+- 日誌、PID、快取及臨時附件：`<worktree>/3D-pet/instances/`，均不進 Git。只有 Unix socket 路徑超過平台長度限制時，通訊暫存退回 `/tmp/3D-pet/instances/`。
+- 對話保存最近 30 天，每秒保存串流、結束立即保存；開新對話保留舊歷史，但泡泡只回填目前對話最後一輪。不保存附件二進位或完整工具輸出。
+- `app.yaml` 仍是設定唯一依據；SQLite 只保留前兩次不同版本，不包含目前版本。原有共用角色備份與遷移備份不裁剪。
+- 日誌按 UTC 日分檔，啟動及每日清除超過 30 天的日期檔；同日檔以整日保留。只清理本專案已知日誌檔名。
+- 首次啟動自動從舊 `/tmp` 工作樹實例複製設定及匯入期限內的對話；舊實例須先結束。已有新設定不覆蓋，來源檔與舊備份保留；舊 JSON 只有最後一輪，無法恢復更早內容。
+- `VRM_PET_DATA_DIR` 覆寫根目錄，之下建立 `runtime_data/` 與 `3D-pet/instances/`；共用角色與資產不受影響。測試另設 `VRM_PET_SHARED_CHARACTERS`。
+- 安裝版未指定覆寫時，設定仍在系統產品資料目錄的 `runtime-data/`，共用角色、模型與動作位置不變。
+- 可用 `node scripts/data-dir.mjs config`、`database`、`logs` 或 `pid` 查詢精確路徑。
+- `npm ci` 及 `postinstall` 會為 Electron 重建 SQLite 原生模組；升級 Electron 時，須同步 `.npmrc` 的 `target`。儲存整合測試在 Electron 中執行，避免與系統 Node ABI 混用。

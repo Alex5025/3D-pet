@@ -24,7 +24,7 @@ export function helperScriptPath(file: string): string {
 export function localSocketPath(name: string, unixDirectory: string): string {
   return process.platform === 'win32'
     ? `\\\\.\\pipe\\vrm-pet-${name}`
-    : join(unixDirectory, `${name}.sock`);
+    : join(unixDirectory, 's');
 }
 
 export function overlayPlatformOptions(): Partial<BrowserWindowConstructorOptions> {

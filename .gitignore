@@ -3,9 +3,7 @@ out
 release
 .DS_Store
 config.json
-runtime-data/*.json
-runtime-data/pets/
-runtime-data/transcripts/
+/runtime-data/
 models/*
 !models/AvatarSample_A.vrm
 motions/
@@ -16,3 +14,8 @@ extract-yourmom/.venv/
 extract-yourmom/*.vrm
 extract-yourmom/vrma/
 .idea/
+
+# 每個 worktree 的長期資料及執行暫存
+/runtime_data/*
+!/runtime_data/README.md
+/3D-pet/instances/

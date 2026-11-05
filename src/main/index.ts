@@ -29,6 +29,7 @@ const paths: Paths = createPaths({
 });
 const characters: Characters = createCharacters({
   get runtimeDataDir() { return paths.runtimeDataDir; },
+  get history() { return paths.history; },
   get settingsWin() { return windows.settingsWin; },
   get sendRefFiles() { return references.sendRefFiles; },
   get defaultVrmPath() { return paths.defaultVrmPath; },
@@ -70,8 +71,7 @@ const tray: TrayService = createTray({
 });
 const chat: Chat = createChat({
   get win() { return windows.win; },
-  get transcriptsDir() { return paths.transcriptsDir; },
-  get transcriptPath() { return paths.transcriptPath; },
+  get history() { return paths.history; },
   get getPet() { return characters.getPet; },
   get finishLedgerTask() { return control.finishLedgerTask; },
   get scheduleControlStatus() { return control.scheduleControlStatus; },
@@ -106,7 +106,7 @@ const lifecycle: Lifecycle = createLifecycle({
     for (const service of [ipcOverlay, ipcPets, ipcReferences, ipcChat, ipcSettings, ipcControl, ipcMenu, power, drop, motions, control, tray]) service.dispose();
   },
   stopAgents: () => chat.dispose(),
-  closeWindows: () => windows.dispose(),
+  closeWindows: () => { paths.dispose(); windows.dispose(); },
   get persistConfigSync() { return characters.persistConfigSync; },
   get pets() { return characters.pets; },
 });
@@ -166,7 +166,7 @@ const ipcChat: IpcChat = createIpcChat({
   get bridge() { return chat.bridge; },
   get liveTranscripts() { return chat.liveTranscripts; },
   get completedTranscripts() { return chat.completedTranscripts; },
-  get transcriptPath() { return paths.transcriptPath; },
+  get history() { return paths.history; },
   get settingsWin() { return windows.settingsWin; },
   get controlWin() { return windows.controlWin; },
   get petRefFiles() { return references.petRefFiles; },
@@ -251,6 +251,7 @@ app.whenReady().then(async () => {
   }
   if (process.platform === 'darwin') app.dock?.hide();
   try {
+    paths.start();
     characters.prepareStore();
     await paths.ensureDefaultVrm();
     await characters.loadConfig();

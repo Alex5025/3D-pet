@@ -1,8 +1,10 @@
 import { readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { dataDir } from './data-dir.mjs';
+import { layout, projectDir } from './data-dir.mjs';
+import { legacyDataDir, prepareStorage } from './storage-layout.mjs';
 
-const pidFile = join(dataDir(), 'runtime-data', 'pet-system.pid');
+const paths = layout();
+prepareStorage(paths, legacyDataDir(projectDir));
+const pidFile = paths.pid;
 
 try {
   const pid = Number.parseInt((await readFile(pidFile, 'utf8')).trim(), 10);
