@@ -10,18 +10,24 @@ import type { PetProfile } from '../preload/index';
 
 let root: HTMLDivElement | null = null;
 let closeListener: ((event: MouseEvent) => void) | null = null;
+let resizeListener: (() => void) | null = null;
+let menuRequest = 0;
 
 export function isPetMenuOpen(): boolean {
   return root !== null;
 }
 
 export function closePetMenu(): void {
-  if (!root) return;
-  root.remove();
+  menuRequest += 1;
+  root?.remove();
   root = null;
   if (closeListener) {
     document.removeEventListener('mousedown', closeListener, true);
     closeListener = null;
+  }
+  if (resizeListener) {
+    window.removeEventListener('resize', resizeListener);
+    resizeListener = null;
   }
 }
 
@@ -47,28 +53,48 @@ export interface PetMenuOptions {
   avatar?: string;
 }
 
-function clampToViewport(anchorX: number, anchorY: number): void {
+type MenuWorkArea = Awaited<ReturnType<typeof window.pet.getMenuWorkArea>>;
+
+function clampToViewport(anchorX: number, anchorY: number, workArea: MenuWorkArea): void {
   if (!root) return;
+  const leftEdge = Math.max(0, workArea?.x ?? 0) + 8;
+  const topEdge = Math.max(0, workArea?.y ?? 0) + 8;
+  const rightEdge = Math.min(innerWidth, workArea ? workArea.x + workArea.width : innerWidth) - 8;
+  const bottomEdge = Math.min(innerHeight, workArea ? workArea.y + workArea.height : innerHeight) - 8;
+  const availableWidth = Math.max(0, rightEdge - leftEdge);
+  root.style.minWidth = `${Math.min(200, availableWidth)}px`;
+  root.style.maxWidth = `${Math.min(280, availableWidth)}px`;
+  root.style.maxHeight = `${Math.max(0, bottomEdge - topEdge)}px`;
+  // 先移回可用區域量測，避免上一頁靠右的位置讓新頁寬度被壓縮。
+  root.style.left = `${leftEdge}px`;
+  root.style.top = `${topEdge}px`;
   const rect = root.getBoundingClientRect();
-  const left = Math.min(anchorX, innerWidth - rect.width - 8);
-  const top = Math.min(anchorY, innerHeight - rect.height - 8);
-  root.style.left = `${Math.max(8, left)}px`;
-  root.style.top = `${Math.max(8, top)}px`;
+  const left = anchorX + rect.width <= rightEdge ? anchorX : anchorX - rect.width;
+  const top = anchorY + rect.height <= bottomEdge ? anchorY : anchorY - rect.height;
+  root.style.left = `${Math.max(leftEdge, Math.min(left, rightEdge - rect.width))}px`;
+  root.style.top = `${Math.max(topEdge, Math.min(top, bottomEdge - rect.height))}px`;
 }
 
 export async function showPetMenu(x: number, y: number, petId: string, options: PetMenuOptions = {}): Promise<void> {
   closePetMenu();
+  const request = menuRequest;
   // 右鍵即選中(與原生 show-menu 行為一致),同時抓資料快照
-  const [collection, motions] = await Promise.all([
+  const [collection, motions, initialWorkArea] = await Promise.all([
     window.pet.getPetCollection(),
     window.pet.getMotionList(),
+    window.pet.getMenuWorkArea(),
   ]);
+  if (request !== menuRequest) return;
+  let workArea = initialWorkArea;
   void window.pet.selectPet(petId);
   const profile = collection.pets.find((item) => item.id === petId);
   if (!profile) return;
 
   root = document.createElement('div');
   root.className = 'pet-menu';
+  // 選單移到角色上方時，點擊與捲動不可穿到桌寵的拖曳／縮放處理。
+  root.addEventListener('mousedown', (event) => event.stopPropagation());
+  root.addEventListener('wheel', (event) => event.stopPropagation());
   document.body.append(root);
 
   const done = closePetMenu;
@@ -164,7 +190,7 @@ export async function showPetMenu(x: number, y: number, petId: string, options: 
       list.append(item);
     }
     root.append(list);
-    clampToViewport(x, y);
+    clampToViewport(x, y, workArea);
   };
 
   /* ── 主選單:天天用的四項 + 更多 ── */
@@ -263,6 +289,16 @@ export async function showPetMenu(x: number, y: number, petId: string, options: 
   };
 
   mainPage();
+
+  resizeListener = () => {
+    clampToViewport(x, y, workArea);
+    void window.pet.getMenuWorkArea().then((updated) => {
+      if (request !== menuRequest) return;
+      workArea = updated;
+      clampToViewport(x, y, workArea);
+    });
+  };
+  window.addEventListener('resize', resizeListener);
 
   // 點選單外任意處收合(捕獲階段,免得被其他 handler 吃掉)
   closeListener = (event: MouseEvent) => {

@@ -604,6 +604,19 @@ function loadSandboxSettings(): void {
 }
 
 /* ---------- 系統操作 ---------- */
+el('open-runtime-folder').addEventListener('click', async () => {
+  const button = el('open-runtime-folder') as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    const error = await window.pet.openRuntimeFolder();
+    if (error) await appDialog({ message: error, buttons: ['確定'], cancelId: 0 });
+  } catch {
+    await appDialog({ message: '無法開啟執行資料夾，請稍後重試。', buttons: ['確定'], cancelId: 0 });
+  } finally {
+    button.disabled = false;
+  }
+});
+
 el('system-restart').addEventListener('click', () => window.pet.systemRestart());
 el('system-quit').addEventListener('click', async () => {
   if (await appDialog({ message: t('control.confirmQuit'), buttons: [t('quit.cancel'), t('quit.confirm')], cancelId: 0 }) === 1) window.pet.systemQuit();

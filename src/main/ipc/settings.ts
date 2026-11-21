@@ -1,10 +1,11 @@
-import { BrowserWindow, Tray, app, dialog } from 'electron';
+import { BrowserWindow, Tray, app, dialog, shell } from 'electron';
 import { readFile, stat } from 'node:fs/promises';
 import { parseCharacterExport, type CharacterFileResult } from '../../shared/character';
 import { LOCALES, getLocale, resolveLocale, setLocale, t, type Locale } from '../../shared/i18n';
 import type { ProjectSandboxSettingsInput, ProjectSandboxSettingsResult } from '../../shared/sandboxSettings';
 import type { AgentBridge } from '../agent/bridge';
 import { appPrompt } from '../appPrompt';
+import { runtimeLayout } from '../runtimeStorage';
 import { CharacterStore, applyCharacter, atomicYaml, parseCharacterYaml } from '../characterStore';
 import { createResourceScope } from '../resourceScope';
 import type { AppRegistry, PetProfile } from '../runtimeTypes';
@@ -100,9 +101,9 @@ export function createIpcSettings(deps: IpcSettingsDeps) {
             applyCharacter(profile, imported.parameters);
             profile.characterRevision = (profile.characterRevision ?? 0) + 1;
             deps.persistConfigSync();
-            deps.sendPetProfiles();
             if (deps.storageError) throw new Error(deps.storageError);
             deps.scheduleIdleMotion(id);
+            deps.sendPetProfiles();
           }
           return { ok: true };
         } catch (error) {
@@ -123,6 +124,30 @@ export function createIpcSettings(deps: IpcSettingsDeps) {
       if (![deps.win?.webContents, deps.settingsWin?.webContents, deps.controlWin?.webContents].includes(event.sender)) return false;
       const profile = deps.getPet(id);
       return profile && typeof path === 'string' ? deps.selectProject(profile, path) : false;
+    });
+
+    scope.ipc.handle('open-runtime-folder', async (event): Promise<string> => {
+      if (!deps.controlWin || event.sender !== deps.controlWin.webContents) return '未授權視窗';
+      try {
+        const error = await shell.openPath(runtimeLayout().runtime);
+        return error ? `無法開啟執行資料夾：${error}` : '';
+      } catch {
+        return '無法開啟執行資料夾，請稍後重試。';
+      }
+    });
+
+    scope.ipc.handle('open-workspace', async (event, id: string): Promise<string> => {
+      if (!deps.settingsWin || event.sender !== deps.settingsWin.webContents) return '未授權視窗';
+      const profile = deps.getPet(id);
+      const path = profile?.workspacePath;
+      if (!path || !profile.projects?.some((project) => project.workspacePath === path)) return '尚未選擇專案';
+      try {
+        if (!(await stat(path)).isDirectory()) return '專案路徑不是資料夾';
+        const error = await shell.openPath(path);
+        return error ? `無法開啟專案資料夾：${error}` : '';
+      } catch {
+        return '專案資料夾不存在或無法存取，請確認工作目錄。';
+      }
     });
 
     scope.ipc.handle('choose-workspace', (event, id: string) => {

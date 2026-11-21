@@ -239,6 +239,10 @@
         border-radius: 14px;
         background: var(--bg-card);
       }
+      .workspace-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+      .workspace-heading .workspace-label { margin: 0; }
+      .workspace-heading button.wide { flex: none; width: auto; margin: 0; padding: 5px 10px; font-size: 12px; }
+      #open-workspace:disabled { opacity: 0.55; cursor: default; }
       .workspace-label { margin-bottom: 5px; color: var(--text-2); font-size: 12px; }
       .field { display: block; margin-bottom: 11px; color: var(--text-2); }
       .field > span { display: block; margin-bottom: 4px; font-size: 12px; }
@@ -260,6 +264,8 @@
         overflow-wrap: anywhere;
         user-select: text;
       }
+      .project-field { margin-top: 12px; margin-bottom: 0; }
+      #project-select { display: block; max-width: 100%; text-overflow: ellipsis; }
       #workspace-path.empty { color: var(--text-3); }
       #change-workspace[disabled],
       #change-workspace-root[disabled] { opacity: 0.55; cursor: wait; }
@@ -471,10 +477,15 @@
             <input class="text-input" id="agent-session-id" type="text" maxlength="160" placeholder="例如：019f…" spellcheck="false" />
           </label>
           <button class="wide" id="new-session" style="margin: 0 0 12px;" data-i18n="settings.newSession">開新對話（清空上下文）</button>
-          <div class="workspace-label" data-i18n="settings.workspace">工作目錄</div>
+          <div class="workspace-heading">
+            <div class="workspace-label" data-i18n="settings.workspace">工作目錄</div>
+            <button class="wide" id="open-workspace" type="button" disabled>開啟資料夾</button>
+          </div>
           <code id="workspace-path" class="empty" data-i18n="settings.noWorkspace">尚未選擇工作目錄</code>
-          <label for="project-select">目前專案</label>
-          <select id="project-select" class="wide" aria-label="目前專案"></select>
+          <label class="field project-field" for="project-select">
+            <span>目前專案</span>
+            <select id="project-select" class="text-input" aria-label="目前專案"></select>
+          </label>
           <button class="wide" id="change-workspace">選擇工作目錄…</button>
         </div>
 

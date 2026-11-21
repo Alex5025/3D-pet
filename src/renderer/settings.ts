@@ -144,6 +144,7 @@ function renderWorkSettings(): void {
   const path = el('workspace-path');
   path.textContent = profile?.workspacePath ?? t('settings.noWorkspace');
   path.classList.toggle('empty', !profile?.workspacePath);
+  (el('open-workspace') as HTMLButtonElement).disabled = !profile?.workspacePath;
   el('change-workspace').textContent = '新增負責專案…';
   const projects = el('project-select') as HTMLSelectElement;
   projects.replaceChildren(...(profile?.projects ?? []).map((project) => {
@@ -349,6 +350,21 @@ el('project-select').addEventListener('change', async () => {
   if (!profile) return;
   await savePersona(); flushPendingAppearance();
   await window.pet.selectProject(profile.id, (el('project-select') as HTMLSelectElement).value);
+});
+
+el('open-workspace').addEventListener('click', async () => {
+  const profile = selectedProfile();
+  if (!profile?.workspacePath) return;
+  const button = el('open-workspace') as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    const error = await window.pet.openWorkspace(profile.id);
+    if (error) await appDialog({ message: error, buttons: ['確定'], cancelId: 0 });
+  } catch {
+    await appDialog({ message: '無法開啟專案資料夾，請稍後重試。', buttons: ['確定'], cancelId: 0 });
+  } finally {
+    button.disabled = !selectedProfile()?.workspacePath;
+  }
 });
 
 el('change-workspace').addEventListener('click', async () => {

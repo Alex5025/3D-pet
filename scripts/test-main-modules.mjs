@@ -97,6 +97,34 @@ try {
   }
   // 執行中的泡泡設定也必須保存，並在新設定寫入後等待舊 session 關閉。
   const activePet = { id: 'fox', name: '狐狸', workspacePath: '/project', agent: { kind: 'codex', sessionId: 'existing' } };
+  // 右鍵選單使用實際內容起點與工作區；包含 macOS 下移、負座標螢幕與頁面縮放。
+  let menuBounds = { x: 0, y: 38, width: 1440, height: 900 };
+  let menuWorkArea = { x: 0, y: 38, width: 1440, height: 790 };
+  let menuZoom = 1;
+  let menuDestroyed = false;
+  const menuWindow = {
+    isDestroyed: () => menuDestroyed,
+    getContentBounds: () => menuBounds,
+    webContents: { getZoomFactor: () => menuZoom },
+  };
+  api.screen.getDisplayMatching = (bounds) => {
+    assert.deepEqual(bounds, menuBounds);
+    return { workArea: menuWorkArea };
+  };
+  const menuIpc = api.createIpcMenu({ win: menuWindow });
+  await menuIpc.start();
+  const readMenuArea = api.ipcMain.handlers.get('get-menu-work-area');
+  const menuEvent = { sender: menuWindow.webContents };
+  assert.deepEqual(readMenuArea(menuEvent), { x: 0, y: 0, width: 1440, height: 790 });
+  menuBounds = { x: -1440, y: -900, width: 1440, height: 900 };
+  menuWorkArea = { x: -1380, y: -862, width: 1380, height: 862 };
+  menuZoom = 2;
+  assert.deepEqual(readMenuArea(menuEvent), { x: 30, y: 19, width: 690, height: 431 });
+  assert.equal(readMenuArea({ sender: {} }), null, '只有疊層可讀選單範圍');
+  menuDestroyed = true;
+  assert.equal(readMenuArea(menuEvent), null, '已關閉視窗不可讀取');
+  menuIpc.dispose();
+
   const sharedMotions = join(scratch, 'shared-motions');
   await mkdir(sharedMotions);
   const poseData = Buffer.from('共用預設姿勢');

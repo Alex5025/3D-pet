@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu } from 'electron';
+import { BrowserWindow, Menu, screen } from 'electron';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createResourceScope } from '../resourceScope';
@@ -24,6 +24,21 @@ export function createIpcMenu(deps: IpcMenuDeps) {
 
   async function start() {
     if (!scope.start()) return;
+
+    scope.ipc.handle('get-menu-work-area', (event) => {
+      const win = deps.win;
+      if (!win || win.isDestroyed() || event.sender !== win.webContents) return null;
+      const bounds = win.getContentBounds();
+      const { workArea } = screen.getDisplayMatching(bounds);
+      const zoom = win.webContents.getZoomFactor();
+      // macOS 可能把全螢幕大小的疊層往下移；以實際內容起點換算，並避開 Dock／工作列。
+      return {
+        x: (workArea.x - bounds.x) / zoom,
+        y: (workArea.y - bounds.y) / zoom,
+        width: workArea.width / zoom,
+        height: workArea.height / zoom,
+      };
+    });
 
     scope.ipc.on('show-menu', (event, id: string) => {
       if (!deps.win || event.sender !== deps.win.webContents || !deps.pets.has(id)) return;

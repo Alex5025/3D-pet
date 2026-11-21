@@ -17,6 +17,7 @@ const profiles: PetProfile[] = [
 window.pet = {
   getPetCollection: async () => ({ pets: profiles, selectedPetId: 'p1' }),
   getMotionList: async () => ['wave.vrma', 'sit.vrma', 'dance.vrma'],
+  getMenuWorkArea: async () => ({ x: 0, y: 0, width: innerWidth, height: innerHeight }),
   selectPet: async (id: string) => (log('selectPet', id), null),
   playMotion: (id: string, file: string) => log('playMotion', id, file),
   stopMotion: (id: string) => log('stopMotion', id),

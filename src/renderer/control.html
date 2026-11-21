@@ -13,7 +13,7 @@
       h1 { margin: 0; font-size: 21px; }
       h2 { margin: 22px 0 8px; font-size: 14px; color: var(--text-2); }
       h2 .count { color: var(--text-3); font-weight: normal; }
-      .topbar { display: flex; align-items: center; gap: 10px; }
+      .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
       .topbar .spacer { flex: 1; }
       .topbar #ui-locale { min-height: 30px; width: auto; }
       button { min-height: 30px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text-1); background: var(--bg-card); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
@@ -159,6 +159,7 @@
           <option value="ja">日本語</option>
           <option value="ko">한국어</option>
         </select>
+        <button id="open-runtime-folder" title="開啟目前實例的設定與資料庫所在目錄">開啟執行資料夾</button>
         <button id="system-restart" data-i18n="tray.restartSystem">重啟寵物系統</button>
         <button id="system-quit" class="danger" data-i18n="tray.quit">結束</button>
       </div>

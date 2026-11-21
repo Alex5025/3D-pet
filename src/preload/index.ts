@@ -135,6 +135,8 @@ const api = {
 
   showMenu: (petId: string) => ipcRenderer.send('show-menu', petId),
   /* 自繪右鍵選單(petMenu.ts)的動作:回 main 走與 Tray 選單相同的函式。 */
+  getMenuWorkArea: (): Promise<{ x: number; y: number; width: number; height: number } | null> =>
+    ipcRenderer.invoke('get-menu-work-area'),
   playMotion: (petId: string, file: string) => ipcRenderer.send('menu-play-motion', petId, file),
   stopMotion: (petId: string) => ipcRenderer.send('menu-stop-motion', petId),
   openSettings: (tab: 'light' | 'char' | 'motion' | 'project', petId: string) =>
@@ -146,6 +148,7 @@ const api = {
     ipcRenderer.on('switch-tab', (_event, tab) => callback(tab)),
 
   selectProject: (petId: string, workspacePath: string): Promise<boolean> => ipcRenderer.invoke('select-project', petId, workspacePath),
+  openWorkspace: (petId: string): Promise<string> => ipcRenderer.invoke('open-workspace', petId),
   chooseWorkspace: (petId: string): Promise<string | null> =>
     ipcRenderer.invoke('choose-workspace', petId),
   /** 角色分頁與桌寵右鍵選單的「選擇 VRM 檔」(開檔對話框由 main 處理)。 */
@@ -197,6 +200,7 @@ const api = {
     ipcRenderer.invoke('chat-unbound-remove', taskId),
   systemRestart: () => ipcRenderer.send('system-restart'),
   systemQuit: () => ipcRenderer.send('system-quit'),
+  openRuntimeFolder: (): Promise<string> => ipcRenderer.invoke('open-runtime-folder'),
 
   /* 參考檔案(拖放到寵物身上;當次對話有效,不落盤)。
    * Electron 33 已移除 File.path,取絕對路徑必須經 preload 的 webUtils。 */

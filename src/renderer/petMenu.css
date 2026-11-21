@@ -6,6 +6,8 @@
   position: fixed;
   z-index: 20;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   min-width: 200px;
   max-width: 280px;
   padding: 5px;
@@ -19,6 +21,8 @@
   line-height: 1.5;
   user-select: none;
 }
+
+.pet-menu > :not(.menu-list) { flex-shrink: 0; }
 
 .pet-menu .menu-head {
   display: flex;
@@ -73,9 +77,9 @@
   border-top: 1px solid var(--border);
 }
 
-/* 清單過長時可捲動(動作幾十個時);上限放寬到近整個螢幕高,主頁一般整頁可見 */
+/* 高度由可用螢幕區域限制；標頭／返回列固定，剩餘空間全部交給清單捲動。 */
 .pet-menu .menu-list {
-  max-height: calc(100vh - 120px);
+  min-height: 0;
   overflow-y: auto;
 }
 

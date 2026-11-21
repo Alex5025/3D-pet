@@ -93,6 +93,10 @@
   },
   {
     "kind": "handle",
+    "name": "get-menu-work-area"
+  },
+  {
+    "kind": "handle",
     "name": "get-state"
   },
   {
@@ -154,6 +158,14 @@
   {
     "kind": "on",
     "name": "pet-rects"
+  },
+  {
+    "kind": "handle",
+    "name": "open-runtime-folder"
+  },
+  {
+    "kind": "handle",
+    "name": "open-workspace"
   },
   {
     "kind": "on",
