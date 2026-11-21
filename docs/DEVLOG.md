@@ -1084,3 +1084,37 @@ resourceScope 管理 IPC listener／handler、事件監聽與計時器；start �
 工作樹設定移至 `runtime_data/app.yaml`，近 30 天對話及前兩次設定版本存入同目錄 SQLite。對話串流每秒保存，退出／重啟保留中斷狀態，開新對話不立即刪除舊歷史。設定採待完成紀錄搭配 YAML 原子替換，重啟可對齊版本。
 
 日誌、PID、快取與臨時附件分離至 `3D-pet/instances/`，日誌按 UTC 日輪替並清理超過 30 天的日期檔。啟動、重啟、清理與 Electron 共用路徑規則。舊 `/tmp` 實例設定與對話只複製／匯入，原檔保留，不覆蓋已存在的新設定。SQLite 原生模組依 Electron ABI 重建與解包。
+
+
+## 2026-11-11：依生效時機拆分啟動與即時設定
+
+`app.yaml` 升級為 schemaVersion 3，只保留 port 與共用角色資料庫路徑，修改後重啟生效。啟用／選取角色、專案分配、Agent 模型／推理強度／權限／Session、位置、語言及預設工作根目錄移至本地 `history.sqlite`。角色個性、VRM 引用及外觀參數移至共用 `characters.sqlite`，保留穩定角色 ID 及跨實例欄位合併。角色匯出／匯入格式仍為 YAML。
+
+即時儲存不再讀寫啟動 YAML。以 ATTACH、DELETE journal 及 FULL synchronous 將本地／共用變更放在同一交易，提交成功才廣播及執行副作用；失敗還原記憶體及角色暫存。開新對話的 Session 與對話索引一起提交。舊 YAML 與獨立備份保留，首次匯入有完成標記，中斷重試不覆蓋已提交資料；舊專案綁定表不再持續同步。
+
+驗證涵蓋舊格式遷移與離線工作區、SQLite 資料重啟回填、啟動 YAML 外部修改與即時更新互不覆蓋、共用設定衝突合併，以及故障注入下的跨資料庫／記憶體／新對話回滾。真實 Electron 使用隔離目錄及 Mock Provider 驗證啟動、Session 保留、對話、設定寫入與重啟；不變更日常資料。
+
+## 2026-11-16：桌寵螢幕截圖
+
+對話泡泡新增「📷 截圖」，使用 Electron `desktopCapturer` 單次擷取游標所在的螢幕，以 JPEG 附件接入既有圖片管線。截圖與貼上的圖片先預覽，Enter 才送出；最多 4 張，單張 8 MiB。主程序限制疊層主框架與啟用中的角色呼叫，避免並行擷取；macOS 權限不足、空圖與螢幕對應失敗皆回報，不靜默改送另一個螢幕。切換專案或銷毀泡泡時，丟棄尚未完成的附件讀取。Claude 唯讀且啟用寵物工具時，圖片訊息也允許 Read 讀取暫存附件。
+
+驗證：typecheck、build、語系檢查、主程序 IPC 與截圖回歸測試通過；Electron 受控圖片驗證預覽、附件上限、送出及非同步清理，開發伺服器的 vrmtest.html 模型載入通過。實際 Codex provider 成功辨識測試圖片文字與紅／藍／綠圖形。此機 macOS 尚未允許開發版 Electron 擷取螢幕，實機已驗證權限提示；使用者選擇稍後開啟，因此不宣稱全螢幕擷取已通過。測試資料與預覽放在 `/tmp/3D-pet/screen-verification/`，日常設定未修改。
+
+### AI 自主觸發截圖
+
+新增 `pet_capture_screen` 至 Codex／Claude 共用的桌寵 MCP。工具經 socket 呼叫主程序，直接以 MCP image content 回傳圖片；不經輸入框預覽或 Enter 送出。主程序僅允許啟用角色的執行中對話，擷取前後檢查同一輪仍有效，取消／休眠後丟棄圖片；手動截圖與 AI 工具共用擷取鎖。泡泡顯示查看狀態與失敗原因，權限不足不回傳假畫面。
+
+兩家 provider 注入主動使用螢幕工具的指示；Codex 的既有對話透過上下文同步更新。新增真實 MCP stdio/socket 測試，覆蓋工具探索、大圖片回傳、權限錯誤、token 驗證、閒置／休眠拒絕及取消清理。實際 Codex 在新建與恢復對話中，皆能依畫面問題自行呼叫工具，辨識受控圖片的文字與三種圖形；結果存於 `/tmp/3D-pet/agent-screen-verification/result.json`。macOS 全螢幕擷取仍待使用者稍後開啟權限；Antigravity 尚未接入此桌寵 MCP。
+
+
+### 0.1.1 macOS 交付包（2026-11-16）
+
+版本升為 0.1.1，使用 `npm run dist:mac -- --arm64 --publish never --config.directories.output=release/0.1.1` 產生 Apple Silicon DMG／ZIP。保留舊版交付包。新 App 的主程序、preload 與桌寵 MCP helper 已比對來源雜湊；打包 App 在隔離資料與精簡 PATH 下完成模型載入、截圖 UI/API、SQLite 初始化及 Mock 對話，自帶 Agent selftest PASS。DMG 校驗、ZIP 完整性與兩個封裝內主要資產的一致性皆通過；附交付說明與 SHA-256。此機無 Developer ID 憑證，未簽署／公證；不覆寫現有安裝。全螢幕擷取權限仍由使用者稍後開啟。
+
+### AI 截圖同步預覽（0.1.2）
+
+主程序成功完成 AI 截圖後，以既有對話事件同步相同圖片至指定角色與專案。泡泡沿用貼圖的縮圖樣式，顯示「AI 最新截圖」，回覆完成後保留，下一輪、新對話或切換專案時清空。執行中與剛完成的對話在記憶體中保留最新截圖，供切回專案或重建泡泡時回填；不寫入 SQLite，也不加入使用者的待送附件，避免下一句重複上傳。
+
+測試涵蓋 MCP 與泡泡取得同一圖片、專案隔離、執行中／完成回填、失敗與取消不推送新圖；Electron UI 驗證貼圖／AI 截圖同時預覽、草稿保留、附件送出隔離及清除時機。畫面預覽存於 `/tmp/3D-pet/ai-screen-preview.png`。
+
+0.1.2 已通過 typecheck、完整 npm test、語系檢查、建置及 vrmtest.html 模型載入回歸。Apple Silicon DMG／ZIP 位於 `release/0.1.2/`；打包 App 的隔離啟動、截圖預覽 UI、Mock 對話與 Agent selftest 通過，封裝內容與完整 out 建置雜湊一致。交付包尚無 Developer ID 簽署／公證；真實螢幕擷取仍待使用者開啟 macOS 權限。

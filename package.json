@@ -1,6 +1,6 @@
 {
   "name": "vrm-pet",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Desktop VRM pet — rendering follows pixiv/three-vrm official examples verbatim",
   "productName": "VRM Pet",
   "author": "3D-pet contributors",
