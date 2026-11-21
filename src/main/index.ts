@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { configureCliEnvironment } from './cliEnvironment';
 import { runAgentSelftest, runAgyE2E, runClaudeE2E, runCodexE2E } from './agent/selftest';
 import { appPrompt } from './appPrompt';
 import { createCharacters, type Characters } from './characters';
@@ -20,6 +21,7 @@ import { createReferences, type References } from './references';
 import { createTray, type TrayService } from './tray';
 import { createWindows, type Windows } from './windows';
 
+configureCliEnvironment();
 configureDataPaths();
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
@@ -157,9 +159,9 @@ const ipcReferences: IpcReferences = createIpcReferences({
   get sendRefFiles() { return references.sendRefFiles; },
 });
 const ipcChat: IpcChat = createIpcChat({
+  get newSession() { return characters.newSession; },
   get win() { return windows.win; },
   get pets() { return characters.pets; },
-  get newSession() { return characters.newSession; },
   get projectFor() { return characters.projectFor; },
   get getPet() { return characters.getPet; },
   get chatKey() { return chat.chatKey; },
