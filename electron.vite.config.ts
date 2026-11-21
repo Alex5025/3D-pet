@@ -50,7 +50,8 @@ export default defineConfig(({ command }) => ({
           index: resolve(__dirname, 'src/renderer/index.html'),
           settings: resolve(__dirname, 'src/renderer/settings.html'),
           control: resolve(__dirname, 'src/renderer/control.html'),
-          prompt: resolve(__dirname, 'src/renderer/prompt.html')
+          prompt: resolve(__dirname, 'src/renderer/prompt.html'),
+          petHouse: resolve(__dirname, 'src/renderer/petHouse.html')
         }
       }
     }
