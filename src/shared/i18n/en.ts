@@ -16,6 +16,8 @@ export const en = {
 
   'tray.currentPet': 'Pet: {name}',
   'tray.switchPet': 'Switch Pet',
+  'tray.houseRead': 'Read in the pet house',
+  'tray.houseRecall': 'Call pet out',
   'tray.chooseVrm': 'Choose VRM File…',
   'tray.motions': 'Character Motions',
   'tray.playMotion': 'Play Motion',

@@ -16,6 +16,8 @@ export const ko = {
 
   'tray.currentPet': '펫: {name}',
   'tray.switchPet': '펫 전환',
+  'tray.houseRead': '작은 집에서 책 읽기',
+  'tray.houseRecall': '펫 불러내기',
   'tray.chooseVrm': 'VRM 파일 선택…',
   'tray.motions': '캐릭터 모션',
   'tray.playMotion': '모션 재생',

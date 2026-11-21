@@ -35,6 +35,7 @@ const projectedCorner = new THREE.Vector3();
 const dragDirection = new THREE.Vector3();
 
 let interactive = false;
+let housePetId: string | null = null;
 let visiblePetId: string | null = null;
 let bubbleHideTimer: ReturnType<typeof setTimeout> | null = null;
 let heldBubblePetId: string | null = null;
@@ -331,6 +332,7 @@ function addRuntime(profile: PetProfile): void {
   const viewer = createViewer({ transparent: true });
   if (powerProfile) viewer.setPowerProfile(powerProfile); // 晚加入的寵物補套當前檔位
   viewer.renderer.domElement.dataset['petId'] = profile.id;
+  viewer.renderer.domElement.style.visibility = housePetId === profile.id ? 'hidden' : '';
   const runtime: PetRuntime = {
     profile,
     viewer,
@@ -496,6 +498,19 @@ window.pet.onLocale((next) => {
   }
 });
 
+window.pet.onHousePresence((id, request) => {
+  const current = id ? runtimes.get(id) : undefined;
+  // 面板開啟時不打斷對話或核准流程；關閉後可再從選單回家。
+  if (id && (!current || current.bubble.isPinned() || visiblePetId === id || interactionRuntime === current)) {
+    window.pet.housePresenceApplied(request, false);
+    return;
+  }
+  housePetId = id;
+  for (const [petId, runtime] of runtimes) {
+    runtime.viewer.renderer.domElement.style.visibility = petId === id ? 'hidden' : '';
+  }
+  window.pet.housePresenceApplied(request, true);
+});
 window.pet.onPetProfiles((profiles) => reconcileProfiles(profiles));
 window.pet.onPetRestart(restartRuntime);
 window.pet.getPetCollection().then(({ pets }) => reconcileProfiles(pets));
@@ -629,7 +644,7 @@ function refreshOrderedRuntimes(): void {
 
 function runtimeAt(x: number, y: number): PetRuntime | null {
   for (const runtime of orderedRuntimes) {
-    if (!runtime.baseBoxReady) continue;
+    if (runtime.profile.id === housePetId || !runtime.baseBoxReady) continue;
     ndc.set((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1));
     raycaster.setFromCamera(ndc, runtime.viewer.camera);
     transformedBox.copy(runtime.baseBox).applyMatrix4(runtime.viewer.root.matrixWorld);

@@ -124,6 +124,12 @@ const api = {
     ipcRenderer.on('pet-profiles-apply', (_event, pets, selectedPetId) => callback(pets, selectedPetId)),
   onSelectedPet: (callback: (petId: string) => void) =>
     ipcRenderer.on('selected-pet-apply', (_event, petId) => callback(petId)),
+  onHousePresence: (callback: (petId: string | null, request: number) => void) =>
+    ipcRenderer.on('pet-house-presence', (_event, petId, request) => callback(petId, request)),
+  housePresenceApplied: (request: number, ready: boolean) =>
+    ipcRenderer.send('pet-house-presence-applied', request, ready),
+  getHouseModel: (): Promise<ArrayBuffer | null> => ipcRenderer.invoke('get-pet-house-model'),
+  houseSceneReady: (ready: boolean) => ipcRenderer.send('pet-house-scene-ready', ready),
   onPetRestart: (callback: (petId: string) => void) =>
     ipcRenderer.on('pet-runtime-restart', (_event, petId) => callback(petId)),
 

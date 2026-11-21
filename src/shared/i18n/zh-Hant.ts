@@ -16,6 +16,8 @@ export const zhHant = {
   // ── Tray 選單 ──
   'tray.currentPet': '寵物：{name}',
   'tray.switchPet': '切換寵物',
+  'tray.houseRead': '回小屋看書',
+  'tray.houseRecall': '叫寵物出來',
   'tray.chooseVrm': '選擇 VRM 檔…',
   'tray.motions': '角色動作',
   'tray.playMotion': '播放動作',

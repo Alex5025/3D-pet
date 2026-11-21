@@ -16,6 +16,8 @@ export const ja = {
 
   'tray.currentPet': 'ペット:{name}',
   'tray.switchPet': 'ペットを切り替え',
+  'tray.houseRead': '小さな家で読書する',
+  'tray.houseRecall': 'ペットを呼び出す',
   'tray.chooseVrm': 'VRM ファイルを選択…',
   'tray.motions': 'キャラクターモーション',
   'tray.playMotion': 'モーションを再生',

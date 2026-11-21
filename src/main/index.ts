@@ -15,6 +15,7 @@ import { createIpcSettings, type IpcSettings } from './ipc/settings';
 import { createLifecycle, type Lifecycle } from './lifecycle';
 import { createMotions, type Motions } from './motions';
 import { configureDataPaths, createPaths, type Paths } from './paths';
+import { createPetHouse } from './petHouse';
 import { createPower, type Power } from './power';
 import { createReferences, type References } from './references';
 import { createTray, type TrayService } from './tray';
@@ -50,7 +51,15 @@ const windows: Windows = createWindows({
   get selectPet() { return characters.selectPet; },
   get registry() { return characters.registry; },
 });
+const petHouse = createPetHouse({
+  get overlay() { return windows.win; },
+  get getPet() { return characters.getPet; },
+  get defaultVrmPath() { return paths.defaultVrmPath; },
+  refresh: () => tray.refreshTray(),
+});
 const tray: TrayService = createTray({
+  housePet: () => petHouse.petId,
+  toggleHouse: (id) => petHouse.toggle(id),
   get registry() { return characters.registry; },
   get getPet() { return characters.getPet; },
   get pets() { return characters.pets; },
@@ -103,6 +112,7 @@ const drop: Drop = createDrop({
 });
 const lifecycle: Lifecycle = createLifecycle({
   stopBackground: () => {
+    petHouse.dispose();
     for (const service of [ipcOverlay, ipcPets, ipcReferences, ipcChat, ipcSettings, ipcControl, ipcMenu, power, drop, motions, control, tray]) service.dispose();
   },
   stopAgents: () => chat.dispose(),
@@ -264,6 +274,7 @@ app.whenReady().then(async () => {
   await chat.start();
   await motions.start();
   windows.createOverlay();
+  petHouse.start();
   await ipcOverlay.start();
   await ipcPets.start();
   await ipcReferences.start();
