@@ -200,7 +200,9 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
         if (hub && opts?.petId) args.push('--allowedTools', 'mcp__pettools__*');
       } else if (hub && opts?.petId) {
         // 唯讀但保留寵物工具:dontAsk 靜默拒絕其他工具,白名單放行 pettools
-        args.push('--permission-mode', 'dontAsk', '--allowedTools', 'mcp__pettools__*', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
+        args.push('--permission-mode', 'dontAsk', '--allowedTools',
+          pastedImagePaths.length ? 'mcp__pettools__*,Read' : 'mcp__pettools__*',
+          '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
       } else if (pastedImagePaths.length) {
         // 貼圖要讓 Claude 的 Read 工具取得暫存檔，但仍禁止寫入、執行與網路工具。
         args.push('--permission-mode', 'dontAsk', '--allowedTools', 'Read', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch');
@@ -215,7 +217,7 @@ export function createClaudeProvider(hub: PetToolsHub | null = null): AgentProvi
       {
         const parts: string[] = [];
         if (opts?.persona) parts.push(`${t('prompt.petPreamble')}${t('prompt.personaIntro')}\n${opts.persona}`);
-        if (hub && opts?.petId) parts.push(t('prompt.performanceRules'));
+        if (hub && opts?.petId) parts.push(t('prompt.performanceRules'), t('prompt.screenVision'));
         const refs = refFilesPrompt(opts?.refFiles);
         if (refs) parts.push(refs);
         if (parts.length) args.push('--append-system-prompt', parts.join('\n'));

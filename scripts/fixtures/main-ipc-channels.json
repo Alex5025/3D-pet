@@ -29,6 +29,10 @@
   },
   {
     "kind": "handle",
+    "name": "chat-capture-screen"
+  },
+  {
+    "kind": "handle",
     "name": "chat-queue-get"
   },
   {
@@ -89,11 +93,11 @@
   },
   {
     "kind": "handle",
-    "name": "get-pet-collection"
+    "name": "get-menu-work-area"
   },
   {
     "kind": "handle",
-    "name": "get-menu-work-area"
+    "name": "get-pet-collection"
   },
   {
     "kind": "handle",
@@ -156,16 +160,16 @@
     "name": "open-external"
   },
   {
-    "kind": "on",
-    "name": "pet-rects"
-  },
-  {
     "kind": "handle",
     "name": "open-runtime-folder"
   },
   {
     "kind": "handle",
     "name": "open-workspace"
+  },
+  {
+    "kind": "on",
+    "name": "pet-rects"
   },
   {
     "kind": "on",

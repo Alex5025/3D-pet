@@ -345,6 +345,7 @@ function addRuntime(profile: PetProfile): void {
       workspacePath: profile.workspacePath,
       requestInputFocus: () => window.pet.setInputMode(true),
       releaseInputFocus: () => { void window.pet.setInputMode(false); },
+      onCaptureScreen: () => window.pet.captureScreen(profile.id),
       onSend: (text, images) => {
         const current = runtimes.get(profile.id);
         if (!current) return;
@@ -557,6 +558,7 @@ function hydrateProject(runtime: PetRuntime): void {
     if (transcript?.running) {
       runtime.bubble.beginTurn(transcript.user);
       runtime.bubble.appendText(transcript.reply);
+      runtime.bubble.setScreenPreview(transcript.screenPreview ?? null);
       if (transcript.pendingApproval) runtime.bubble.showApproval(transcript.pendingApproval.requestId, transcript.pendingApproval.description);
     } else if (transcript) runtime.bubble.restoreTranscript(transcript);
     for (const item of pending.events) if (item.revision > (transcript?.revision ?? -1)) handleChatEvent(id, item.event, path, item.revision);
@@ -586,6 +588,9 @@ function handleChatEvent(petId: string, event: BufferedEvent['event'], workspace
       break;
     case 'tool':
       bubble.setStatus(t('overlay.statusRunningTool', { name: event.name }));
+      break;
+    case 'screenCapture':
+      bubble.setScreenPreview(event.image);
       break;
     case 'text':
       bubble.setStatus(null);

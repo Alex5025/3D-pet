@@ -3,6 +3,8 @@
  * 對應 docs/AGENT-BRIDGE-DESIGN.md §3;跨 IPC 的 discriminated union 只維護這一份,避免雙份漂移。
  */
 
+import type { ChatImage } from './chat';
+
 export type AgentKind = 'codex' | 'claude' | 'agy';
 
 /** 權限等級:readonly=唯讀只回答(預設)/ ask=可寫工作目錄、危險操作經泡泡核准 / auto=自動執行並核准工具操作,不授予沙盒外權限(Codex) */
@@ -26,6 +28,7 @@ export type AgentEvent =
   | { kind: 'session'; sessionId: string } // 首個帶 session id 的事件;main 已回存 profile,renderer 僅供顯示用
   | { kind: 'thinking' } // 泡泡:「思考中…」
   | { kind: 'tool'; name: string } // 泡泡:「正在執行 ○○」(也用於「仍在執行…」看門狗提示)
+  | { kind: 'screenCapture'; image: ChatImage } // AI 已讀取的截圖，同步顯示在泡泡預覽
   | { kind: 'text'; text: string } // 助手回覆文字(增量或整段)
   | { kind: 'approval'; requestId: string; description: string } // v2:泡泡顯示 允許/拒絕
   | { kind: 'approvalResolved'; requestId: string } // 審批已由任一 UI(泡泡/中控)回覆:非終結事件,renderer 只收合審批 UI,不得 endTurn

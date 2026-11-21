@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { helperScriptPath, localSocketPath } from '../platform';
+import type { ScreenCaptureResult } from '../../shared/chat';
 
 /**
  * 寵物工具中樞(v3):petToolsServer.mjs(由各 CLI 以 MCP 掛載)經本機 socket 回連這裡,
- * 把 agent 的工具呼叫(播動作/切表情/說話)轉成對桌寵的實際操作。
+ * 把 agent 的工具呼叫(播動作/切表情/說話/看螢幕)轉成對桌寵的實際操作。
  * 一個 app 一個 hub;petId 由 MCP 腳本的 env 帶進來(每寵各自的 MCP 設定)。
  */
 
@@ -19,6 +20,8 @@ export interface PetToolsDeps {
   speak(petId: string, text: string): boolean;
   /** 可用動作檔清單(工具 enum 用)。 */
   listMotions(): string[];
+  /** 當輪 AI 主動擷取螢幕，圖片直接回傳至工具結果。 */
+  captureScreen?(petId: string): Promise<ScreenCaptureResult>;
 }
 
 export interface PetToolsHub {
@@ -37,6 +40,7 @@ export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
   const scriptPath = helperScriptPath('petToolsServer.mjs');
 
   const server: Server = createServer((socket) => {
+    socket.setEncoding('utf8');
     let buffer = '';
     let chain = Promise.resolve(); // 同 socket 多請求串行處理,回覆順序不亂
     socket.on('error', () => undefined); // 客戶端斷線等錯誤不可炸 main
@@ -61,8 +65,15 @@ export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
           const args = (msg['args'] ?? {}) as Record<string, unknown>;
           switch (msg['tool']) {
             case '__manifest': // MCP 腳本開機時查:動作清單進工具 enum
-              reply = { ok: true, motions: deps.listMotions(), expressions: PET_EXPRESSIONS };
+              reply = { ok: true, motions: deps.listMotions(), expressions: PET_EXPRESSIONS, screenCapture: !!deps.captureScreen };
               break;
+            case 'pet_capture_screen': {
+              const result = await deps.captureScreen?.(petId);
+              reply = result?.ok
+                ? { ok: true, result: '這是剛擷取的螢幕畫面，請直接根據圖片回答。', image: result.image }
+                : { ok: false, error: result?.reason ?? '目前不支援擷取螢幕' };
+              break;
+            }
             case 'pet_play_motion': {
               const ok = await deps.playMotion(petId, String(args['name'] ?? ''));
               reply = ok ? { ok: true, result: '動作播放中' } : { ok: false, error: '找不到這個動作' };
@@ -84,7 +95,7 @@ export function createPetToolsHub(deps: PetToolsDeps): PetToolsHub {
         } catch {
           /* 保底回 error reply */
         }
-        socket.write(JSON.stringify(reply) + '\n');
+        if (!socket.destroyed) socket.write(JSON.stringify(reply) + '\n');
       }
     });
   });

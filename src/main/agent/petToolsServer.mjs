@@ -1,5 +1,5 @@
 // 寵物工具 MCP 腳本(stdio):由 codex(thread config)/claude(--mcp-config)掛載,
-// 提供 pet_play_motion / pet_show_expression / pet_speak 三個工具,
+// 提供 pet_play_motion / pet_show_expression / pet_speak / pet_capture_screen 工具,
 // 呼叫經本機 socket 轉給 Electron main 的 petToolsHub 執行。
 // env:VRM_PET_TOOLS_SOCKET / VRM_PET_TOOLS_TOKEN / VRM_PET_PET_ID
 import { createInterface } from 'node:readline';
@@ -14,7 +14,8 @@ const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 function askHub(tool, args) {
   return new Promise((resolve) => {
     const socket = connect(SOCKET);
-    const timer = setTimeout(() => { socket.destroy(); resolve(null); }, 10000);
+    socket.setEncoding('utf8');
+    const timer = setTimeout(() => { socket.destroy(); resolve(null); }, tool === 'pet_capture_screen' ? 30000 : 10000);
     let buffer = '';
     socket.on('data', (chunk) => {
       buffer += String(chunk);
@@ -26,6 +27,7 @@ function askHub(tool, args) {
       }
     });
     socket.on('error', () => { clearTimeout(timer); resolve(null); });
+    socket.on('close', () => { clearTimeout(timer); resolve(null); });
     socket.write(JSON.stringify({ token: TOKEN, petId: PET_ID, tool, args }) + '\n');
   });
 }
@@ -65,6 +67,15 @@ const TOOLS = [
   }
 ];
 
+if (manifest?.screenCapture) {
+  TOOLS.push({
+    name: 'pet_capture_screen',
+    description: '查看使用者目前的螢幕：單次擷取游標所在螢幕，直接回傳可辨識的圖片。當理解問題、辨識畫面或檢查結果需要螢幕內容時，主動呼叫，不必請使用者先按截圖或貼圖。每次呼叫只取得當下畫面，不是持續監看；若系統拒絕權限，說明原因，不要反覆重試。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  });
+}
+
 // 宿主(claude/codex)死了 stdin 就關:立刻退出,不留孤兒行程佔住繼承的 stdio
 // (孤兒佔著 fd 會讓宿主行程的 close 事件永遠不觸發,上游 turn 無法終結)
 const rl = createInterface({ input: process.stdin });
@@ -78,9 +89,17 @@ rl.on('line', async (line) => {
     send({ jsonrpc: '2.0', id: msg.id, result: { tools: TOOLS } });
   } else if (msg.method === 'tools/call') {
     const name = msg.params?.name;
+    if (!TOOLS.some((tool) => tool.name === name)) {
+      send({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: '未知工具' } });
+      return;
+    }
     const reply = await askHub(name, msg.params?.arguments ?? {});
     const text = reply?.ok ? String(reply.result ?? 'ok') : `失敗:${reply?.error ?? '無法連上桌寵'}`;
-    send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text }], isError: !reply?.ok } });
+    const content = [{ type: 'text', text }];
+    if (reply?.ok && reply.image) {
+      content.push({ type: 'image', data: reply.image.data, mimeType: reply.image.mimeType });
+    }
+    send({ jsonrpc: '2.0', id: msg.id, result: { content, isError: !reply?.ok } });
   } else if (msg.id !== undefined) {
     send({ jsonrpc: '2.0', id: msg.id, result: {} });
   }

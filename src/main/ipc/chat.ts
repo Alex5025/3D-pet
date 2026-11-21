@@ -1,7 +1,8 @@
 import { BrowserWindow, shell } from 'electron';
 import type { HistoryStore } from '../historyStore';
 import { RETENTION_MS } from '../../../scripts/storage-layout.mjs';
-import type { ChatImage, ChatSendResult, ChatTranscript } from '../../shared/chat';
+import type { ChatImage, ChatSendResult, ChatTranscript, ScreenCaptureResult } from '../../shared/chat';
+import { captureScreen } from '../screenCapture';
 import { t } from '../../shared/i18n';
 import type { PetProject } from '../../shared/projects';
 import type { AgentBridge } from '../agent/bridge';
@@ -17,7 +18,7 @@ export interface IpcChatDeps {
   readonly chatKey: (id: string, path?: string | undefined) => string;
   readonly chatRevisions: Map<string, number>;
   readonly bridge: AgentBridge | null;
-  readonly liveTranscripts: Map<string, { user: string; reply: string; workspacePath?: string | undefined; }>;
+  readonly liveTranscripts: Map<string, { user: string; reply: string; workspacePath?: string | undefined; screenPreview?: ChatImage; }>;
   readonly completedTranscripts: Map<string, ChatTranscript>;
   readonly history: HistoryStore;
   readonly settingsWin: BrowserWindow | null;
@@ -41,6 +42,14 @@ export function createIpcChat(deps: IpcChatDeps) {
   async function start() {
     if (!scope.start()) return;
 
+    scope.ipc.handle('chat-capture-screen', async (event, petId: string): Promise<ScreenCaptureResult> => {
+      if (!deps.win || event.sender !== deps.win.webContents || event.senderFrame !== deps.win.webContents.mainFrame
+        || !deps.pets.get(petId)?.enabled) {
+        return { ok: false, reason: t('reason.invalidRequest') };
+      }
+      return captureScreen();
+    });
+
     /** 開新對話(泡泡的「新對話」鈕):清掉 sessionId 並關掉 bridge 的舊 session。
      *  在 main 端做而不是讓 renderer 重組 agent 設定——後者若拿到過期 profile 會洗掉 model/力度/權限。 */
     /** 上次對話紀錄:泡泡建立時 pull(循 chat-queue-get 的慣例,推播漏接也能自癒)。 */
@@ -54,7 +63,9 @@ export function createIpcChat(deps: IpcChatDeps) {
         const state = deps.bridge?.petStates().find((s) => s.petId === id && s.workspacePath === project.workspacePath);
         const extra = { revision, running: !!state?.running, pendingApproval: state?.pendingApproval ?? undefined };
         const live = deps.liveTranscripts.get(id);
-        if (live?.workspacePath === project.workspacePath) return { user: live.user, reply: live.reply, at: Date.now(), ...extra };
+        if (live?.workspacePath === project.workspacePath) return {
+          user: live.user, reply: live.reply, screenPreview: live.screenPreview, at: Date.now(), ...extra,
+        };
         const completed = deps.completedTranscripts.get(key);
         if (completed && completed.at >= Date.now() - RETENTION_MS) return { ...completed, ...extra };
         const stored = deps.history.latest(id, project.workspacePath);

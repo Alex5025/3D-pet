@@ -344,6 +344,7 @@
 
 .pet-speech-bubble .bubble-images {
   display: none;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -354,6 +355,37 @@
 
 .pet-speech-bubble .bubble-images.open {
   display: flex;
+}
+
+.pet-speech-bubble .bubble-image-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.pet-speech-bubble .bubble-image-previews img {
+  width: calc(50% - 3px);
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+
+.pet-speech-bubble .bubble-image-previews img:only-child {
+  width: 100%;
+}
+
+.pet-speech-bubble .bubble-capture-status:not(:empty) {
+  margin: 4px 2px 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pet-speech-bubble .bubble-capture:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .pet-speech-bubble .bubble-images button {

@@ -2,7 +2,7 @@ import type { PetProject } from '../shared/projects';
 import type { CharacterFileResult } from '../shared/character';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AgentBinding, AgentEvent, AgentKind } from '../shared/agentEvents';
-import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, QueuedMessageSummary } from '../shared/chat';
+import type { ChatImage, ChatSendResult, ChatTranscript, ControlStatusSnapshot, QueuedMessageSummary, ScreenCaptureResult } from '../shared/chat';
 import type {
   ProjectSandboxSettings,
   ProjectSandboxSettingsInput,
@@ -173,6 +173,8 @@ const api = {
 
   listAgentModels: (kind: AgentKind): Promise<AgentModelInfo[]> =>
     ipcRenderer.invoke('agent-models', kind),
+  captureScreen: (petId: string): Promise<ScreenCaptureResult> =>
+    ipcRenderer.invoke('chat-capture-screen', petId),
   chatSend: (petId: string, text: string, images: ChatImage[] = [], workspacePath?: string): Promise<ChatSendResult> =>
     ipcRenderer.invoke('chat-send', petId, text, images, workspacePath),
   removeQueuedMessage: (petId: string, taskId: string) =>
@@ -198,9 +200,9 @@ const api = {
     ipcRenderer.on('control-status-apply', (_event, snapshot) => callback(snapshot)),
   removeUnboundTask: (taskId: string): Promise<boolean> =>
     ipcRenderer.invoke('chat-unbound-remove', taskId),
+  openRuntimeFolder: (): Promise<string> => ipcRenderer.invoke('open-runtime-folder'),
   systemRestart: () => ipcRenderer.send('system-restart'),
   systemQuit: () => ipcRenderer.send('system-quit'),
-  openRuntimeFolder: (): Promise<string> => ipcRenderer.invoke('open-runtime-folder'),
 
   /* 參考檔案(拖放到寵物身上;當次對話有效,不落盤)。
    * Electron 33 已移除 File.path,取絕對路徑必須經 preload 的 webUtils。 */

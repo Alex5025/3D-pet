@@ -226,7 +226,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     // 角色個性 + 寵物工具提示:官方 developerInstructions 欄位(thread 建立/恢復時注入)
     const parts: string[] = [t('prompt.petPreamble')];
     if (persona) parts.push(`${t('prompt.personaIntro')}\n${persona}`);
-    if (hub && petId) parts.push(t('prompt.performanceRules'));
+    if (hub && petId) parts.push(t('prompt.performanceRules'), t('prompt.screenVision'));
     const dev = parts.length > 1 ? { developerInstructions: parts.join('\n') } : {};
     // 寵物工具 MCP:以 thread config 覆寫掛載(v3.0 實測可行)
     const mcp = hub && petId
@@ -248,7 +248,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     const id = (res.result?.['thread'] as { id?: string } | undefined)?.id;
     if (!id) throw new Error(t('agent.noThreadId'));
     loadedThreads.add(id);
-    appliedContext.set(id, composeContext(persona, undefined, permission)); // thread/start 只注入 persona,參考檔由首個 turn 的 syncContext 補上
+    appliedContext.set(id, composeContext(persona, undefined, permission, !!hub && !!petId)); // 參考檔由首個 turn 的 syncContext 補上
     return id;
   }
 
@@ -257,11 +257,14 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     persona: string | undefined,
     refFiles: string[] | undefined,
     permission?: AgentPermission,
+    hasPetTools = false,
   ): string {
     const parts: string[] = [];
     // 計畫模式的指示放最前面(權限值成為組合值的一部分 → 切換權限時下個 turn 自動注入,
     // 與換語言同一個刻意依賴;離開計畫模式時指示消失,codex 就恢復正常動手)
     if (permission === 'plan') parts.push(t('prompt.planMode'));
+    // resume 不採用新的 developerInstructions，必須把看螢幕的指示納入上下文對齊。
+    if (hasPetTools) parts.push(t('prompt.screenVision'));
     const trimmed = persona?.trim();
     if (trimmed) parts.push(`${t('prompt.personaCurrentIntro')}\n${trimmed}`);
     const refs = refFilesPrompt(refFiles);
@@ -278,7 +281,7 @@ export function createCodexProvider(hub: PetToolsHub | null = null): AgentProvid
     refFiles: string[] | undefined,
     permission?: AgentPermission,
   ): Promise<void> {
-    const wanted = composeContext(persona, refFiles, permission);
+    const wanted = composeContext(persona, refFiles, permission, !!hub && !!sessions.get(threadId)?.petId);
     const applied = appliedContext.get(threadId) ?? null;
     if (wanted === applied) return;
     if (!wanted && applied === null) return; // 未知基準且無上下文:視為無,不注入

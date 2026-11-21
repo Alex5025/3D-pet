@@ -57,6 +57,8 @@ export class BrowserWindow extends EventEmitter {
   getBounds() { return this.bounds; } setBounds(bounds) { this.bounds = bounds; }
   setOpacity() {} loadFile() { return Promise.resolve(); } loadURL() { return Promise.resolve(); }
 }
+export const desktopCapturer = {};
+export const systemPreferences = {};
 export const dialog = {};
 export const shell = {};
 export const Menu = {};
@@ -72,9 +74,9 @@ try {
     bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent', plugins: [{ name: 'electron-test', setup(b) {
       b.onResolve({ filter: /[./]dragMonitor$/ }, () => ({ path: 'dragMonitor', namespace: 'mock-drag' }));
       b.onLoad({ filter: /.*/, namespace: 'mock-drag' }, () => ({ contents: 'export const createDragMonitor = () => ({ setActive() {}, dispose() {} });', loader: 'js' }));
+      b.onResolve({ filter: /^better-sqlite3$/ }, () => ({ path: require.resolve('better-sqlite3'), external: true }));
       b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'mock' }));
       b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: mock, loader: 'js' }));
-      b.onResolve({ filter: /^better-sqlite3$/ }, () => ({ path: require.resolve('better-sqlite3'), external: true }));
     } }],
   });
   const api = createRequire(import.meta.url)(output);
@@ -95,8 +97,6 @@ try {
     assert.equal(api.ipcMain.handlers.size, 0);
     assert.equal(api.ipcMain.eventNames().length, 0);
   }
-  // 執行中的泡泡設定也必須保存，並在新設定寫入後等待舊 session 關閉。
-  const activePet = { id: 'fox', name: '狐狸', workspacePath: '/project', agent: { kind: 'codex', sessionId: 'existing' } };
   // 右鍵選單使用實際內容起點與工作區；包含 macOS 下移、負座標螢幕與頁面縮放。
   let menuBounds = { x: 0, y: 38, width: 1440, height: 900 };
   let menuWorkArea = { x: 0, y: 38, width: 1440, height: 790 };
@@ -125,6 +125,8 @@ try {
   assert.equal(readMenuArea(menuEvent), null, '已關閉視窗不可讀取');
   menuIpc.dispose();
 
+  // 執行中的泡泡設定也必須保存，並在新設定寫入後等待舊 session 關閉。
+  const activePet = { id: 'fox', name: '狐狸', workspacePath: '/project', agent: { kind: 'codex', sessionId: 'existing' } };
   const sharedMotions = join(scratch, 'shared-motions');
   await mkdir(sharedMotions);
   const poseData = Buffer.from('共用預設姿勢');
@@ -283,22 +285,6 @@ try {
   await characterService.setPetEnabled('fox', true);
   assert.equal(characterService.getPet('fox').persona, '外部個性');
   assert.equal(characterService.getPet('fox').characterReady, true);
-  characterService.dispose();
-
-  const order = [];
-  const lifecycle = api.createLifecycle({
-    pets: new Map(), stopBackground() { order.push('background'); throw new Error('預期測試錯誤'); },
-    stopAgents() { order.push('agents'); }, persistConfigSync() { order.push('save'); },
-    closeWindows() { order.push('windows'); },
-  });
-  lifecycle.start(); lifecycle.start();
-  lifecycle.shutdownSync(); lifecycle.shutdownSync(); lifecycle.dispose();
-  assert.deepEqual(order, ['background', 'agents', 'save', 'windows']);
-  assert.equal(api.app.listenerCount('before-quit'), 0);
-  console.log('通過：IPC 契約、重複註冊／清理、視窗重新授權、崩潰恢復、省電監聽、動作 watcher 與結束儲存');
-} finally {
-  await rm(scratch, { recursive: true, force: true });
-}
   // 角色與 Agent 同時修改時，本地寫入失敗不能套用或廣播未提交設定。
   const Database = require('better-sqlite3');
   const inspector = new Database(join(runtime, 'history.sqlite'));
@@ -326,3 +312,19 @@ try {
   assert.notEqual(history.conversation('fox', sessionWorkspace), conversation);
   assert.equal(characterService.storageError, '');
   inspector.close(); history.close();
+  characterService.dispose();
+
+  const order = [];
+  const lifecycle = api.createLifecycle({
+    pets: new Map(), stopBackground() { order.push('background'); throw new Error('預期測試錯誤'); },
+    stopAgents() { order.push('agents'); }, persistConfigSync() { order.push('save'); },
+    closeWindows() { order.push('windows'); },
+  });
+  lifecycle.start(); lifecycle.start();
+  lifecycle.shutdownSync(); lifecycle.shutdownSync(); lifecycle.dispose();
+  assert.deepEqual(order, ['background', 'agents', 'save', 'windows']);
+  assert.equal(api.app.listenerCount('before-quit'), 0);
+  console.log('通過：IPC 契約、重複註冊／清理、視窗重新授權、崩潰恢復、省電監聽、動作 watcher 與結束儲存');
+} finally {
+  await rm(scratch, { recursive: true, force: true });
+}

@@ -2,7 +2,7 @@ import './speechBubble.css';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { perf } from './perf';
-import type { ChatImage, ChatTranscript } from '../shared/chat';
+import type { ChatImage, ChatTranscript, ScreenCaptureResult } from '../shared/chat';
 import { workspaceFolderName } from '../shared/petGroups';
 import { t } from '../shared/i18n';
 
@@ -29,6 +29,8 @@ export interface SpeechBubble {
   isResizing: () => boolean;
   /** 清空輸入框與待送附件(送出被 main 接受後由 renderer 呼叫;不綁在 beginTurn——佇列接續時會洗掉正在打的字)。 */
   clearComposer: () => void;
+  /** 顯示 AI 最近一次讀取的截圖，不加入待送附件。 */
+  setScreenPreview: (image: ChatImage | null) => void;
   resetProject: () => void;
   /** 排隊中的訊息清單(輸入框上方;每則 ✕ → onRemoveQueued);空陣列收合。 */
   setQueue: (list: { id: string; text: string; hasImages: boolean }[]) => void;
@@ -88,6 +90,8 @@ interface SpeechBubbleOptions {
   releaseInputFocus?: () => void;
   /** Enter 送出(非 busy 且有文字或圖片時觸發)。 */
   onSend?: (text: string, images: ChatImage[]) => void;
+  /** 使用者點擊截圖才擷取；先附在輸入框，按 Enter 後才送出。 */
+  onCaptureScreen?: () => Promise<ScreenCaptureResult>;
   /** 停止鈕/Esc 中斷進行中的 turn。 */
   onCancel?: () => void;
   /** 審批按鈕(允許/拒絕)的回覆。 */
@@ -328,9 +332,13 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   addRefsBtn.className = 'bubble-new-session';
   addRefsBtn.textContent = '📎';
   addRefsBtn.title = t('bubble.addRefsTitle');
+  const captureBtn = document.createElement('button');
+  captureBtn.type = 'button';
+  captureBtn.className = 'bubble-new-session bubble-capture';
+  captureBtn.hidden = !options.onCaptureScreen;
   // 工作目錄 chip 掛在 agentInfo 直接子層,不進 agentControls——
   // renderAgentControls() 會 replaceChildren() 清空 controls,兩條更新路徑分開才不會互相洗掉
-  agentInfo.append(workspace, agentInfoText, agentControls, addRefsBtn, newSessionBtn);
+  agentInfo.append(workspace, agentInfoText, agentControls, addRefsBtn, captureBtn, newSessionBtn);
   // 審批區塊:agent 想做危險操作時顯示,等使用者點頭
   const approvalBox = document.createElement('div');
   approvalBox.className = 'bubble-approval';
@@ -379,6 +387,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   // 新對話:turn 進行中不給按(要先停止);按下後就地清空回覆區,視覺上等於「重新開始」
   newSessionBtn.addEventListener('click', () => {
     if (busy) return;
+    setScreenPreview(null);
     replyRaw = '';
     reply.replaceChildren(mdBox);
     mdBox.innerHTML = '';
@@ -393,23 +402,80 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const refsBox = document.createElement('div');
   refsBox.className = 'bubble-refs';
 
-  // 圖片只以附件數量呈現，不產生縮圖；送出後才清空。
+  const screenPreviewBox = document.createElement('div');
+  screenPreviewBox.className = 'bubble-images bubble-screen-preview';
+  const screenPreviewLabel = document.createElement('span');
+  const screenPreviewImages = document.createElement('div');
+  screenPreviewImages.className = 'bubble-image-previews';
+  screenPreviewBox.append(screenPreviewLabel, screenPreviewImages);
+  const makeImagePreview = (image: ChatImage): HTMLImageElement => {
+    const preview = document.createElement('img');
+    preview.src = `data:${image.mimeType};base64,${image.data}`;
+    preview.alt = image.name || t('bubble.imagePreview');
+    return preview;
+  };
+  const setScreenPreview = (image: ChatImage | null): void => {
+    screenPreviewImages.replaceChildren(...(image ? [makeImagePreview(image)] : []));
+    screenPreviewBox.classList.toggle('open', !!image);
+  };
+
+  // 截圖與貼上的圖片先預覽；送出被接受後才清空。
   const imagesBox = document.createElement('div');
   imagesBox.className = 'bubble-images';
+  const imagePreviews = document.createElement('div');
+  imagePreviews.className = 'bubble-image-previews';
   const imagesText = document.createElement('span');
   const clearImages = document.createElement('button');
   clearImages.type = 'button';
   clearImages.textContent = t('bubble.removeImages');
   clearImages.title = t('bubble.removeImagesTitle');
-  imagesBox.append(imagesText, clearImages);
+  imagesBox.append(imagesText, clearImages, imagePreviews);
   let pendingImages: ChatImage[] = [];
+  let composerRevision = 0;
+  let capturing = false;
+  const captureStatus = document.createElement('div');
+  captureStatus.className = 'bubble-capture-status';
+  captureStatus.setAttribute('role', 'status');
+  const updateCaptureButton = (): void => {
+    captureBtn.textContent = t(capturing ? 'bubble.capturing' : 'bubble.captureScreen');
+    captureBtn.title = t('bubble.captureScreenTitle');
+    captureBtn.disabled = capturing || pendingImages.length >= MAX_PASTED_IMAGES;
+  };
   const updateImagesBox = (): void => {
     imagesText.textContent = t('bubble.imagesPasted', { n: pendingImages.length });
     imagesBox.classList.toggle('open', pendingImages.length > 0);
+    imagePreviews.replaceChildren(...pendingImages.map(makeImagePreview));
+    updateCaptureButton();
   };
   clearImages.addEventListener('click', () => {
+    composerRevision++;
     pendingImages = [];
+    captureStatus.textContent = '';
     updateImagesBox();
+  });
+  captureBtn.addEventListener('click', async () => {
+    if (!options.onCaptureScreen || capturing || pendingImages.length >= MAX_PASTED_IMAGES) return;
+    const revision = composerRevision;
+    capturing = true;
+    captureStatus.textContent = '';
+    updateCaptureButton();
+    try {
+      const result = await options.onCaptureScreen();
+      if (revision !== composerRevision) return;
+      if (!result.ok) { captureStatus.textContent = result.reason; return; }
+      if (pendingImages.length >= MAX_PASTED_IMAGES) { captureStatus.textContent = t('bubble.imageLimit'); return; }
+      pendingImages.push(result.image);
+      if (!input.value.trim()) { input.value = t('bubble.screenPrompt'); autosize(); }
+      updateImagesBox();
+      await options.requestInputFocus?.();
+      if (revision === composerRevision && element.classList.contains('visible')) input.focus();
+      else options.releaseInputFocus?.();
+    } catch {
+      if (revision === composerRevision) captureStatus.textContent = t('screen.failed');
+    } finally {
+      capturing = false;
+      updateCaptureButton();
+    }
   });
 
   const statusRow = document.createElement('div');
@@ -426,7 +492,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
   const queueBox = document.createElement('div');
   queueBox.className = 'bubble-queue';
 
-  element.append(pinHotspot, activity, label, agentInfo, task, reply, approvalBox, statusRow, imagesBox, queueBox, input, refsBox);
+  element.append(pinHotspot, activity, label, agentInfo, task, reply, approvalBox, statusRow, captureStatus, screenPreviewBox, imagesBox, queueBox, input, refsBox);
 
   // 左右邊緣的寬度把手：拖曳＝手動設定這顆泡泡的寬度上限（內容少時照樣縮小、多時撐到這裡為止）；
   // 雙擊還原純密度上限。只存記憶體，寵物重啟後回到自動。
@@ -503,11 +569,12 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       autosize();
     }
     const slots = Math.max(0, MAX_PASTED_IMAGES - pendingImages.length);
+    const revision = composerRevision;
     for (const file of files.slice(0, slots)) {
       if (!ACCEPTED_IMAGE_TYPES.has(file.type as ChatImage['mimeType']) || file.size > MAX_IMAGE_BYTES) continue;
       const reader = new FileReader();
       reader.addEventListener('load', () => {
-        if (typeof reader.result !== 'string' || pendingImages.length >= MAX_PASTED_IMAGES) return;
+        if (revision !== composerRevision || typeof reader.result !== 'string' || pendingImages.length >= MAX_PASTED_IMAGES) return;
         const comma = reader.result.indexOf(',');
         if (comma < 0) return;
         pendingImages.push({
@@ -526,6 +593,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       if (event.shiftKey || event.isComposing) return;
       event.preventDefault();
       // busy 中也可送出:main 端會排入佇列(是否清空輸入框由 invoke 回覆決定)
+      if (capturing) return;
       if (input.value.trim() || pendingImages.length) {
         options.onSend?.(input.value.trim(), [...pendingImages]);
       }
@@ -663,6 +731,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     newSessionBtn.textContent = t('bubble.newSession');
     newSessionBtn.title = t('bubble.newSessionTitle');
     addRefsBtn.title = t('bubble.addRefsTitle');
+    screenPreviewLabel.textContent = t('bubble.screenPreview');
+    updateCaptureButton();
     setWorkspacePath(currentWorkspacePath); // 未設定時的文字與 title 都是 i18n
     if (currentTask) setTask(currentTask.text, currentTask.labelKey); // 交辦列的前綴也要跟著換語言
     allowButton.textContent = t('common.allow');
@@ -854,9 +924,12 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       label.textContent = labelText();
     },
     setWorkspacePath,
+    setScreenPreview,
     showAt,
     hide,
     destroy: () => {
+      composerRevision++;
+      setScreenPreview(null);
       resizeObserver.disconnect();
       if (activityReadTimer) clearTimeout(activityReadTimer);
       if (element.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
@@ -867,6 +940,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     isPinned: () => pinned,
     isResizing: () => resizing,
     beginTurn: (text) => {
+      setScreenPreview(null);
       busy = true;
       setTask(text ?? null); // 這一輪交辦的內容;沒帶就清掉,免得留著上一輪的誤導
       setActivity('working', t('bubble.actRunning'));
@@ -880,6 +954,9 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       statusRow.classList.add('open');
     },
     resetProject: () => {
+      composerRevision++;
+      setScreenPreview(null);
+      captureStatus.textContent = '';
       busy = false; replyRaw = ''; reply.replaceChildren(mdBox); mdBox.innerHTML = ''; reply.classList.remove('open');
       approvalRequestId = null; approvalBox.classList.remove('open'); statusRow.classList.remove('open');
       status.textContent = ''; setTask(null); activity.classList.remove('open');
@@ -887,6 +964,8 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
       refsBox.replaceChildren(); refsBox.classList.remove('open');
     },
     clearComposer: () => {
+      composerRevision++;
+      captureStatus.textContent = '';
       // 這裡是「送出被 main 接受」的唯一時機(被拒收不會呼叫),歷史就在這收
       pushHistory(input.value);
       historyIndex = null;
@@ -988,6 +1067,7 @@ export function createSpeechBubble(options: SpeechBubbleOptions = {}): SpeechBub
     restoreTranscript: (transcript) => {
       // 進行中的一輪永遠優先:重啟後的回填是非同步的,不能覆蓋已經開始串流的內容
       if (busy || replyRaw) return;
+      setScreenPreview(transcript.screenPreview ?? null);
       if (transcript.user) pushHistory(transcript.user); // 重啟後 ↑ 至少叫得回上一句
       // 使用者那句改釘在交辦列(以前是塞進回覆當 markdown 引言,長輸出一捲就看不到了)
       setTask(transcript.user || null, 'bubble.lastChatYou');

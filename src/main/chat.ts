@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { HistoryStore, SavedTurn, TurnStatus } from './historyStore';
 import { join } from 'node:path';
 import type { AgentEvent } from '../shared/agentEvents';
-import type { ChatTranscript, ControlTaskRecord } from '../shared/chat';
+import type { ChatImage, ChatTranscript, ControlTaskRecord } from '../shared/chat';
 import type { PetProject } from '../shared/projects';
 import type { AgentBridge } from './agent/bridge';
 import { createAgentBridge } from './agent/bridge';
@@ -15,6 +15,8 @@ import { createProviders } from './agent/providers';
 import { createChatDispatcher, createChatQueue } from './chatQueue';
 import { createResourceScope } from './resourceScope';
 import type { PetProfile } from './runtimeTypes';
+import { captureScreen } from './screenCapture';
+import { t } from '../shared/i18n';
 
 export interface ChatDeps {
   readonly win: BrowserWindow | null;
@@ -64,7 +66,7 @@ export function createChat(deps: ChatDeps) {
   }
 
   // 每輪獨立保存；串流定期落盤，關閉時寫入中斷狀態。
-  const liveTranscripts = new Map<string, { user: string; reply: string; workspacePath?: string; }>();
+  const liveTranscripts = new Map<string, { user: string; reply: string; workspacePath?: string; screenPreview?: ChatImage; }>();
   const turns = new Map<string, SavedTurn>();
   const completedTranscripts = new Map<string, ChatTranscript>();
   let storageFailure = '';
@@ -100,7 +102,9 @@ export function createChat(deps: ChatDeps) {
     const live = liveTranscripts.get(petId);
     if (!live) return;
     saveLive(petId, status);
-    completedTranscripts.set(chatKey(petId, live.workspacePath), { user: live.user, reply: live.reply, at: turns.get(petId)?.at ?? Date.now() });
+    completedTranscripts.set(chatKey(petId, live.workspacePath), {
+      user: live.user, reply: live.reply, screenPreview: live.screenPreview, at: turns.get(petId)?.at ?? Date.now(),
+    });
     liveTranscripts.delete(petId);
     turns.delete(petId);
   }
@@ -116,7 +120,10 @@ export function createChat(deps: ChatDeps) {
     const revision = (chatRevisions.get(key) ?? 0) + 1;
     chatRevisions.set(key, revision);
     if (event.kind === 'turnStart') beginTranscript(petId, event.text, workspacePath);
-    else if (event.kind === 'text') {
+    else if (event.kind === 'screenCapture') {
+      const live = liveTranscripts.get(petId);
+      if (live && live.workspacePath === workspacePath) live.screenPreview = event.image;
+    } else if (event.kind === 'text') {
       const live = liveTranscripts.get(petId);
       if (live) live.reply += event.text;
     } else if (event.kind === 'done' || event.kind === 'error') {
@@ -201,7 +208,22 @@ export function createChat(deps: ChatDeps) {
         sendChatEvent(petId, { kind: 'text', text: `\n${trimmed.slice(0, 200)}\n` });
         return true;
       },
-      listMotions: () => deps.motionFiles
+      listMotions: () => deps.motionFiles,
+      captureScreen: async (petId) => {
+        const turn = turns.get(petId);
+        if (!turn) return { ok: false, reason: t('screen.noActiveTurn') };
+        const active = (): boolean => !scope.disposed && !!deps.getPet(petId)?.enabled
+          && turns.get(petId) === turn
+          && !!bridge?.petStates().some((state) => state.petId === petId && state.running && state.workspacePath === turn.workspace);
+        if (!active()) return { ok: false, reason: t('screen.noActiveTurn') };
+        sendChatEvent(petId, { kind: 'tool', name: t('screen.agentCapturing') }, turn.workspace);
+        const result = await captureScreen();
+        // 擷取期間取消、休眠或結束時，不把圖片交給已失效的呼叫端。
+        if (!active()) return { ok: false, reason: t('screen.noActiveTurn') };
+        if (result.ok) sendChatEvent(petId, { kind: 'screenCapture', image: result.image }, turn.workspace);
+        sendChatEvent(petId, { kind: 'tool', name: result.ok ? t('screen.agentCaptured') : result.reason }, turn.workspace);
+        return result;
+      },
     });
 
     bridge = createAgentBridge({

@@ -58,7 +58,7 @@ export interface ControlStatusSnapshot {
   tasks: ControlTaskRecord[];
 }
 
-/** 從對話泡泡貼上的圖片；只在當輪訊息中傳遞，不落盤。 */
+/** 對話泡泡貼上或擷取的圖片；部分 CLI 會轉為短期暫存檔供讀取。 */
 export interface ChatImage {
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
   /** 不含 data URL 前綴的 base64 內容。 */
@@ -66,8 +66,14 @@ export interface ChatImage {
   name?: string;
 }
 
+export type ScreenCaptureResult =
+  | { ok: true; image: ChatImage }
+  | { ok: false; reason: string };
+
 /** 上次對話紀錄(每寵最後一輪):重啟後回填泡泡,讓使用者看得到聊到哪。 */
 export interface ChatTranscript {
+  /** 當輪 AI 最近一次截圖；僅存記憶體供泡泡回填，不寫入歷史資料庫。 */
+  screenPreview?: ChatImage;
   revision?: number;
   running?: boolean;
   pendingApproval?: { requestId: string; description: string };
