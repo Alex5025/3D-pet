@@ -104,7 +104,7 @@ export function createMotions(deps: MotionsDeps) {
   /** 設定預設姿勢(選單與設定面板共用):即選即播 + 存檔 + 同步 UI。file=null 清除。 */
   async function setDefaultPose(petId: string, file: string | null): Promise<void> {
     if (file && !motionFiles.includes(file)) return; // 白名單:只接受 motions/ 裡的檔名
-    deps.updatePet(petId, { defaultPose: file ?? undefined });
+    if (!deps.updatePet(petId, { defaultPose: file ?? undefined })) return;
     deps.refreshTray();
     deps.sendPetProfiles(); // 設定面板的下拉跟著同步
     if (!file) return;

@@ -175,9 +175,9 @@ Codex 全自動使用 workspace-write 與 granular 政策：只開啟 MCP elicit
 
 | 檔案 | 內容 | 寫入時機 |
 |---|---|---|
-| 工作樹 `runtime_data/app.yaml` | 固定 port、共用角色檔路徑、啟用角色、專案清單、各專案 Agent session、位置 | 異動送達主程序後立即原子替換 |
-| 共用 `characters.yaml` | 穩定角色 ID、模型路徑／SHA-256、個性、光影、動作；不含工作目錄與 session | 喚醒載入；儲存時讀取並合併欄位異動，以跨程序鎖、版本檢查及原子替換寫入 |
-| 工作樹 `runtime_data/history.sqlite` | 近 30 天對話與前兩次設定版本 | 串流每秒、turn 結束及設定更新時 |
+| 工作樹 `runtime_data/app.yaml` | schemaVersion 3、固定 port、共用角色資料庫路徑 | 手動修改，重啟後生效；一般儲存不改寫 |
+| 共用 `characters.sqlite` | 穩定角色 ID、模型路徑／SHA-256、個性、光影、服裝、動作；不含工作目錄與 session | SQLite 交易成功後即時套用；其他實例下次喚醒讀取，三方合併避免覆蓋獨立修改 |
+| 工作樹 `runtime_data/history.sqlite` | 啟用／選取角色、專案、Agent／Session、位置、語言、預設工作根目錄、近 30 天對話及前兩次即時設定版本 | 設定交易成功後即時套用；串流每秒、turn 結束時保存 |
 | 工作目錄的 `.codex/config.toml` | 沙盒策略 | 中控套用時,main 直寫 |
 
 **不落盤**:參考檔案清單、任務帳本、佇列。
@@ -197,9 +197,9 @@ Codex 全自動使用 workspace-write 與 granular 政策：只開啟 MCP elicit
 
 ```mermaid
 flowchart TB
-  C["共用 characters.yaml<br/>小狐狸：角色 ID、模型、個性、光影"]
+  C["共用 characters.sqlite<br/>小狐狸：角色 ID、模型、個性、光影"]
   subgraph A["工作樹 A：平行世界 A"]
-    AC["app.yaml：port 5173、專案綁定、各專案 session"]
+    AC["app.yaml：port 5173<br/>history.sqlite：專案綁定、各專案 session"]
     AF["唯一的小狐狸<br/>一條佇列，依序工作"]
     AX["專案 X：提示與對話 X"]
     AY["專案 Y：提示與對話 Y"]
@@ -208,7 +208,7 @@ flowchart TB
     AF --> AY
   end
   subgraph B["工作樹 B：平行世界 B"]
-    BC["app.yaml：port 5174、專案綁定、各專案 session"]
+    BC["app.yaml：port 5174<br/>history.sqlite：專案綁定、各專案 session"]
     BF["唯一的小狐狸<br/>一條佇列，依序工作"]
     BX["專案 X：獨立 session 與對話"]
     BZ["專案 Z：提示與對話 Z"]
@@ -222,9 +222,9 @@ flowchart TB
 
 ### 儲存與啟動
 
-共用角色預設位於產品資料目錄 `VRM Pet/runtime-data/characters.yaml`（schemaVersion 3）。每個角色使用穩定 ID；SHA-256 僅識別 VRM 檔案，不作角色查重。不同角色可使用同一 VRM，各自保存個性、光影、服裝與動作參數。改名、更換 VRM 或切換 AI 模型不改變角色 ID。AI 模型保存在本地專案 Agent 綁定。共用角色沒有工作目錄或 session；預設範例模型位於共用產品資料目錄的 `models/`；舊 `runtime-data/assets/` 檔案與既有角色引用保留。自訂共用角色檔時，模型與動作放在該 YAML 同層的 `models/`、`motions/`。
+共用角色預設位於產品資料目錄 `VRM Pet/runtime-data/characters.sqlite`。每個角色使用穩定 ID；SHA-256 僅識別 VRM 檔案，不作角色查重。不同角色可使用同一 VRM，各自保存個性、光影、服裝與動作參數。改名、更換 VRM 或切換 AI 模型不改變角色 ID。AI 模型保存在本地專案 Agent 綁定。共用角色沒有工作目錄或 session；預設範例模型位於共用產品資料目錄的 `models/`；舊 `runtime-data/assets/` 檔案與既有角色引用保留。自訂共用角色檔時，模型與動作放在該資料庫同層的 `models/`、`motions/`。
 
-linked worktree 的設定與 SQLite 位於工作樹根目錄的 `runtime_data/`，可用 `node scripts/data-dir.mjs config` 查詢。各自的 `app.yaml`（schemaVersion 2）保存固定 port、`charactersPath`、啟用角色、負責專案、選取專案、位置與各專案的 Agent 綁定。角色名稱是啟動清單的顯示快取；完整參數只存在共用檔。
+linked worktree 的設定與 SQLite 位於工作樹根目錄的 `runtime_data/`，可用 `node scripts/data-dir.mjs config` 查詢。各自的 `app.yaml`（schemaVersion 3）只保存固定 port 與 `charactersPath`，指向共用 SQLite。其餘即時設定保存在本地 `history.sqlite` 的 `live_settings`；角色名稱是本地清單的顯示快取，完整角色參數只存在共用資料庫。
 
 首次初始化預設複製正式版的專案分配，不繼承 session／對話，角色全部休眠；所有世界引用已存在的共用角色 ID，不再複製個性。`VRM_PET_DATA_DIR` 覆寫本地目錄；`VRM_PET_BASELINE_DIR` 指定首次分配來源；`VRM_PET_SHARED_CHARACTERS` 指定首次初始化使用的共用檔。初始化完成後，以 `app.yaml` 的 `charactersPath` 為準。測試應同時隔離本地目錄和共用角色檔，避免寫到正式資料。
 
@@ -240,29 +240,32 @@ Agent session、逐字稿、參考檔案以角色與專案分開。每個 turn �
 
 一般啟動讀本地設定；首次遷移及喚醒載入共用角色參數，儲存時另讀磁碟版本以合併不同欄位的異動。同一欄位兩邊修改不同時回報衝突，不覆寫磁碟版本。其他世界不熱更新，下一次喚醒載入新設定；偵測基礎個性版本改變時，清除本世界各專案的舊 session，保留歷史對話供查看。
 
-共用檔寫入使用排他鎖、來源版本檢查與原子替換。衝突時拒絕覆寫並提示。程序異常結束若遺留 `.lock`，須確認其中 PID 已不在運行才移除；程式不擅自搶走鎖。YAML 重寫不保留手寫註解。
+共用與本地資料庫以 ATTACH 及單一寫入交易一起提交，採 DELETE journal 與 FULL synchronous，讓兩個檔案可一起恢復；不使用 WAL。失敗時還原記憶體狀態，介面不套用未提交設定。開新對話的 Session 清除與對話索引更新也在同一交易完成。SQLite 管理跨程序鎖，不再使用自訂 `.lock`。
 
 遷移保留來源角色 ID 與各自參數，不按名稱或 VRM 合併；只有同一 ID 的版本不同才顯示差異供選擇或取消。無 ID 的舊資料依來源實體位置與記錄順序產生穩定遷移 ID。新增角色一律建立新 ID，不自動沿用相同 VRM 的角色。工作樹只用於開發並行測試，不增加跨工作樹角色選擇介面。失效模型路徑透過選檔修復。發布前備份原設定，完成後才移離舊作用中檔案。同實例升級會複製已知舊逐字稿到新索引，原檔保留；移除本世界角色不刪除其他世界仍使用的共用角色。
 
-### SQLite 評估
+### YAML 升級至 SQLite（2026-11-11）
 
-適合後續承接對話歷史與任務帳本；角色設定維持可手動編輯的 YAML，模型與動作保留原檔。佇列持久化另需定義中斷恢復與防止重複執行；本次未導入 SQLite。參考：[SQLite 適用情境](https://www.sqlite.org/whentouse.html)、[FTS5](https://www.sqlite.org/fts5.html)。
+第一次載入舊設定時，先備份 `app.yaml.pre-sqlite.bak` 與 `characters.yaml.pre-sqlite.bak`，將即時設定及角色匯入 SQLite，最後發布精簡啟動 YAML。共用角色舊 YAML 原檔保留；不再讀回其後續修改。角色匯出／匯入仍可使用可攜 YAML 檔案。
 
+本地設定存在即視為已完成匯入；若在發布啟動 YAML 前中斷，重試只完成發布，不以舊 YAML 覆蓋新資料。既有專案綁定表只在首次升級讀取，之後清空。損壞或缺少已遷移的資料庫會明確報錯，不從備份默默重建。新工作樹可從已升級的基準讀取專案分配，仍不繼承 Session／對話。
+
+備份時應停止實例並保存本地 `runtime_data/`、共用 `characters.sqlite` 與模型／動作原檔；舊版 WAL／SHM 或復原中的 journal 檔不可單獨丟棄。交易限制參考：[SQLite ATTACH](https://www.sqlite.org/lang_attach.html)。
 
 ### 安裝版與跨平台資料位置
 
 macOS 模型預設為 `~/Library/Application Support/VRM Pet/models/`，動作為同層 `motions/`。新增、替換、修復與內建範例均使用相同模型目錄；首次啟動建立資料夾，以不覆寫方式複製內建範例。舊範例只複製，不移除，已有角色的外部模型引用保持有效。
 
-Windows NSIS 預設採單一使用者安裝，程式位於 `%LOCALAPPDATA%\Programs\VRM Pet`，允許更改安裝位置。模型與動作位於 `%APPDATA%\VRM Pet\models`、`motions`；角色及啟動 YAML 位於其 `runtime-data`。Chromium 快取位於 `%LOCALAPPDATA%\VRM Pet\Cache`。標準解除安裝不刪除使用者資料，更新亦保留；明確指定解除安裝器的 `--delete-app-data` 參數則不在保留保證內。
+Windows NSIS 預設採單一使用者安裝，程式位於 `%LOCALAPPDATA%\Programs\VRM Pet`，允許更改安裝位置。模型與動作位於 `%APPDATA%\VRM Pet\models`、`motions`；共用角色 SQLite 及啟動 YAML 位於其 `runtime-data`。Chromium 快取位於 `%LOCALAPPDATA%\VRM Pet\Cache`。標準解除安裝不刪除使用者資料，更新亦保留；明確指定解除安裝器的 `--delete-app-data` 參數則不在保留保證內。
 
 Windows 與 macOS 的 linked worktree 都將設定放在 `runtime_data/`、快取放在 `3D-pet/instances/Cache/`，實例互不干擾。Windows 安裝與解除安裝尚需 Windows 實機驗收。
 
 ### 本地設定與歷史儲存
 
-- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（含 SQLite 的 WAL／SHM 檔）。
+- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（有 journal 時一併保存）。
 - 日誌、PID、快取及臨時附件：`<worktree>/3D-pet/instances/`，均不進 Git。只有 Unix socket 路徑超過平台長度限制時，通訊暫存退回 `/tmp/3D-pet/instances/`。
 - 對話保存最近 30 天，每秒保存串流、結束立即保存；開新對話保留舊歷史，但泡泡只回填目前對話最後一輪。不保存附件二進位或完整工具輸出。
-- `app.yaml` 仍是設定唯一依據；SQLite 只保留前兩次不同版本，不包含目前版本。原有共用角色備份與遷移備份不裁剪。
+- `app.yaml` 是啟動設定來源；SQLite 是即時設定來源，保存目前版本及前兩次不同版本。兩者不雙向同步。原有共用角色備份與遷移備份不裁剪。
 - 日誌按 UTC 日分檔，啟動及每日清除超過 30 天的日期檔；同日檔以整日保留。只清理本專案已知日誌檔名。
 - 首次啟動自動從舊 `/tmp` 工作樹實例複製設定及匯入期限內的對話；舊實例須先結束。已有新設定不覆蓋，來源檔與舊備份保留；舊 JSON 只有最後一輪，無法恢復更早內容。
 - `VRM_PET_DATA_DIR` 覆寫根目錄，之下建立 `runtime_data/` 與 `3D-pet/instances/`；共用角色與資產不受影響。測試另設 `VRM_PET_SHARED_CHARACTERS`。

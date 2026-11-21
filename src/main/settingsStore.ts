@@ -1,13 +1,13 @@
 import { cpSync, copyFileSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { HistoryStore } from './historyStore';
-import { stringify } from 'yaml';
+import { HistoryStore } from './historyStore';
 import { randomUUID } from 'node:crypto';
-import { atomicYaml, characterParameters, modelHash, parseCharacterYaml, parseStoredCharacter, signature, writeCharacters } from './characterStore';
+import { atomicYaml, characterParameters, modelHash, parseCharacterYaml, parseStoredCharacter, signature, writeCharacters, migrateCharacterDatabase, CharacterStore } from './characterStore';
 import type { CharacterDocument, CharacterParameters } from '../shared/character';
 import type { LocalPet, PetProject } from '../shared/projects';
 import type { AgentBinding } from '../shared/agentEvents';
 
+/** 記憶體中的完整快照；磁碟上的啟動 YAML 使用 schemaVersion 3。 */
 export interface BootSettings {
   schemaVersion: 2;
   initialized: boolean;
@@ -18,13 +18,19 @@ export interface BootSettings {
   locale?: string;
   pets: LocalPet[];
 }
+/** 所有可即時修改的欄位只存在本地 SQLite。 */
+export type LiveSettings = Pick<BootSettings, 'initialized' | 'selectedPetId' | 'defaultWorkspaceRoot' | 'locale' | 'pets'>;
+function liveSettings(boot: BootSettings): LiveSettings {
+  return { initialized: boot.initialized, selectedPetId: boot.selectedPetId,
+    defaultWorkspaceRoot: boot.defaultWorkspaceRoot, locale: boot.locale, pets: boot.pets };
+}
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 export function parseBoot(raw: unknown): BootSettings {
   if (!record(raw) || raw.schemaVersion !== 2 || typeof raw.charactersPath !== 'string' || !raw.charactersPath || !Number.isInteger(raw.port)
     || Number(raw.port) < 1024 || Number(raw.port) > 65535 || typeof raw.initialized !== 'boolean' || !Array.isArray(raw.pets)) throw new Error('app.yaml 格式或 port 無效');
   const ids = new Set<string>();
   for (const pet of raw.pets) {
-    if (!record(pet) || typeof pet.id !== 'string' || !pet.id || ids.has(pet.id) || typeof pet.name !== 'string' || typeof pet.enabled !== 'boolean' || !Array.isArray(pet.projects)) throw new Error('app.yaml 角色清單無效');
+    if (!record(pet) || typeof pet.id !== 'string' || !pet.id || ids.has(pet.id) || typeof pet.name !== 'string' || typeof pet.enabled !== 'boolean' || !Array.isArray(pet.projects)) throw new Error('角色設定清單無效');
     ids.add(pet.id);
     const paths = new Set<string>();
     for (const project of pet.projects) {
@@ -42,54 +48,80 @@ export function parseBoot(raw: unknown): BootSettings {
     if (typeof pet.workspacePath === 'string' && existsSync(pet.workspacePath)) pet.workspacePath = realpathSync.native(pet.workspacePath);
     if (pet.workspacePath !== undefined && (typeof pet.workspacePath !== 'string' || !paths.has(pet.workspacePath))) throw new Error('選取專案不屬於角色');
   }
-  if (raw.initialized && (!ids.size || typeof raw.selectedPetId !== 'string' || !ids.has(raw.selectedPetId))) throw new Error('app.yaml 選取角色無效');
+  if (raw.initialized && (!ids.size || typeof raw.selectedPetId !== 'string' || !ids.has(raw.selectedPetId))) throw new Error('設定選取角色無效');
   return raw as unknown as BootSettings;
 }
 export class SettingsStore {
-  private sourceSignature: string | null = null;
   private cached: Record<string, unknown> = { schemaVersion: 1, initialized: false, port: 5173, pets: [] };
-  constructor(readonly filePath: string, private readonly history?: HistoryStore) {}
+  private readonly history: HistoryStore;
+  private readonly ownsHistory: boolean;
+  constructor(readonly filePath: string, history?: HistoryStore) {
+    this.ownsHistory = !history;
+    this.history = history ?? new HistoryStore(join(dirname(filePath), 'history.sqlite'));
+  }
+  /** 先提交可重試的 SQLite 匯入，再發布只含啟動欄位的 YAML。 */
+  private initialize(boot: BootSettings): BootSettings {
+    const before = signature(this.filePath);
+    const path = migrateCharacterDatabase(boot.charactersPath);
+    const backup = `${this.filePath}.pre-sqlite.bak`;
+    if (before !== null && !existsSync(backup)) copyFileSync(this.filePath, backup, constants.COPYFILE_EXCL);
+    if (signature(this.filePath) !== before) throw new Error('app.yaml 遷移來源正在被修改');
+    this.history.importLiveSettings(liveSettings(boot), next => { parseBoot({ ...boot, ...next }); });
+    if (signature(this.filePath) !== before) throw new Error('app.yaml 遷移來源正在被修改');
+    mkdirSync(dirname(this.filePath), { recursive: true });
+    const migrated = parseBoot({ schemaVersion: 2, port: boot.port, charactersPath: path, ...this.history.liveSettings() });
+    atomicYaml(this.filePath, { schemaVersion: 3, port: boot.port, charactersPath: path });
+    return migrated;
+  }
   loadRaw(): Record<string, unknown> {
     const before = signature(this.filePath);
-    this.history?.reconcileSettings(before === null ? null : readFileSync(this.filePath, 'utf8'));
-    if (before !== null) {
-      const raw = parseCharacterYaml(readFileSync(this.filePath, 'utf8'));
-      if (!record(raw) || ![1, 2].includes(Number(raw.schemaVersion))) throw new Error('app.yaml 版本無效');
-      this.cached = raw;
+    const text = before === null ? null : readFileSync(this.filePath, 'utf8');
+    this.history.reconcileSettings(text); // 完成舊版尚未結束的 YAML 寫入紀錄。
+    if (text !== null) {
+      const raw = parseCharacterYaml(text);
+      if (!record(raw) || ![1, 2, 3].includes(Number(raw.schemaVersion))) throw new Error('app.yaml 版本無效');
+      if (signature(this.filePath) !== before) throw new Error('app.yaml 正在被外部修改');
+      if (raw.schemaVersion === 3) {
+        if (Object.keys(raw).some(key => !['schemaVersion', 'port', 'charactersPath'].includes(key))) throw new Error('app.yaml 只接受啟動設定；即時設定請由介面修改');
+        const live = this.history.liveSettings();
+        if (!live) throw new Error('缺少本地即時設定資料庫，請還原 history.sqlite；不會從舊 YAML 覆蓋資料');
+        this.cached = parseBoot({ schemaVersion: 2, port: raw.port, charactersPath: raw.charactersPath, ...live }) as unknown as Record<string, unknown>;
+      } else if (raw.schemaVersion === 2 && raw.initialized === true) {
+        this.cached = this.initialize(parseBoot(raw)) as unknown as Record<string, unknown>;
+      } else this.cached = raw;
     }
-    if (signature(this.filePath) !== before) throw new Error('app.yaml 正在被外部修改');
-    this.sourceSignature = before;
     return structuredClone(this.cached);
   }
   load(): BootSettings { return parseBoot(this.loadRaw()); }
-  save(patch: Partial<BootSettings>): void {
+  snapshot(): BootSettings { return parseBoot(structuredClone(this.cached)); }
+  save(patch: Partial<BootSettings>, characters?: CharacterStore, reset?: { petId: string; workspace: string }): void {
     const next = parseBoot({ ...this.cached, ...patch });
-    if (JSON.stringify(next) === JSON.stringify(this.cached) && this.sourceSignature !== null) return;
-    if (signature(this.filePath) !== this.sourceSignature) throw new Error('app.yaml 已被外部修改，未覆寫；請重啟實例以套用');
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    const previous = existsSync(this.filePath) ? readFileSync(this.filePath, 'utf8') : null;
-    this.history?.reconcileSettings(previous);
-    this.history?.prepareSettings(previous, stringify(next, { lineWidth: 0, aliasDuplicateObjects: false }));
-    atomicYaml(this.filePath, next);
-    this.history?.reconcileSettings(readFileSync(this.filePath, 'utf8'));
-    this.sourceSignature = signature(this.filePath);
+    if (this.cached.schemaVersion !== 2 || this.cached.initialized !== true) {
+      this.cached = this.initialize(next) as unknown as Record<string, unknown>;
+      return;
+    }
+    if (next.port !== this.cached.port || next.charactersPath !== this.cached.charactersPath) throw new Error('啟動設定請修改 app.yaml，重啟後生效');
+    // 一般儲存不讀寫 YAML，外部修改 port 不影響本次即時設定提交。
+    this.history.saveLiveSettings(liveSettings(next), characters, reset);
     this.cached = structuredClone(next) as unknown as Record<string, unknown>;
   }
+  close(): void { if (this.ownsHistory) this.history.close(); }
 }
 export interface MigrationChoices {
   model(path: string, name: string): Promise<string | null>;
   parameters(existing: CharacterParameters, incoming: CharacterParameters): Promise<'existing' | 'incoming' | 'cancel'>;
 }
-/** 一次性初始化才讀完整角色；一般啟動僅讀 app.yaml。衝突必須由使用者選擇。 */
+/** 一次性初始化才讀完整角色；一般啟動讀啟動 YAML 及本地 SQLite。衝突必須由使用者選擇。 */
 export async function migrateSettings(store: SettingsStore, defaultModel: string, sharedPath: string, choices: MigrationChoices, baseline?: string): Promise<BootSettings> {
   const boot = store.loadRaw();
   if (boot.schemaVersion === 2 && boot.initialized === true) return parseBoot(boot);
+  if (/\.sqlite$/i.test(sharedPath) && !existsSync(sharedPath)) sharedPath = sharedPath.replace(/\.sqlite$/i, '.yaml');
   const runtime = dirname(store.filePath);
   const ownData = dirname(runtime);
   const hasOwn = boot.initialized === true || ['app.json', 'characters.yaml', 'config.json', 'pets'].some((n) => existsSync(join(runtime, n)));
   const sourceData = !hasOwn && baseline ? baseline : ownData;
   const copying = sourceData !== ownData;
-  const source = copying ? join(sourceData, 'runtime-data') : runtime;
+  const source = copying ? join(sourceData, existsSync(join(sourceData, 'runtime_data', 'app.yaml')) ? 'runtime_data' : 'runtime-data') : runtime;
   const watched = new Map<string, string | null>();
   const read = (path: string, yaml = false): unknown => {
     const before = signature(path); watched.set(path, before);
@@ -97,13 +129,26 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
     const text = readFileSync(path, 'utf8');
     return yaml ? parseCharacterYaml(text) : JSON.parse(text) as unknown;
   };
-  const sourceBoot = read(join(source, 'app.yaml'), true);
+  let sourceBoot = read(join(source, 'app.yaml'), true);
+  if (record(sourceBoot) && sourceBoot.schemaVersion === 3) {
+    const live = HistoryStore.readLiveSettings(join(source, 'history.sqlite'));
+    if (!live) throw new Error('基準實例缺少即時設定資料庫');
+    sourceBoot = { ...sourceBoot, ...live };
+  }
   const registry = read(join(source, 'app.json'));
-  const rawCharacters = read(join(source, 'characters.yaml'), true);
+  const rawCharacters = record(sourceBoot) && sourceBoot.schemaVersion === 3 ? null : read(join(source, 'characters.yaml'), true);
   const oldDocs = record(rawCharacters) && Array.isArray(rawCharacters.characters) ? rawCharacters.characters as Record<string, unknown>[] : [];
   if (rawCharacters !== null && (!record(rawCharacters) || ![1, 2, 3].includes(Number(rawCharacters.schemaVersion)) || !Array.isArray(rawCharacters.characters))) throw new Error('舊角色 YAML 無效');
+  // 已遷移的共用庫由 SQLite 讀取；舊 YAML 僅供首次升級。
+  const databasePath = sharedPath.replace(/\.ya?ml$/i, '.sqlite');
+  const existingDatabase = existsSync(databasePath);
+  const sharedStore = existingDatabase ? new CharacterStore(sharedPath) : undefined;
   const globalSignature = signature(sharedPath);
-  const globalRaw = read(sharedPath, true);
+  let globalRaw: unknown;
+  if (existingDatabase) {
+    sharedStore!.loadForWake();
+    globalRaw = { schemaVersion: 3, characters: sharedStore!.all() };
+  } else globalRaw = read(sharedPath, true);
   const globals = new Map<string, CharacterDocument>();
   if (record(globalRaw) && globalRaw.schemaVersion === 3 && Array.isArray(globalRaw.characters)) {
     for (const raw of globalRaw.characters) {
@@ -176,7 +221,8 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
       projects = [{ workspacePath: path, agent: profile.agent as AgentBinding | undefined }];
     }
     for (const project of projects) {
-      const path = realpathSync.native(project.workspacePath);
+      // 舊工作區可能已搬移；遷移保留原路徑，避免阻斷整個應用程式啟動。
+      const path = existsSync(project.workspacePath) ? realpathSync.native(project.workspacePath) : project.workspacePath;
       if (local.projects.some((p) => p.workspacePath === path)) continue;
       const agent = project.agent ? { ...project.agent } : undefined;
       if (copying && agent) delete agent.sessionId;
@@ -197,10 +243,18 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
     const path = join(runtime, name);
     if (existsSync(path)) cpSync(path, join(backup, name), { recursive: true });
   }
-  if (globalSignature !== null && sharedPath !== join(runtime, 'characters.yaml')) cpSync(sharedPath, join(backup, 'shared-characters.yaml'));
+  if (!existingDatabase && globalSignature !== null && sharedPath !== join(runtime, 'characters.yaml')) cpSync(sharedPath, join(backup, 'shared-characters.yaml'));
   const nextDocuments = [...globals.values()];
-  if (!record(globalRaw) || globalRaw.schemaVersion !== 3 || JSON.stringify(globalRaw.characters) !== JSON.stringify(nextDocuments)) writeCharacters(sharedPath, globalSignature, nextDocuments);
-  const verified = parseCharacterYaml(readFileSync(sharedPath, 'utf8')) as { characters: unknown[] };
+  if (existingDatabase) {
+    const shared = sharedStore!;
+    for (const doc of nextDocuments) {
+      shared.resolve(doc.vrmPath, doc.modelHash, doc.parameters, false, doc.id);
+      shared.update(doc.id, doc.parameters);
+    }
+    shared.flush();
+  } else writeCharacters(sharedPath, globalSignature, nextDocuments);
+  const check = new CharacterStore(existingDatabase ? databasePath : sharedPath); check.loadForWake();
+  const verified = { characters: check.all() };
   if (verified.characters.length !== globals.size) throw new Error('共用角色讀回驗證失敗');
   // 同實例升級保留歷史：舊檔保留，另複製到「角色＋專案」的新索引。
   // 新平行世界不繼承基準對話。
@@ -212,7 +266,7 @@ export async function migrateSettings(store: SettingsStore, defaultModel: string
       const projects = Array.isArray(profile.projects) ? profile.projects as PetProject[]
         : typeof profile.workspacePath === 'string' ? [{ workspacePath: profile.workspacePath }] : [];
       for (const project of projects) {
-        const workspace = realpathSync.native(project.workspacePath);
+        const workspace = existsSync(project.workspacePath) ? realpathSync.native(project.workspacePath) : project.workspacePath;
         const oldKey = modelHash(Buffer.from(JSON.stringify([profile.id, workspace])));
         const candidates = [join(runtime, 'transcripts', `${oldKey}.json`), join(runtime, 'transcripts', `${profile.id}.json`)];
         const existing = candidates.find(existsSync);

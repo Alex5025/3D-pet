@@ -41,11 +41,11 @@ export function registerAppearanceIpc<
   ipcMain.on('save-state', (event, id: string, state: unknown) => {
     const win = overlay();
     if (!win || event.sender !== win.webContents) return;
-    updatePet(id, { state } as Partial<TProfile>);
+    if (!updatePet(id, { state } as Partial<TProfile>)) return;
     settings()?.webContents.send('apply-state', id, state);
   });
   ipcMain.on('set-state', (_event, id: string, state: unknown) => {
-    updatePet(id, { state } as Partial<TProfile>);
+    if (!updatePet(id, { state } as Partial<TProfile>)) return;
     overlay()?.webContents.send('apply-state', id, state);
   });
 

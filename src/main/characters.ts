@@ -64,6 +64,27 @@ export function createCharacters(deps: CharactersDeps) {
   }
 
   let storageError = '';
+  let committedPets = new Map<string, PetProfile>();
+  let committedRegistry: AppRegistry | undefined;
+  function rememberCommitted(): void {
+    committedPets = structuredClone(pets);
+    committedRegistry = structuredClone(registry);
+  }
+  function restoreCommitted(): void {
+    for (const id of pets.keys()) if (!committedPets.has(id)) pets.delete(id);
+    for (const [id, saved] of committedPets) {
+      const current = pets.get(id);
+      if (current) {
+        for (const key of Object.keys(current)) delete (current as unknown as Record<string, unknown>)[key];
+        Object.assign(current, structuredClone(saved));
+      } else pets.set(id, structuredClone(saved));
+    }
+    if (committedRegistry) {
+      for (const key of Object.keys(registry)) delete (registry as unknown as Record<string, unknown>)[key];
+      Object.assign(registry, structuredClone(committedRegistry));
+    }
+    characters.discardChanges();
+  }
 
   function reportStorageError(error: unknown): void {
     storageError = error instanceof Error ? error.message : String(error);
@@ -86,10 +107,23 @@ export function createCharacters(deps: CharactersDeps) {
     if (!project) return false;
     profile.workspacePath = path;
     profile.agent = project.agent;
+    if (!persistConfigSync()) return false;
     deps.sendRefFiles?.(profile.id);
-    scheduleConfigFlush();
     sendPetProfiles();
     return true;
+  }
+
+  /** Session 與目前對話索引一起提交，成功後才讓 IPC 清除介面快取。 */
+  function newSession(petId: string): boolean {
+    const profile = getPet(petId);
+    const project = profile && projectFor(profile);
+    if (!profile || !project) return false;
+    if (project.agent) {
+      const { sessionId: _previous, ...agent } = project.agent;
+      project.agent = agent;
+      profile.agent = agent;
+    }
+    return persistConfigSync({ petId, workspace: project.workspacePath });
   }
 
   /** 預設工作根目錄：供新寵物及啟動時缺少工作目錄的角色使用。 */
@@ -126,30 +160,34 @@ export function createCharacters(deps: CharactersDeps) {
     );
   }
 
-  /** 設定異動立即原子落盤；角色資料先寫入，啟動索引最後更新。 */
-  function persistConfigSync(): void {
+  /** 即時設定與角色變更在同一個 SQLite 交易提交；失敗恢復記憶體。 */
+  function persistConfigSync(reset?: { petId: string; workspace: string }): boolean {
     try {
-      if (!settingsReady) return;
-      characters.flush();
+      if (!settingsReady) return true;
       settings.save({
         initialized: true, selectedPetId: registry.selectedPetId,
         defaultWorkspaceRoot: registry.defaultWorkspaceRoot, locale: registry.locale,
         pets: [...pets.values()].map(localPet),
-      });
+      }, characters, reset);
+      rememberCommitted();
       storageError = '';
       deps.settingsWin?.webContents.send('character-storage-error', '');
+      return true;
     } catch (error) {
+      restoreCommitted();
       reportStorageError(error);
+      sendPetProfiles();
       console.log('[main] config flush failed', error);
+      return false;
     }
   }
 
   function scheduleConfigFlush(): void {
-    persistConfigSync();
+    if (!persistConfigSync()) throw new Error(storageError);
   }
 
   async function loadConfig(): Promise<void> {
-    const boot = await migrateSettings(settings, deps.defaultVrmPath(), characters.filePath, {
+    const boot = await migrateSettings(settings, deps.defaultVrmPath(), characters.sourcePath, {
       model: async (path, name) => {
         await appPrompt({ message: `「${name}」的模型路徑已失效，請重新選擇模型。`, detail: path, buttons: ['選擇模型', '取消'], cancelId: 1 }).then((answer) => { if (answer.response === 1) throw new Error('已取消修復'); });
         const result = await dialog.showOpenDialog({ title: `修復 ${name} 的模型路徑`, defaultPath: deps.modelsDir(), properties: ['openFile'], filters: [{ name: 'VRM', extensions: ['vrm'] }] });
@@ -177,6 +215,7 @@ export function createCharacters(deps: CharactersDeps) {
       defaultWorkspaceRoot: boot.defaultWorkspaceRoot, locale: boot.locale as Locale | undefined
     };
     settingsReady = true;
+    rememberCommitted();
   }
 
   function getPet(id?: string): PetProfile | null {
@@ -200,6 +239,7 @@ export function createCharacters(deps: CharactersDeps) {
       if (project) project.agent = patch.agent;
     }
     Object.assign(profile, patch, { id: profile.id });
+    if (!persistConfigSync()) return null;
     // 「休息 → 釋放快取 + 關 agent session」是 disable 的固有副作用:集中在這唯一變更點,
     // 不管來自選單、設定面板或未來任何路徑都一致(避免各處各記一份)。
     if (patch.enabled === false) {
@@ -211,7 +251,6 @@ export function createCharacters(deps: CharactersDeps) {
     }
     if (patch.enabled !== undefined) deps.refreshCursorPoll?.();
     if (patch.enabled !== undefined || 'idleMotions' in patch) deps.scheduleIdleMotion(id);
-    scheduleConfigFlush();
     return profile;
   }
 
@@ -223,10 +262,10 @@ export function createCharacters(deps: CharactersDeps) {
   async function wakeCharacter(profile: PetProfile): Promise<void> {
     characters.loadForWake();
     const saved = characters.get(profile.id);
-    if (profile.characterId && !saved) throw new Error('characters.yaml 缺少此角色，請還原設定');
+    if (profile.characterId && !saved) throw new Error('共用角色資料庫缺少此角色，請還原設定');
     if (saved) {
       const version = modelHash(Buffer.from(saved.parameters.persona ?? ''));
-      if (profile.personaVersion !== version) {
+      if (profile.personaVersion !== undefined && profile.personaVersion !== version) {
         await deps.bridge?.closePetSession(profile.id);
         for (const project of profile.projects ?? []) if (project.agent) delete project.agent.sessionId;
       }
@@ -237,7 +276,8 @@ export function createCharacters(deps: CharactersDeps) {
     }
     if (!profile.workspacePath) throw new Error('請先選擇工作目錄');
     await bindCharacter(profile, profile.workspacePath, profile.vrmPath ?? deps.defaultVrmPath(), true);
-    updatePet(profile.id, { enabled: true });
+    if (!updatePet(profile.id, { enabled: true })) throw new Error(storageError);
+    releasePetCaches(profile.id);
   }
 
   async function setPetEnabled(id: string, enabled: boolean): Promise<PetProfile | null> {
@@ -253,7 +293,7 @@ export function createCharacters(deps: CharactersDeps) {
           await appPrompt({ message: profile.characterError, buttons: ['確定'], cancelId: 0 });
         }
       } else if (!enabled) {
-        updatePet(id, { enabled: false });
+        if (!updatePet(id, { enabled: false })) return null;
         profile.characterReady = false;
       }
       persistConfigSync();
@@ -275,7 +315,7 @@ export function createCharacters(deps: CharactersDeps) {
     const profile = pets.get(id);
     if (!profile) return null;
     registry.selectedPetId = id;
-    scheduleConfigFlush();
+    if (!persistConfigSync()) return null;
     deps.refreshTray();
     deps.settingsWin?.webContents.send('selected-pet-apply', id);
     const icons = avatarIcons.get(id);
@@ -303,9 +343,12 @@ export function createCharacters(deps: CharactersDeps) {
     profile.characterRevision = (profile.characterRevision ?? 0) + 1;
     delete profile.characterError;
     applyCharacter(profile, document.parameters);
-    releasePetCaches(profile.id);
-    deps.scheduleIdleMotion(profile.id);
-    if (!waking) { persistConfigSync(); sendPetProfiles(); }
+    if (!waking && !persistConfigSync()) throw new Error(storageError);
+    if (!waking) {
+      releasePetCaches(profile.id);
+      deps.scheduleIdleMotion(profile.id);
+      sendPetProfiles();
+    }
     // 完整設定由 profile 廣播套用；模型由 renderer 依角色版本重建，避免兩次載入競態。
   }
 
@@ -375,8 +418,7 @@ export function createCharacters(deps: CharactersDeps) {
         const canonical = realpathSync.native(path);
         profile.projects ??= [];
         if (!projectFor(profile, canonical)) profile.projects.push({ workspacePath: canonical });
-        selectProject(profile, canonical);
-        persistConfigSync();
+        if (!selectProject(profile, canonical)) throw new Error(storageError);
       }
       catch (error) { await appPrompt({ message: String(error), buttons: ['確定'], cancelId: 0 }); }
     });
@@ -410,22 +452,22 @@ export function createCharacters(deps: CharactersDeps) {
     if (pets.size <= 1 || !pets.has(id)) return false;
     // 移除本世界的角色引用，不刪除其他世界仍使用的共用角色。
     pets.delete(id);
+    registry.petIds = registry.petIds.filter((petId) => petId !== id);
+    if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
+    if (!persistConfigSync()) return false;
     releasePetCaches(id);
     deps.clearChatQueue?.(id);
     deps.clearTranscript?.(id); // 寵物刪了,對話紀錄不留在磁碟上
     deps.cancelIdleMotion(id);
     void deps.bridge?.closePetSession(id);
-    registry.petIds = registry.petIds.filter((petId) => petId !== id);
-    if (registry.selectedPetId === id) registry.selectedPetId = registry.petIds[0]!;
     deps.refreshCursorPoll?.(); // 刪掉最後一隻醒著的寵物時停輪詢
-    persistConfigSync();
     sendPetProfiles();
     return true;
   }
 
   function resetState(petId: string): void {
     const state = { ...DEFAULT_STATE };
-    updatePet(petId, { state });
+    if (!updatePet(petId, { state })) return;
     deps.win?.webContents.send('apply-state', petId, state);
     deps.settingsWin?.webContents.send('apply-state', petId, state);
   }
@@ -455,6 +497,7 @@ export function createCharacters(deps: CharactersDeps) {
   }
   return {
     prepareStore,
+    newSession,
     get settings() { return settings; },
     get characters() { return characters; },
     get loadConfig() { return loadConfig; },
@@ -484,7 +527,7 @@ export function createCharacters(deps: CharactersDeps) {
     get chooseWorkspace() { return chooseWorkspace; },
     get workspaceRoot() { return workspaceRoot; },
     start,
-    dispose: () => scope.dispose(),
+    dispose: () => { scope.dispose(); settings.close(); },
   };
 }
 export type Characters = ReturnType<typeof createCharacters>;

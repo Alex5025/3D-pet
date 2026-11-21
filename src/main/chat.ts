@@ -104,9 +104,9 @@ export function createChat(deps: ChatDeps) {
     liveTranscripts.delete(petId);
     turns.delete(petId);
   }
-  const clearTranscript = (petId: string) => {
+  const clearTranscript = (petId: string, rotate = true) => {
     const selected = deps.getPet(petId)?.workspacePath;
-    deps.history.newConversation(petId, selected ?? '');
+    if (rotate) deps.history.newConversation(petId, selected ?? '');
     if (liveTranscripts.get(petId)?.workspacePath === selected) { liveTranscripts.delete(petId); turns.delete(petId); }
     completedTranscripts.delete(chatKey(petId, selected));
   };

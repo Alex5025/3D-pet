@@ -159,6 +159,7 @@ const ipcReferences: IpcReferences = createIpcReferences({
 const ipcChat: IpcChat = createIpcChat({
   get win() { return windows.win; },
   get pets() { return characters.pets; },
+  get newSession() { return characters.newSession; },
   get projectFor() { return characters.projectFor; },
   get getPet() { return characters.getPet; },
   get chatKey() { return chat.chatKey; },

@@ -41,7 +41,7 @@ function validateConfig(path) {
   const document = parseDocument(readFileSync(path, 'utf8'), { uniqueKeys: true });
   if (document.errors.length || document.warnings.length) throw new Error(`遷移來源 YAML 無效：${path}`);
   const value = document.toJS({ maxAliasCount: 0 });
-  if (![1, 2].includes(value?.schemaVersion) || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535 || !Array.isArray(value.pets)) throw new Error(`遷移來源設定無效：${path}`);
+  if (![1, 2, 3].includes(value?.schemaVersion) || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535 || (value.schemaVersion !== 3 && !Array.isArray(value.pets))) throw new Error(`遷移來源設定無效：${path}`);
 }
 /** 發布前先寫來源標記；重試不覆蓋新設定，對話匯入由 SQLite 記錄去重。 */
 export function prepareStorage(layout, legacy, now = Date.now()) {
@@ -52,6 +52,7 @@ export function prepareStorage(layout, legacy, now = Date.now()) {
   const marker = join(layout.runtime, 'migration-source.json');
   if (resolve(source) !== resolve(layout.runtime) && !existsSync(layout.config) && existsSync(oldConfig)) {
     assertStopped(join(source, 'pet-system.pid'));
+    assertStopped(join(legacy, '3D-pet', 'instances', 'pet-system.pid'));
     validateConfig(oldConfig);
     // 已有 marker 必須與來源一致，避免重試時混用另一實例。
     if (existsSync(marker) && JSON.parse(readFileSync(marker, 'utf8')).source !== source) throw new Error('遷移來源與既有紀錄不符');
@@ -59,6 +60,12 @@ export function prepareStorage(layout, legacy, now = Date.now()) {
     const staging = `${layout.config}.migration`;
     copyFileSync(oldConfig, staging);
     validateConfig(staging);
+    // 停止來源後複製整組 SQLite 檔案，包含舊版 WAL 與未完成交易的恢復檔。
+    for (const name of ['history.sqlite', 'history.sqlite-wal', 'history.sqlite-shm', 'history.sqlite-journal']) {
+      const from = join(source, name);
+      const to = join(layout.runtime, name);
+      if (existsSync(from) && !existsSync(to)) copyFileSync(from, to, constants.COPYFILE_EXCL);
+    }
     renameSync(staging, layout.config);
   }
   if (existsSync(marker)) {

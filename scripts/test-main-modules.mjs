@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -7,6 +8,13 @@ import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import YAML from 'yaml';
+
+if (!process.versions.electron) {
+  const require = createRequire(import.meta.url);
+  execFileSync(require('electron'), [new URL(import.meta.url).pathname], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'inherit' });
+  process.exit(0);
+}
+const require = createRequire(import.meta.url);
 
 // 模擬 Electron 邊界，直接執行正式模組；不啟動日常桌寵或讀取其設定。
 const root = process.platform === 'win32' ? join(tmpdir(), '3D-pet') : '/tmp/3D-pet';
@@ -55,7 +63,7 @@ export const Menu = {};
 export const nativeImage = {};
 export class Tray {}
 `;
-const modules = ['windows', 'resourceScope', 'power', 'lifecycle', 'motions', 'characters', 'drop'];
+const modules = ['windows', 'resourceScope', 'power', 'lifecycle', 'motions', 'characters', 'drop', 'historyStore', 'characterStore'];
 const ipcNames = ['overlay', 'pets', 'references', 'chat', 'settings', 'control', 'menu'];
 const entry = [...modules.map(n => `export * from './src/main/${n}';`), ...ipcNames.map(n => `export * from './src/main/ipc/${n}';`), `export * from 'electron';`].join('\n');
 try {
@@ -66,6 +74,7 @@ try {
       b.onLoad({ filter: /.*/, namespace: 'mock-drag' }, () => ({ contents: 'export const createDragMonitor = () => ({ setActive() {}, dispose() {} });', loader: 'js' }));
       b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'mock' }));
       b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: mock, loader: 'js' }));
+      b.onResolve({ filter: /^better-sqlite3$/ }, () => ({ path: require.resolve('better-sqlite3'), external: true }));
     } }],
   });
   const api = createRequire(import.meta.url)(output);
@@ -237,11 +246,12 @@ try {
   assert.equal(characterService.getPet('fox').characterReady, true);
   assert.equal(characterService.getPet('fox').persona, '原個性');
   characterService.updatePet('fox', { persona: '即時更新' });
-  assert.equal(YAML.parse(await readFile(charactersPath, 'utf8')).characters[0].parameters.persona, '即時更新');
+  const observer = new api.CharacterStore(charactersPath); observer.loadForWake();
+  assert.equal(observer.get('fox').parameters.persona, '即時更新');
   await characterService.setPetEnabled('fox', false);
   assert.equal(characterService.getPet('fox').characterReady, false);
   stored.characters[0].parameters.persona = '外部個性';
-  await writeFile(charactersPath, YAML.stringify(stored));
+  observer.update('fox', stored.characters[0].parameters); observer.flush();
   await characterService.setPetEnabled('fox', true);
   assert.equal(characterService.getPet('fox').persona, '外部個性');
   assert.equal(characterService.getPet('fox').characterReady, true);
@@ -261,3 +271,30 @@ try {
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }
+  // 角色與 Agent 同時修改時，本地寫入失敗不能套用或廣播未提交設定。
+  const Database = require('better-sqlite3');
+  const inspector = new Database(join(runtime, 'history.sqlite'));
+  const savedProfile = structuredClone(characterService.getPet('fox'));
+  inspector.exec("CREATE TRIGGER fail_live BEFORE UPDATE ON live_settings BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;");
+  assert.equal(characterService.updatePet('fox', { persona: '不可套用', agent: { kind: 'codex', sessionId: 'unsaved', permission: 'auto' } }), null);
+  assert.deepEqual(characterService.getPet('fox'), savedProfile);
+  observer.loadForWake();
+  assert.equal(observer.get('fox').parameters.persona, '外部個性');
+  assert.match(characterService.storageError, /injected/);
+  inspector.exec('DROP TRIGGER fail_live');
+  characterService.updatePet('fox', { agent: { kind: 'codex', sessionId: 'kept', permission: 'ask' } });
+  const beforeSession = structuredClone(characterService.getPet('fox'));
+  const history = new api.HistoryStore(join(runtime, 'history.sqlite'));
+  const sessionWorkspace = characterService.getPet('fox').workspacePath;
+  const conversation = history.conversation('fox', sessionWorkspace);
+  inspector.exec("CREATE TRIGGER fail_conversation BEFORE UPDATE ON conversations BEGIN SELECT RAISE(ABORT, 'injected conversation failure'); END;");
+  assert.equal(characterService.newSession('fox'), false);
+  assert.deepEqual(characterService.getPet('fox'), beforeSession);
+  assert.equal(history.projectBinding('fox', sessionWorkspace).sessionId, 'kept');
+  assert.equal(history.conversation('fox', sessionWorkspace), conversation);
+  inspector.exec('DROP TRIGGER fail_conversation');
+  assert.equal(characterService.newSession('fox'), true);
+  assert.equal(history.projectBinding('fox', sessionWorkspace).sessionId, undefined);
+  assert.notEqual(history.conversation('fox', sessionWorkspace), conversation);
+  assert.equal(characterService.storageError, '');
+  inspector.close(); history.close();

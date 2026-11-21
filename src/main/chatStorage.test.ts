@@ -23,7 +23,8 @@ void app.whenReady().then(async () => {
   const win = { webContents: { send(channel: string, _id: string, event: AgentEvent) { if (channel === 'chat-event-apply') events.push(event); } } } as unknown as BrowserWindow;
   const chat = createChat({ history, win, getPet: () => profile, finishLedgerTask() {}, scheduleControlStatus() {},
     pets: new Map([[profile.id, profile]]), taskLedger: new Map(), runningTaskByPet: new Map(), motionFiles: [], motionsDir: () => root,
-    projectFor: () => profile.projects![0], petRefFiles: new Map(), refKey: () => 'fox', scheduleConfigFlush() {},
+    projectFor: () => profile.projects![0], petRefFiles: new Map(), refKey: () => 'fox',
+    scheduleConfigFlush() { history.saveLiveSettings({ initialized: true, selectedPetId: profile.id, pets: [{ ...profile, projects: profile.projects! }] }); },
   });
   const waitFor = async (check: () => boolean) => {
     const end = Date.now() + 5000;
@@ -38,6 +39,8 @@ void app.whenReady().then(async () => {
     await waitFor(() => events.some(event => event.kind === 'done'));
     assert.equal((observer.prepare('SELECT status FROM turns').get() as { status: string }).status, 'completed');
     assert.ok(history.latest('fox', root)?.reply.includes('測試串流'));
+    assert.ok(profile.projects![0].agent?.sessionId);
+    assert.equal(history.projectBinding('fox', root)?.sessionId, profile.projects![0].agent?.sessionId, '真實 session 事件回存專案綁定');
     chat.clearTranscript('fox');
     assert.equal(history.latest('fox', root), null);
     assert.equal((observer.prepare('SELECT count(*) AS n FROM turns').get() as { n: number }).n, 1);

@@ -4,10 +4,14 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { join } from 'node:path';
 import { HistoryStore, HISTORY_RETENTION_MS, type SavedTurn } from './historyStore';
 import { SettingsStore, type BootSettings } from './settingsStore';
-import { atomicYaml, modelHash } from './characterStore';
+import { atomicYaml, modelHash, CharacterStore, parseCharacterYaml } from './characterStore';
 
 const root = mkdtempSync('/tmp/3D-pet/history-test-');
 const database = join(root, 'history.sqlite');
+const legacyDb = new Database(database);
+legacyDb.exec('CREATE TABLE conversations (petId TEXT NOT NULL, workspace TEXT NOT NULL, conversation TEXT NOT NULL, PRIMARY KEY(petId,workspace)); PRAGMA user_version=1;');
+legacyDb.prepare('INSERT INTO conversations VALUES (?,?,?)').run('legacy', '/kept', 'kept-conversation');
+legacyDb.close();
 const configPath = join(root, 'app.yaml');
 const store = new HistoryStore(database);
 const now = Date.now();
@@ -16,30 +20,57 @@ const inspector = new Database(database);
 const base: BootSettings = { schemaVersion: 2, initialized: true, port: 5173, charactersPath: join(root, 'shared.yaml'), selectedPetId: 'fox', pets: [
   { id: 'fox', name: '狐狸', enabled: false, workspacePath: '/project', projects: [{ workspacePath: '/project', agent: { kind: 'codex', sessionId: 'original' } }] },
 ] };
+// 升級保留對話與舊表最新 Session，但只匯入一次。
+assert.equal(inspector.pragma('user_version', { simple: true }), 3);
+assert.equal(store.conversation('legacy', '/kept'), 'kept-conversation');
+const model = join(root, 'fox.vrm'); writeFileSync(model, 'fixture');
+atomicYaml(base.charactersPath, { schemaVersion: 3, characters: [{ schemaVersion: 1, id: 'fox',
+  modelHash: modelHash(Buffer.from('fixture')), vrmPath: model, parameters: { name: '狐狸', persona: '原個性' } }] });
+inspector.prepare('INSERT INTO pet_projects VALUES (?,?,?,?,?,?,?)').run('fox', '/project', model, 1, 'codex', 'latest', JSON.stringify({ kind: 'codex', sessionId: 'latest', permission: 'ask' }));
 atomicYaml(configPath, base);
 const settings = new SettingsStore(configPath, store);
-settings.load();
-settings.save({ port: 5174 });
-settings.save({ port: 5175 });
-settings.save({ port: 5176 });
-settings.save({ port: 5176 });
-let versions = inspector.prepare('SELECT content FROM settings_versions ORDER BY id').all() as { content: string }[];
+const loaded = settings.load();
+assert.equal(loaded.pets[0].projects[0].agent?.sessionId, 'latest');
+assert.deepEqual(Object.keys(parseCharacterYaml(readFileSync(configPath, 'utf8')) as object).sort(), ['charactersPath', 'port', 'schemaVersion']);
+assert.equal(readFileSync(`${configPath}.pre-sqlite.bak`, 'utf8').includes('original'), true);
+settings.save({ locale: 'en' }); settings.save({ locale: 'ja' }); settings.save({ locale: 'ko' }); settings.save({ locale: 'ko' });
+const versions = inspector.prepare('SELECT content FROM settings_versions ORDER BY id').all() as { content: string }[];
 assert.equal(versions.length, 2);
-assert.ok(versions[0].content.includes('5174') && versions[1].content.includes('5175'));
-// 在 YAML 替換前退出：放棄未發布版本，不製造備份。
-const before = readFileSync(configPath, 'utf8');
-store.prepareSettings(before, '未發布');
-store.close();
-new SettingsStore(configPath, store).load();
-assert.equal((inspector.prepare('SELECT count(*) AS n FROM settings_versions').get() as { n: number }).n, 2);
-// 已替換 YAML 但尚未結案：下次載入補回前一版本。
-store.prepareSettings(before, before.replace('5176', '5177'));
-writeFileSync(configPath, before.replace('5176', '5177'));
-store.close();
+assert.equal(JSON.parse(versions[0].content).locale, 'en');
+assert.equal(JSON.parse(versions[1].content).locale, 'ja');
+// 重啟欄位可外部修改；即時儲存不能把它覆蓋，也不能提前生效。
+const startup = readFileSync(configPath, 'utf8').replace('5173', '5177');
+writeFileSync(configPath, startup);
+settings.save({ locale: 'en' });
+assert.equal(readFileSync(configPath, 'utf8'), startup);
+assert.equal(settings.snapshot().port, 5173);
 assert.equal(new SettingsStore(configPath, store).load().port, 5177);
-versions = inspector.prepare('SELECT content FROM settings_versions ORDER BY id').all() as { content: string }[];
-assert.equal(versions.length, 2);
-assert.ok(versions[1].content.includes('5176'));
+assert.throws(() => settings.save({ port: 5179 }), /重啟/);
+// 舊 YAML 被還原或遷移在發布前中斷，不得重複匯入舊即時設定。
+atomicYaml(configPath, base);
+assert.equal(new SettingsStore(configPath, store).load().locale, 'en');
+assert.equal(store.projectBinding('fox', '/project')?.sessionId, 'latest');
+const changed = structuredClone(loaded.pets);
+changed[0].projects[0].agent = { kind: 'codex', model: 'new-model', permission: 'plan' };
+settings.save({ pets: changed });
+store.close();
+assert.equal(new SettingsStore(configPath, store).load().pets[0].projects[0].agent?.sessionId, undefined);
+assert.equal(store.projectBinding('fox', '/project')?.model, 'new-model');
+// 在共用角色已寫入之後強制本地寫入失敗：兩邊都必須回滾。
+const shared = new CharacterStore(loaded.charactersPath); shared.loadForWake();
+const reader = new Database(shared.filePath);
+shared.update('fox', { name: '狐狸', persona: '不應提交' });
+inspector.exec("CREATE TRIGGER fail_live BEFORE UPDATE ON live_settings BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;");
+assert.throws(() => settings.save({ locale: 'ja' }, shared), /injected/);
+assert.equal(JSON.parse((reader.prepare('SELECT document FROM characters WHERE id=?').get('fox') as { document: string }).document).parameters.persona, '原個性');
+assert.equal(store.liveSettings()?.locale, 'en');
+assert.equal(settings.snapshot().locale, 'en');
+assert.equal(shared.hasChanges, true);
+inspector.exec('DROP TRIGGER fail_live');
+settings.save({ locale: 'ja' }, shared);
+assert.equal(shared.hasChanges, false);
+assert.equal(JSON.parse((reader.prepare('SELECT document FROM characters WHERE id=?').get('fox') as { document: string }).document).parameters.persona, '不應提交');
+reader.close();
 const turn = (id: string, at = now): SavedTurn => ({ id, petId: 'fox', workspace: '/project', conversation: store.conversation('fox', '/project'), provider: 'codex', user: '測試', reply: '部分回覆', at, updatedAt: at, status: 'running' });
 store.saveTurn(turn('stream'));
 store.saveTurn({ ...turn('stream'), reply: '完整回覆', status: 'completed' });
@@ -69,12 +100,8 @@ assert.equal(readFileSync(oldPath, 'utf8').includes('原問題'), true);
 const bad = { ...base, pets: [{ ...base.pets[0], id: 'bad' }] };
 writeFileSync(join(legacy, 'transcripts', `${modelHash(Buffer.from(JSON.stringify(['bad', '/project'])))}.json`), '{');
 assert.throws(() => store.importLegacy(legacy, bad, now));
-// 外部改動仍被 SettingsStore 阻擋；損壞資料庫不可默默重建。
-const guarded = new SettingsStore(configPath, store); guarded.load();
-writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('5177', '5178'));
-assert.throws(() => guarded.save({ port: 5179 }), /外部修改/);
 store.close(); inspector.close();
 const corrupt = join(root, 'corrupt.sqlite'); writeFileSync(corrupt, 'not a database');
 assert.throws(() => new HistoryStore(corrupt).initialize());
 rmSync(root, { recursive: true, force: true });
-console.log('通過：SQLite 實際讀寫、前兩版設定、跨檔案中斷恢復、串流更新、對話隔離、30 天期限與重複匯入');
+console.log('通過：SQLite 實際讀寫、前兩版設定、單次遷移、啟動設定隔離、跨資料庫交易回滾、串流更新、對話隔離、30 天期限與重複匯入');

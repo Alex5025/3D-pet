@@ -96,19 +96,13 @@ export function createIpcSettings(deps: IpcSettingsDeps) {
             const answer = await appPrompt({ message: `以匯入設定覆寫「${profile.name}」的光影與角色參數？`, buttons: ['取消', '覆寫'], cancelId: 0 });
             if (answer.response !== 1) return { ok: false, canceled: true };
             if (deps.getPet(id)?.characterId !== characterId) throw new Error('角色已變更，請重新操作');
-            const previous = structuredClone(document.parameters);
             deps.characters.update(characterId, imported.parameters);
-            try { deps.characters.flush(); }
-            catch (error) {
-              deps.characters.update(characterId, previous);
-              deps.reportStorageError(error);
-              throw error;
-            }
             applyCharacter(profile, imported.parameters);
             profile.characterRevision = (profile.characterRevision ?? 0) + 1;
-            deps.scheduleIdleMotion(id);
             deps.persistConfigSync();
             deps.sendPetProfiles();
+            if (deps.storageError) throw new Error(deps.storageError);
+            deps.scheduleIdleMotion(id);
           }
           return { ok: true };
         } catch (error) {

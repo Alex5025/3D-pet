@@ -80,13 +80,13 @@ npm run dev     # macOS 與 Windows 共用的開發啟動方式
 
 | 平台 | 共用角色設定預設位置 |
 | --- | --- |
-| macOS | `~/Library/Application Support/VRM Pet/runtime-data/characters.yaml` |
-| Windows | `%APPDATA%\VRM Pet\runtime-data\characters.yaml` |
+| macOS | `~/Library/Application Support/VRM Pet/runtime-data/characters.sqlite` |
+| Windows | `%APPDATA%\VRM Pet\runtime-data\characters.sqlite` |
 
-- `characters.yaml` 集中保存各角色的名稱、VRM 路徑、個性、光影、服裝、擺動與動作設定。不同角色以獨立 ID 識別，即使使用相同 VRM，參數也不合併。
+- `characters.sqlite` 集中保存各角色的名稱、VRM 路徑、個性、光影、服裝、擺動與動作設定。不同角色以獨立 ID 識別，即使使用相同 VRM，參數也不合併。
 - 同一角色在不同開發工作樹共用基礎參數；AI 模型與 Agent session 屬於本地專案執行設定，不影響角色身分。
-- 正常啟動讀取本地 `app.yaml`；喚醒角色時才讀取共用角色參數，首次初始化及遷移例外。其他已喚醒實例不即時套用變更，需下次喚醒才重新載入。
-- `app.yaml` 保存 port、角色引用、負責專案與 Agent 綁定，位於工作樹根目錄的 `runtime_data/`。
+- 正常啟動讀取本地 `app.yaml` 與 `history.sqlite`；喚醒角色時才讀取共用角色參數，首次初始化及遷移例外。其他已喚醒實例不即時套用變更，需下次喚醒才重新載入。
+- `app.yaml`（schemaVersion 3）只保存 port 與共用角色資料庫路徑，修改後重啟生效。即時設定（角色啟用／選取、專案、Agent／Session、位置、語言、預設工作根目錄）保存在同目錄 `history.sqlite`。
 - 介面設定異動立即儲存。寫入時讀取檔案並合併不同欄位的異動，以保留外部編輯；這不會即時套用其他實例的角色參數。同一欄位有不同修改時，保留檔案並提示衝突。
 - 儲存失敗仍會在設定頁顯示錯誤與重試操作。詳細目錄與遷移方式見 [系統架構與資料清單](docs/SYSTEM-INVENTORY.md)。
 
@@ -170,10 +170,12 @@ npm run check:secrets:all                                                 # 掃�
 
 ### 本地設定與歷史儲存
 
-- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（含 SQLite 的 WAL／SHM 檔）。
+- 工作樹設定：`<worktree>/runtime_data/app.yaml`；對話與設定版本：同目錄 `history.sqlite`（若有 journal 檔須一併保存）。
 - 日誌、PID、快取及臨時附件：`<worktree>/3D-pet/instances/`，均不進 Git。只有 Unix socket 路徑超過平台長度限制時，通訊暫存退回 `/tmp/3D-pet/instances/`。
 - 對話保存最近 30 天，每秒保存串流、結束立即保存；開新對話保留舊歷史，但泡泡只回填目前對話最後一輪。不保存附件二進位或完整工具輸出。
-- `app.yaml` 仍是設定唯一依據；SQLite 只保留前兩次不同版本，不包含目前版本。原有共用角色備份與遷移備份不裁剪。
+- 啟動設定以 `app.yaml` 為準，即時設定以 SQLite 為準，不雙向同步。SQLite 保存目前即時設定及前兩次不同版本；共用角色備份與遷移備份不裁剪。
+- 即時變更提交成功後才套用；本地及共用設定以同一 SQLite 交易提交，失敗回滾。開新對話的 Session 清除與對話索引更新也一起提交。
+- 首次升級保留舊 YAML 及 `.pre-sqlite.bak`，將即時設定與角色匯入資料庫，再發布精簡啟動 YAML；中斷後可重試，不以舊檔覆蓋已匯入資料。備份請停止實例，保存本地資料目錄、共用 `characters.sqlite` 及模型／動作原檔。
 - 日誌按 UTC 日分檔，啟動及每日清除超過 30 天的日期檔；同日檔以整日保留。只清理本專案已知日誌檔名。
 - 首次啟動自動從舊 `/tmp` 工作樹實例複製設定及匯入期限內的對話；舊實例須先結束。已有新設定不覆蓋，來源檔與舊備份保留；舊 JSON 只有最後一輪，無法恢復更早內容。
 - `VRM_PET_DATA_DIR` 覆寫根目錄，之下建立 `runtime_data/` 與 `3D-pet/instances/`；共用角色與資產不受影響。測試另設 `VRM_PET_SHARED_CHARACTERS`。

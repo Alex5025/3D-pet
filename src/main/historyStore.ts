@@ -3,7 +3,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ChatTranscript } from '../shared/chat';
-import type { BootSettings } from './settingsStore';
+import type { AgentBinding } from '../shared/agentEvents';
+import type { CharacterStore } from './characterStore';
+import type { BootSettings, LiveSettings } from './settingsStore';
 import { RETENTION_MS } from '../../scripts/storage-layout.mjs';
 
 export const HISTORY_RETENTION_MS = RETENTION_MS;
@@ -23,11 +25,12 @@ export class HistoryStore {
     mkdirSync(dirname(this.filePath), { recursive: true });
     const db = new Database(this.filePath);
     try {
-      db.pragma('journal_mode = WAL');
+      // 使用 rollback journal，讓 ATTACH 的本地／共用資料庫可原子提交。
+      db.pragma('journal_mode = DELETE');
       db.pragma('synchronous = FULL');
       db.pragma('busy_timeout = 5000');
       const version = db.pragma('user_version', { simple: true });
-      if (version !== 0 && version !== 1) throw new Error('不支援的對話資料庫版本');
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error('不支援的對話資料庫版本');
       db.transaction(() => {
         db.exec(`
           CREATE TABLE IF NOT EXISTS conversations (petId TEXT NOT NULL, workspace TEXT NOT NULL, conversation TEXT NOT NULL, PRIMARY KEY(petId, workspace));
@@ -40,12 +43,73 @@ export class HistoryStore {
           CREATE TABLE IF NOT EXISTS settings_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, at INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS settings_pending (id INTEGER PRIMARY KEY CHECK(id=1), previous TEXT, next TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS imports (source TEXT PRIMARY KEY, at INTEGER NOT NULL);
-          PRAGMA user_version = 1;
+          CREATE TABLE IF NOT EXISTS pet_projects (
+            petId TEXT NOT NULL, workspace TEXT NOT NULL, vrmPath TEXT,
+            isCurrent INTEGER NOT NULL, provider TEXT NOT NULL, sessionId TEXT,
+            agent TEXT NOT NULL, PRIMARY KEY(petId, workspace)
+          );
+          CREATE TABLE IF NOT EXISTS live_settings (id INTEGER PRIMARY KEY CHECK(id=1), content TEXT NOT NULL);
+
         `);
+        if (version !== 3) db.pragma('user_version = 3');
       })();
       this.db = db;
       return db;
     } catch (error) { db.close(); throw error; }
+  }
+  static readLiveSettings(filePath: string): LiveSettings | undefined {
+    const db = new Database(filePath, { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare('SELECT content FROM live_settings WHERE id=1').get() as { content: string } | undefined;
+      return row ? JSON.parse(row.content) as LiveSettings : undefined;
+    } finally { db.close(); }
+  }
+  liveSettings(): LiveSettings | undefined {
+    const row = this.connection().prepare('SELECT content FROM live_settings WHERE id=1').get() as { content: string } | undefined;
+    return row ? JSON.parse(row.content) as LiveSettings : undefined;
+  }
+  /** 舊表只在首次匯入時讀取；即時設定發布後不再以舊資料回填。 */
+  importLiveSettings(settings: LiveSettings, validate: (settings: LiveSettings) => void): void {
+    const db = this.connection();
+    db.transaction(() => {
+      if (this.liveSettings()) return;
+      const next = structuredClone(settings);
+      for (const pet of next.pets) for (const project of pet.projects) {
+        const row = db.prepare('SELECT agent FROM pet_projects WHERE petId=? AND workspace=?').get(pet.id, project.workspacePath) as { agent: string } | undefined;
+        if (row) project.agent = JSON.parse(row.agent) as AgentBinding;
+      }
+      validate(next);
+      this.saveLiveSettings(next);
+      db.exec('DELETE FROM pet_projects');
+    }).immediate();
+  }
+  projectBinding(petId: string, workspace: string): AgentBinding | undefined {
+    return this.liveSettings()?.pets.find(pet => pet.id === petId)?.projects.find(project => project.workspacePath === workspace)?.agent;
+  }
+  saveLiveSettings(settings: LiveSettings, characters?: CharacterStore, reset?: { petId: string; workspace: string }): void {
+    const db = this.connection();
+    let attached = false;
+    if (characters?.hasChanges) {
+      db.prepare('ATTACH DATABASE ? AS shared').run(characters.filePath);
+      attached = true;
+      db.pragma('shared.journal_mode = DELETE');
+      db.pragma('shared.synchronous = FULL');
+    }
+    try {
+      const committed = db.transaction(() => {
+        const finish = attached ? characters!.writeInTransaction(db, 'shared') : () => {};
+        const content = JSON.stringify(settings);
+        const previous = db.prepare('SELECT content FROM live_settings WHERE id=1').get() as { content: string } | undefined;
+        if (previous?.content !== content) {
+          if (previous) db.prepare('INSERT INTO settings_versions(content,at) VALUES (?,?)').run(previous.content, Date.now());
+          db.prepare('INSERT INTO live_settings VALUES (1,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content').run(content);
+          db.exec('DELETE FROM settings_versions WHERE id NOT IN (SELECT id FROM settings_versions ORDER BY id DESC LIMIT 2)');
+        }
+        if (reset) this.newConversation(reset.petId, reset.workspace);
+        return finish;
+      }).immediate();
+      committed();
+    } finally { if (attached) db.exec('DETACH DATABASE shared'); }
   }
   initialize(now = Date.now()): void {
     this.connection().prepare("UPDATE turns SET status='interrupted', updatedAt=? WHERE status='running'").run(now);

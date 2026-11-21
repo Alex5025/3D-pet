@@ -26,7 +26,8 @@ export interface IpcChatDeps {
   readonly refKey: (id: string, workspacePath?: string | undefined) => string;
   readonly sendRefFiles: (petId: string) => void;
   readonly chatQueue: ChatQueue;
-  readonly clearTranscript: ((petId: string) => void);
+  readonly clearTranscript: (petId: string, rotate?: boolean) => void;
+  readonly newSession: (petId: string) => boolean;
   readonly updatePet: (id: string, patch: Partial<PetProfile>) => PetProfile | null;
   readonly sendPetProfiles: () => void;
   readonly chatDispatcher: ChatDispatcher;
@@ -71,7 +72,7 @@ export function createIpcChat(deps: IpcChatDeps) {
       if (!fromOurWindow) return;
       const selected = deps.getPet(id)?.workspacePath;
       if (deps.bridge?.petStates().some((s) => s.petId === id && s.workspacePath === selected && s.running)) return;
-      try { deps.clearTranscript?.(id); } // 舊歷史保留，切換目前對話索引。
+      try { if (!deps.newSession(id)) return; deps.clearTranscript(id, false); } // 舊歷史保留，切換目前對話索引。
       catch (error) {
         console.error('[history] 建立新對話失敗', error);
         deps.win?.webContents.send('chat-event-apply', id, { kind: 'tool', name: `建立新對話失敗：${String(error)}` }, selected);
@@ -80,10 +81,6 @@ export function createIpcChat(deps: IpcChatDeps) {
       deps.petRefFiles.delete(deps.refKey(id)); // 參考檔是「當次對話」的:開新對話一併清空
       deps.sendRefFiles(id);
       deps.chatQueue.clearProject(id, selected); // 只清目前專案的待處理對話
-      const profile = deps.getPet(id);
-      if (!profile?.agent?.sessionId) return; // 已經是新對話(參考檔仍要清)
-      const { sessionId: _dropped, ...keep } = profile.agent;
-      deps.updatePet(id, { agent: keep });
       void deps.bridge?.closePetSession(id, deps.getPet(id)?.workspacePath);
       deps.sendPetProfiles();
     });

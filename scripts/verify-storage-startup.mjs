@@ -61,6 +61,7 @@ async function quit(evaluate) {
 }
 try {
   let evaluate = await launch();
+  assert.equal((await evaluate('window.pet.getPetCollection()')).pets[0].agent.sessionId, 'previous-session');
   assert.equal((await evaluate('window.pet.getChatTranscript("storage-test")')).reply, '遷移前回覆');
   assert.equal(readFileSync(join(legacy, 'app.yaml'), 'utf8'), original, '遷移保留原檔');
   assert.equal((await evaluate('window.pet.chatSend("storage-test", "儲存啟動驗證")')).queued, true);
@@ -73,12 +74,16 @@ try {
   assert.equal(existsSync(join(root, 'runtime_data/history.sqlite')), true);
   assert.equal(existsSync(join(root, '3D-pet/instances/pet-system.pid')), true);
   let saved = YAML.parse(readFileSync(join(root, 'runtime_data/app.yaml'), 'utf8'));
-  assert.equal(saved.port, 54329); assert.equal(saved.pets[0].projects[0].agent.effort, 'high');
+  assert.equal(saved.port, 54329); assert.equal(saved.schemaVersion, 3); assert.equal(saved.pets, undefined); assert.ok(saved.charactersPath.endsWith('.sqlite'));
   // 快取刪除後，設定與 SQLite 仍完整；第二次啟動不重複覆蓋原設定。
   rmSync(join(root, '3D-pet/instances/Cache'), { recursive: true, force: true });
   evaluate = await launch();
   assert.equal((await evaluate('window.pet.getChatTranscript("storage-test")')).reply, transcript.reply);
   assert.equal((await evaluate('window.pet.getPetCollection()')).pets[0].agent.effort, 'high');
+  await evaluate('window.pet.newSession("storage-test")');
+  await sleep(100);
+  assert.equal((await evaluate('window.pet.getPetCollection()')).pets[0].agent.sessionId, undefined);
+  assert.equal(await evaluate('window.pet.getChatTranscript("storage-test")'), null);
   await quit(evaluate);
   console.log('通過：真實主程序啟動、舊資料遷移、IPC 對話與設定寫入、正常結束、刪除快取後重啟回填');
 } finally {

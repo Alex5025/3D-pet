@@ -1,5 +1,6 @@
+import Database from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, openSync, closeSync, existsSync, copyFileSync, constants } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseDocument, stringify } from 'yaml';
 import { CHARACTER_KEYS, parseCharacterExport, parseCharacterParameters, type CharacterDocument, type CharacterParameters } from '../shared/character';
@@ -76,46 +77,82 @@ function mergeChanges(base: unknown, local: unknown, disk: unknown, path: string
     }
     return merged;
   }
-  throw new Error(`characters.yaml 已被外部修改同一欄位（${path}），未覆寫；請確認兩邊內容後重試`);
+  throw new Error(`共用角色已被外部修改同一欄位（${path}），未覆寫；請確認兩邊內容後重試`);
 }
 
-/** 全角色集中儲存；一般啟動不讀內容，喚醒或一次性遷移載入；儲存時讀取磁碟以合併異動。 */
+/** YAML 僅在第一次升級時匯入；原檔及獨立備份皆保留。 */
+export function characterDatabasePath(path: string): string {
+  return /\.ya?ml$/i.test(path) ? path.replace(/\.ya?ml$/i, '.sqlite') : path;
+}
+export function migrateCharacterDatabase(source: string): string {
+  const path = characterDatabasePath(source);
+  mkdirSync(dirname(path), { recursive: true });
+  const db = new Database(path);
+  try {
+    db.pragma('busy_timeout = 5000');
+    db.pragma('journal_mode = DELETE');
+    db.pragma('synchronous = FULL');
+    const version = db.pragma('user_version', { simple: true });
+    if (version !== 0 && version !== 1) throw new Error('不支援的共用角色資料庫版本');
+    db.transaction(() => {
+      db.exec('CREATE TABLE IF NOT EXISTS characters (id TEXT PRIMARY KEY, document TEXT NOT NULL); CREATE TABLE IF NOT EXISTS character_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
+      if (!db.prepare("SELECT 1 FROM character_meta WHERE key='initialized'").get()) {
+        if (source === path || !existsSync(source)) throw new Error('缺少共用角色遷移來源，請還原角色設定');
+        const before = signature(source);
+        const raw = parseCharacterYaml(readFileSync(source, 'utf8')) as { schemaVersion?: number; characters?: unknown[] };
+        if (raw?.schemaVersion !== 3 || !Array.isArray(raw.characters)) throw new Error('共用角色 YAML 無效');
+        const documents = raw.characters.map(parseStoredCharacter);
+        if (new Set(documents.map(d => d.id)).size !== documents.length) throw new Error('共用角色 ID 重複');
+        const backup = `${source}.pre-sqlite.bak`;
+        if (!existsSync(backup)) copyFileSync(source, backup, constants.COPYFILE_EXCL);
+        if (signature(source) !== before) throw new Error('共用角色遷移來源正在被修改');
+        const insert = db.prepare('INSERT INTO characters VALUES (?,?)');
+        for (const document of documents) insert.run(document.id, JSON.stringify(document));
+        db.prepare("INSERT INTO character_meta VALUES ('initialized','1')").run();
+      }
+      if (version === 0) db.pragma('user_version = 1');
+    }).immediate();
+    return path;
+  } finally { db.close(); }
+}
+
+/** 共用角色以 SQLite 儲存；三方合併保留其他實例的獨立修改。 */
 export class CharacterStore {
   private documents = new Map<string, CharacterDocument>();
   private dirty = false;
   private baseline = new Map<string, CharacterDocument>();
   private loaded = false;
-  constructor(readonly filePath: string) {}
+  readonly filePath: string;
+  constructor(readonly sourcePath: string) { this.filePath = characterDatabasePath(sourcePath); }
   get(id: string): CharacterDocument | undefined { return this.documents.get(id); }
   all(): CharacterDocument[] { return [...this.documents.values()]; }
+  get hasChanges(): boolean { return this.dirty; }
+  private open(): Database.Database {
+    migrateCharacterDatabase(this.sourcePath);
+    const db = new Database(this.filePath);
+    db.pragma('busy_timeout = 5000');
+    db.pragma('synchronous = FULL');
+    return db;
+  }
   loadForWake(): void {
     this.flush();
-    const before = signature(this.filePath);
-    if (before === null) throw new Error('characters.yaml 已遺失，請還原檔案');
-    const raw = parseCharacterYaml(readFileSync(this.filePath, 'utf8')) as Record<string, unknown> | null;
-    if (!raw || raw.schemaVersion !== 3 || !Array.isArray(raw.characters)) throw new Error('角色 YAML 版本或清單無效');
-    const next = new Map<string, CharacterDocument>();
-    for (const item of raw.characters) {
-      const doc = parseStoredCharacter(item);
-      if (next.has(doc.id)) throw new Error('重複寵物 ID');
-      next.set(doc.id, doc);
-    }
-    if (signature(this.filePath) !== before) throw new Error('角色設定正在被外部修改，請重新喚醒');
-    this.documents = next;
-    this.baseline = structuredClone(next);
-    this.loaded = true;
+    const db = this.open();
+    try {
+      this.documents = new Map((db.prepare('SELECT document FROM characters').all() as { document: string }[])
+        .map(row => { const document = parseStoredCharacter(JSON.parse(row.document)); return [document.id, document]; }));
+      this.baseline = structuredClone(this.documents);
+      this.loaded = true;
+    } finally { db.close(); }
   }
   resolve(vrmPath: string, hash: string, initial: CharacterParameters, requireExisting: boolean, id: string): CharacterDocument {
-    if (!this.loaded) throw new Error('請先喚醒寵物以載入 characters.yaml');
+    if (!this.loaded) throw new Error('請先喚醒寵物以載入角色資料庫');
     if (!id) throw new Error('角色 ID 不可為空');
     vrmPath = realpathSync.native(vrmPath);
     const cached = this.documents.get(id);
     if (cached && cached.modelHash === hash && cached.vrmPath === vrmPath) return cached;
-    if (!cached && requireExisting) throw new Error('characters.yaml 缺少此角色，請還原設定');
-    const document: CharacterDocument = {
-      schemaVersion: 1, id, vrmPath, modelHash: hash,
-      parameters: cached?.parameters ?? characterParameters(initial),
-    };
+    if (!cached && requireExisting) throw new Error('共用角色資料庫缺少此角色，請還原設定');
+    const document: CharacterDocument = { schemaVersion: 1, id, vrmPath, modelHash: hash,
+      parameters: cached?.parameters ?? characterParameters(initial) };
     this.documents.set(id, document);
     this.dirty = true;
     return document;
@@ -125,28 +162,30 @@ export class CharacterStore {
     if (!document) throw new Error('請先喚醒寵物以載入角色設定');
     const next = characterParameters(parameters);
     if (JSON.stringify(next) === JSON.stringify(document.parameters)) return;
-    document.parameters = next;
+    this.documents.set(id, { ...document, parameters: next });
     this.dirty = true;
   }
-  flush(): void {
-    if (!this.loaded || !this.dirty) return;
-    const currentSignature = signature(this.filePath);
-    if (currentSignature === null) throw new Error('characters.yaml 已遺失，請還原檔案');
-    const raw = parseCharacterYaml(readFileSync(this.filePath, 'utf8')) as Record<string, unknown> | null;
-    if (!raw || raw.schemaVersion !== 3 || !Array.isArray(raw.characters)) throw new Error('角色 YAML 版本或清單無效');
-    const merged = new Map<string, CharacterDocument>();
-    for (const item of raw.characters) {
-      const document = parseStoredCharacter(item);
-      if (merged.has(document.id)) throw new Error('重複寵物 ID');
-      merged.set(document.id, document);
-    }
-    for (const [id, local] of this.documents) {
-      const value = mergeChanges(this.baseline.get(id), local, merged.get(id), id);
-      if (value !== undefined) merged.set(id, parseStoredCharacter(value));
-    }
-    writeCharacters(this.filePath, currentSignature, [...merged.values()]);
-    // 不把其他世界的修改熱套用到目前角色；下次喚醒才讀入。
-    this.baseline = structuredClone(this.documents);
+  discardChanges(): void {
+    this.documents = structuredClone(this.baseline);
     this.dirty = false;
+  }
+  /** 呼叫者必須持有寫入交易；回呼只可在 COMMIT 成功後執行。 */
+  writeInTransaction(db: Database.Database, schema: 'main' | 'shared'): () => void {
+    if (!this.dirty) return () => {};
+    if (!db.inTransaction) throw new Error('角色儲存需要交易');
+    const rows = db.prepare(`SELECT document FROM ${schema}.characters`).all() as { document: string }[];
+    const disk = new Map(rows.map(row => { const d = parseStoredCharacter(JSON.parse(row.document)); return [d.id, d]; }));
+    const insert = db.prepare(`INSERT INTO ${schema}.characters VALUES (?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document`);
+    for (const [id, local] of this.documents) {
+      const merged = mergeChanges(this.baseline.get(id), local, disk.get(id), id);
+      if (merged !== undefined) insert.run(id, JSON.stringify(parseStoredCharacter(merged)));
+    }
+    return () => { this.baseline = structuredClone(this.documents); this.dirty = false; };
+  }
+  flush(): void {
+    if (!this.dirty) return;
+    const db = this.open();
+    try { db.transaction(() => this.writeInTransaction(db, 'main')).immediate()(); }
+    finally { db.close(); }
   }
 }

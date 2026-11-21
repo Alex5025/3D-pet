@@ -26,7 +26,7 @@ export function configureInstance() {
   const document = parseDocument(readFileSync(path, 'utf8'), { uniqueKeys: true });
   if (document.errors.length || document.warnings.length) throw new Error(`啟動設定格式錯誤：${path}`);
   const config = document.toJS({ maxAliasCount: 0 });
-  if (!config || ![1, 2].includes(config.schemaVersion) || !Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) {
+  if (!config || ![1, 2, 3].includes(config.schemaVersion) || !Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) {
     throw new Error(`port 必須是 1024–65535 的整數：${path}`);
   }
   console.log(`[instance] worktree=${projectDir}\ndata=${directory}\nport=${config.port}\nconfig=${path}`);

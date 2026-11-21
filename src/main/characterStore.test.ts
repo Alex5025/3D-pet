@@ -23,6 +23,24 @@ async function run(): Promise<void> {
   for (const [id, path] of [['one', x], ['two', y]]) writeFileSync(join(runtime, 'pets', `${id}.json`), JSON.stringify({ id, name: id === 'one' ? '小狐狸' : '八重神子', wardrobe: { coat: id === 'one' }, lighting: { type: 'directional', ambient: 1.8, directional: id === 'one' ? 1.05 : 1, x: 0, y: 1, z: 2, shade: id === 'one' ? 0.25 : 0.15, temperature: id === 'one' ? 7000 : 6500 }, enabled: false, workspacePath: path, vrmPath: model, persona: id, agent: { kind: 'codex', sessionId: `old-${id}` } }));
   let decisions = 0;
   const choices: MigrationChoices = { model: async () => model, parameters: async () => { decisions++; return 'existing'; } };
+  // 舊工作區已刪除時仍能遷移，保留綁定、session 與對話內容，且不重建目錄。
+  const missingRuntime = join(root, 'missing', 'runtime-data');
+  const missingWorkspace = join(root, 'removed-workspace');
+  mkdirSync(join(missingRuntime, 'transcripts'), { recursive: true });
+  writeFileSync(join(missingRuntime, 'config.json'), JSON.stringify({
+    id: 'missing-pet', name: '離線角色', enabled: false, vrmPath: model,
+    workspacePath: missingWorkspace, agent: { kind: 'codex', sessionId: 'keep-session' },
+  }));
+  const transcript = JSON.stringify({ user: '保留對話', reply: '保留回覆', at: Date.now() });
+  writeFileSync(join(missingRuntime, 'transcripts', 'missing-pet.json'), transcript);
+  const missingStore = new SettingsStore(join(missingRuntime, 'app.yaml'));
+  const missing = await migrateSettings(missingStore, model, join(root, 'missing-characters.yaml'), choices);
+  assert.equal(missing.pets[0]?.workspacePath, missingWorkspace);
+  assert.equal(missing.pets[0]?.projects[0]?.agent?.sessionId, 'keep-session');
+  assert.equal(existsSync(missingWorkspace), false);
+  const transcriptKey = modelHash(Buffer.from(JSON.stringify(['missing-pet', missingWorkspace])));
+  assert.equal(readFileSync(join(missingRuntime, 'transcripts', `${transcriptKey}.json`), 'utf8'), transcript);
+  assert.deepEqual(await migrateSettings(new SettingsStore(missingStore.filePath), model, missing.charactersPath, choices), missing);
   const instanceA = new SettingsStore(join(root, 'A', 'runtime-data', 'app.yaml'));
   const a = await migrateSettings(instanceA, model, shared, choices, legacy);
   const id = a.pets[0]!.id;
@@ -53,9 +71,7 @@ async function run(): Promise<void> {
   storeA.update(id, { name: '小狐狸', persona: '舊版本' });
   assert.throws(() => storeA.flush(), /外部修改/);
   storeB.update(id, { name: '小狐狸', persona: '鎖測試' });
-  writeFileSync(`${shared}.lock`, String(process.pid));
-  assert.throws(() => storeB.flush(), /其他實例/);
-  const { unlinkSync } = await import('node:fs'); unlinkSync(`${shared}.lock`); storeB.flush();
+  storeB.flush();
   const independent = storeB.resolve(model, hash, { name: '另一隻', wardrobe: { coat: true } }, false, 'independent');
   storeB.flush(); storeB.loadForWake();
   assert.equal(storeB.get('two')?.parameters.name, '八重神子');
@@ -86,15 +102,16 @@ async function run(): Promise<void> {
   assert.equal(verified.get(id)!.parameters.name, '本地改名');
   assert.equal(verified.get(id)!.parameters.wardrobe!.coat, false);
   assert.equal(verified.get('two')!.parameters.persona, '另一角色外部個性');
-  const beforeConflict = readFileSync(mergePath, 'utf8');
+  const beforeConflict = readFileSync(verified.filePath);
   localStore.update(id, { ...localStore.get(id)!.parameters, persona: '本地不同個性' });
   assert.throws(() => localStore.flush(), /同一欄位/);
-  assert.equal(readFileSync(mergePath, 'utf8'), beforeConflict);
+  assert.deepEqual(readFileSync(verified.filePath), beforeConflict);
   // 正常啟動不讀角色檔；即使壞掉仍可取得本地專案清單，喚醒才回報錯誤。
-  writeFileSync(shared, 'characters: [');
+  const databaseBackup = readFileSync(storeB.filePath);
+  writeFileSync(storeB.filePath, 'not a database');
   assert.equal((await migrateSettings(new SettingsStore(instanceA.filePath), model, shared, choices)).pets.length, 2);
   assert.throws(() => new CharacterStore(shared).loadForWake());
-  writeFileSync(shared, sharedText);
+  writeFileSync(storeB.filePath, databaseBackup);
   // 同 ID 的真正版本衝突仍可取消，來源及共用檔皆不可被改動。
   const cancelRuntime = join(root, 'cancelled', 'runtime-data');
   cpSync(runtime, cancelRuntime, { recursive: true });
@@ -119,7 +136,19 @@ async function run(): Promise<void> {
   assert.equal(instanceA.load().pets[0]!.id, id);
   assert.equal(readFileSync(shared, 'utf8'), sharedBeforeAI);
   atomicYaml(instanceA.filePath, { ...bootRaw, port: 5174 });
-  assert.throws(() => instanceA.save({ locale: 'en' }), /外部修改/);
+  instanceA.save({ locale: 'en' });
+  assert.equal(instanceA.snapshot().port, 5173);
+  assert.equal(instanceA.load().port, 5174);
+  assert.equal(instanceA.load().locale, 'en');
+
+  // 新工作樹從已遷移基準複製專案，不改基準資料庫、不繼承 Session。
+  const baselineDatabase = join(root, 'A', 'runtime-data', 'history.sqlite');
+  const beforeBaseline = readFileSync(baselineDatabase);
+  const fromSqlite = await migrateSettings(new SettingsStore(join(root, 'C', 'runtime-data', 'app.yaml')),
+    model, shared, choices, join(root, 'A'));
+  assert.deepEqual(fromSqlite.pets.map(pet => pet.id), instanceA.load().pets.map(pet => pet.id));
+  assert.ok(fromSqlite.pets.every(pet => !pet.enabled && pet.projects.every(project => !project.agent?.sessionId)));
+  assert.deepEqual(readFileSync(baselineDatabase), beforeBaseline);
 
   // 真正透過 bridge + dispatcher 驗證串行、固定任務目錄與 session 分離。
   const mock = createMockProvider('codex');

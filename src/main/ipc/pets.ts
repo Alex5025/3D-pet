@@ -42,7 +42,7 @@ export function createIpcPets(deps: IpcPetsDeps) {
       getPet: deps.getPet,
       updatePet: async (id, patch) => {
         const { enabled, ...metadata } = patch;
-        if (Object.keys(metadata).length) deps.updatePet(id, metadata);
+        if (Object.keys(metadata).length && !deps.updatePet(id, metadata)) return null;
         return enabled === undefined ? deps.getPet(id) : deps.setPetEnabled(id, enabled);
       },
       createNewPet: () => deps.serializeCharacter(async () => {

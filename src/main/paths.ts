@@ -22,7 +22,7 @@ export function createPaths(deps: PathsDeps) {
 
   const productDataDir = (): string => join(app.getPath('appData'), 'VRM Pet');
 
-  const sharedAssetRoot = (): string => resolve(deps.characters.filePath) === resolve(productDataDir(), 'runtime-data', 'characters.yaml')
+  const sharedAssetRoot = (): string => resolve(deps.characters.filePath) === resolve(productDataDir(), 'runtime-data', 'characters.sqlite')
     ? productDataDir() : dirname(deps.characters.filePath);
 
   const modelsDir = (): string => join(sharedAssetRoot(), 'models');
