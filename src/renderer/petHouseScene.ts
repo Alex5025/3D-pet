@@ -1,86 +1,144 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
-const materialCache = new Map<number, THREE.MeshStandardMaterial>();
-function paint(color: number): THREE.MeshStandardMaterial {
-  let material = materialCache.get(color);
-  if (!material) {
-    material = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
-    materialCache.set(color, material);
-  }
-  return material;
+export type HouseActivity = 'flowers' | 'read' | 'tea' | 'stretch';
+export interface ActivitySpot {
+  position: THREE.Vector3;
+  facing: number;
+  activity: HouseActivity;
+  page?: THREE.Mesh;
+  cup?: THREE.Group;
+  cupRest?: THREE.Vector3;
 }
-function block(group: THREE.Group, x: number, y: number, z: number, w: number, h: number, d: number, color: number): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), paint(color));
-  mesh.position.set(x, y, z);
-  group.add(mesh);
-  return mesh;
-}
-
-export const readingSeat = new THREE.Vector3(-0.54, 0.44, -0.44);
-
-export const bookCenter = new THREE.Vector3(-0.54, 0.56, -0.13);
-
-export function createHouseScene(): THREE.Group {
+export function createHouseScene(count: number) {
   const room = new THREE.Group();
-  const wood = 0xa66340, lightWood = 0xcb8d59, pink = 0xf3aebb, blue = 0x9095cd;
-  block(room, 0, -0.10, 0, 3.30, 0.20, 2.90, 0x9cadd0);
-  block(room, 0, 0.015, 0, 3.25, 0.035, 2.85, 0xf7ded1);
-  block(room, 0, 1.13, -1.38, 3.3, 2.26, 0.10, pink);
-  block(room, -1.6, 1.13, 0, 0.10, 2.26, 2.85, 0xeaa0b8);
-  block(room, 0, 2.27, -1.38, 3.35, 0.05, 0.13, 0xffecd9);
-  block(room, -1.6, 2.27, 0, 0.13, 0.05, 2.9, 0xffecd9);
-  block(room, 0.30, 0.05, 0.72, 1.65, 0.02, 1.13, 0xe9a2ac);
-  block(room, 0.30, 0.064, 0.72, 1.44, 0.012, 0.94, 0xf6bdba);
-
-  // 沙發沿後牆，角色面向開口，膝上放一本攤開的書。
-  block(room, -0.56, 0.30, -0.56, 1.22, 0.20, 0.54, blue);
-  block(room, -0.56, 0.58, -0.81, 1.22, 0.48, 0.14, 0x7f86bb);
-  for (const x of [-1.14, 0.02]) block(room, x, 0.48, -0.55, 0.11, 0.29, 0.55, 0x818dc5);
-  const pillow = block(room, -0.94, 0.53, -0.67, 0.28, 0.27, 0.12, 0x8bd2d9);
-  pillow.rotation.z = -0.22;
-  block(room, -0.58, 0.22, 0.38, 0.92, 0.09, 0.45, lightWood);
-  for (const x of [-0.94, -0.22]) block(room, x, 0.12, 0.38, 0.06, 0.21, 0.32, wood);
-
-  // 窗、書桌、書架與燈皆以低面數幾何建模，不封裝參考圖片。
-  block(room, 0.90, 1.51, -1.31, 0.87, 0.62, 0.05, lightWood);
-  block(room, 0.90, 1.51, -1.273, 0.75, 0.49, 0.024, 0x87a6c9);
-  block(room, 0.90, 1.51, -1.253, 0.76, 0.038, 0.02, 0xf7ccb1);
-  block(room, 0.93, 0.59, -0.98, 1.08, 0.10, 0.51, lightWood);
-  for (const x of [0.47, 1.39]) block(room, x, 0.29, -0.98, 0.09, 0.59, 0.44, wood);
-  block(room, 0.96, 0.66, -0.94, 0.35, 0.025, 0.24, 0xece5f4);
-  block(room, 0.96, 0.77, -1.07, 0.35, 0.22, 0.035, 0x90c1d1);
-  for (const x of [-1.37, -0.86]) block(room, x, 0.92, -1.10, 0.06, 1.84, 0.39, wood);
-  for (const y of [0.15, 0.57, 0.99, 1.41, 1.81]) {
-    block(room, -1.115, y, -1.1, 0.56, 0.055, 0.39, lightWood);
-    if (y < 1.8) for (let i = 0; i < 5; i++) {
-      const h = 0.15 + 0.02 * (i % 4);
-      block(room, -1.28 + 0.075 * i, y + h / 2 + 0.029, -1.08, 0.054, h, 0.16,
-        [0x955a61, 0xdeac80, 0x7e93b4, 0xf0d3a5, 0x9879ab][i]);
+  const total = Math.max(6, count * 2);
+  const radius = Math.max(1.45, total * 0.21);
+  const width = radius * 2 + 1.75, depth = radius * 1.5 + 1.65;
+  const columns = Math.max(2, Math.round(width / 1.65));
+  const back = -depth / 2 + 0.18;
+  const brass = 0xac7843, sage = 0x42665b, cream = 0xffe1ac;
+  function mesh(geometry: THREE.BufferGeometry, color: number, x: number, y: number, z: number) {
+    const m = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.78 }));
+    m.position.set(x, y, z);
+    room.add(m);
+    return m;
+  }
+  function slab(x: number, y: number, z: number, w: number, h: number, d: number, color: number) {
+    return mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d, 0.16) * 0.48), color, x, y, z);
+  }
+  function orb(x: number, y: number, z: number, w: number, h: number, d: number, color: number) {
+    const m = mesh(new THREE.SphereGeometry(1, 14, 10), color, x, y, z);
+    m.scale.set(w, h, d);
+    return m;
+  }
+  function rod(x: number, y: number, z: number, radius: number, height: number, color: number) {
+    return mesh(new THREE.CylinderGeometry(radius, radius, height, 16), color, x, y, z);
+  }
+  slab(0, -0.14, 0, width, 0.25, depth, sage);
+  slab(0, -0.045, 0, width + 0.018, 0.032, depth + 0.018, brass);
+  slab(0, 0, 0, width - 0.06, 0.09, depth - 0.06, 0xdbb388);
+  // 木板接縫與短紋在透明桌布上也能讀出平台厚度。
+  for (let z = -depth / 2 + 0.24; z < depth / 2 - 0.08; z += 0.22) {
+    slab(0, 0.046, z, width - 0.18, 0.007, 0.012, 0xb88962);
+  }
+  const spots: ActivitySpot[] = [];
+  const activities: HouseActivity[] = ['flowers', 'read', 'stretch', 'tea'];
+  for (let i = 0; i < total; i++) {
+    const angle = i * 2 * Math.PI / total + 0.3;
+    const dx = Math.sin(angle), dz = Math.cos(angle);
+    const position = new THREE.Vector3(radius * dx, 0.06, radius * 0.75 * dz);
+    const activity = activities[i % activities.length]!;
+    const spot: ActivitySpot = { position, facing: angle, activity };
+    spots.push(spot);
+    const x = position.x + dx * 0.43, z = position.z + dz * 0.43;
+    if (activity === 'stretch') continue;
+    rod(x, 0.28, z, 0.065, 0.44, brass);
+    rod(x, 0.10, z, 0.18, 0.08, sage);
+    rod(x, 0.53, z, 0.26, 0.07, 0xb88861);
+    if (activity === 'flowers') {
+      rod(x, 0.64, z, 0.12, 0.18, 0xc88268);
+      for (let k = 0; k < 5; k++) {
+        const fx = x + 0.09 * Math.cos(k * 2.4), fz = z + 0.09 * Math.sin(k * 2.4);
+        const h = 0.14 + 0.055 * (k % 3);
+        rod(fx, 0.72 + h / 2, fz, 0.009, h, sage);
+        orb(fx, 0.72 + h, fz, 0.065, 0.043, 0.065, k % 2 ? 0xebac91 : 0xe1bf79);
+      }
+    } else if (activity === 'read') {
+      for (const side of [-1, 1]) {
+        const page = slab(x + side * 0.09 * dz, 0.605, z - side * 0.09 * dx, 0.19, 0.035, 0.25, cream);
+        if (side === 1) spot.page = page;
+        page.rotation.order = 'YXZ'; page.rotation.y = angle; page.rotation.z = -side * 0.15;
+      }
+    } else {
+      rod(x, 0.58, z, 0.115, 0.02, cream);
+      const cup = new THREE.Group();
+      cup.position.set(x, 0.65, z);
+      room.add(cup);
+      cup.attach(rod(x, 0.65, z, 0.073, 0.12, 0xeed6b3));
+      cup.attach(rod(x, 0.713, z, 0.062, 0.006, 0x83553a));
+      spot.cup = cup;
+      spot.cupRest = cup.position.clone();
+      orb(x + 0.15, 0.65, z + 0.07, 0.09, 0.08, 0.09, sage);
     }
   }
-  const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.145, 0.20, 0.17, 14),
-    new THREE.MeshStandardMaterial({ color: 0xffe4aa, emissive: 0xffbe68, emissiveIntensity: 0.7 }));
-  lamp.position.set(-1.28, 0.99, 0.10);
-  room.add(lamp);
-  block(room, -1.28, 0.47, 0.10, 0.035, 0.94, 0.035, wood);
-  block(room, -1.28, 0.052, 0.10, 0.22, 0.045, 0.22, lightWood);
-  for (const [x, z] of [[1.17, 0.53], [-1.18, 0.99]]) {
-    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.14, 10), paint(0xcc7a6d));
-    pot.position.set(x, 0.09, z);
-    room.add(pot);
-    for (let i = 0; i < 3; i++) {
-      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.125, 10, 6), paint(i === 1 ? 0x7caf8e : 0x5f9674));
-      leaf.position.set(x + (i - 1) * 0.085, 0.26 + (i % 2) * 0.07, z);
-      leaf.scale.set(0.65, 1, 0.65);
-      leaf.rotation.z = (i - 1) * -0.42;
-      room.add(leaf);
+  const wallY = 1.48;
+  const span = (width - 0.42) / columns;
+  for (let i = 0; i < columns; i++) {
+    const x = (i - (columns - 1) / 2) * span, r = span / 2;
+    // 拱窗的半透明玻璃讓桌布自然透出。
+    const pane = new THREE.Shape();
+    pane.moveTo(-r, 0); pane.lineTo(r, 0); pane.lineTo(r, wallY);
+    pane.absarc(0, wallY, r, 0, Math.PI, false); pane.closePath();
+    const glass = mesh(new THREE.ShapeGeometry(pane), 0x80bbab, x, 0.04, back);
+    // 暖色山景彩繪玻璃：按整面窗的座標取樣，讓相鄰拱窗接成同一片風景。
+    const canvas = document.createElement('canvas');
+    canvas.width = 192; canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const sky = ctx.createLinearGradient(0, 0, 0, 256);
+    sky.addColorStop(0, '#85a6b4'); sky.addColorStop(0.46, '#f1c9a9'); sky.addColorStop(1, '#f7dbaf');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, 192, 256);
+    if (i === columns - 1) {
+      ctx.fillStyle = '#fff0bf'; ctx.beginPath(); ctx.arc(80, 83, 25, 0, Math.PI * 2); ctx.fill();
+    }
+    for (const [layer, shade] of ['#b1b5a9', '#839e95', '#66867d'].entries()) {
+      ctx.fillStyle = shade; ctx.beginPath(); ctx.moveTo(0, 256);
+      for (let px = 0; px <= 192; px++) {
+        const u = (px / 192 + i) * 2.8;
+        ctx.lineTo(px, 126 + layer * 29 + 22 * Math.sin(u + layer * 2) + 9 * Math.cos(2.6 * u + layer));
+      }
+      ctx.lineTo(192, 256); ctx.fill();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const uv = glass.geometry.getAttribute('uv');
+    for (let v = 0; v < uv.count; v++) uv.setXY(v, (uv.getX(v) + r) / span, uv.getY(v) / (wallY + r));
+    glass.material.map = texture; glass.material.color.setHex(0xffffff);
+    glass.material.transparent = true; glass.material.opacity = 0.88; glass.material.depthWrite = false;
+    mesh(new THREE.TorusGeometry(r, 0.034, 8, 40, Math.PI), sage, x, wallY, back + 0.02);
+    rod(x - r, wallY / 2, back + 0.02, 0.039, wallY, sage);
+    rod(x, (wallY + r) / 2, back + 0.025, 0.016, wallY + r, brass);
+    slab(x, wallY, back + 0.03, span, 0.045, 0.045, sage);
+    const cord = 0.24 + (i % 2) * 0.11;
+    rod(x, wallY + r - cord / 2, back + 0.09, 0.012, cord, brass);
+    const light = orb(x, wallY + r - cord - 0.09, back + 0.1, 0.095, 0.12, 0.095, cream);
+    light.material.emissive.setHex(0xffbb66); light.material.emissiveIntensity = 0.55;
+  }
+  rod(span * columns / 2, wallY / 2, back + 0.02, 0.039, wallY, sage);
+  for (const side of [-1, 1]) {
+    const x = side * (width / 2 - 0.24), z = back + 0.44;
+    mesh(new THREE.CylinderGeometry(0.19, 0.13, 0.32, 12), 0xb26d52, x, 0.20, z);
+    for (let k = 0; k < 7; k++) {
+      const angle = k * 2.4;
+      const leaf = orb(x + 0.12 * Math.cos(angle), 0.48 + k * 0.052, z + 0.10 * Math.sin(angle),
+        0.075, 0.19, 0.08, [0x49775d, 0x779564, 0x96aa74][k % 3]!);
+      leaf.rotation.z = -0.6 * Math.cos(angle);
+      if (k % 2 === 0) orb(leaf.position.x, leaf.position.y + 0.15, leaf.position.z, 0.065, 0.055, 0.065, 0xe6a68c);
     }
   }
-
-  const { x, y, z } = bookCenter;
-  const book = block(room, x, y, z, 0.29, 0.044, 0.21, 0xa24d6f);
-  book.rotation.x = 0.17;
-  block(room, x - 0.06, y + 0.024, z + 0.005, 0.12, 0.024, 0.19, 0xffe8d0).rotation.x = 0.17;
-  block(room, x + 0.06, y + 0.024, z + 0.005, 0.12, 0.024, 0.19, 0xf9dcbf).rotation.x = 0.17;
-  return room;
+  // 前緣鋪編織地毯，留出角色腿部空間。
+  const front = depth / 2 - 0.31;
+  slab(0, 0.061, front, width - 0.68, 0.025, 0.42, 0xb97965);
+  for (const dz of [-0.14, 0.14]) slab(0, 0.078, front + dz, width - 0.8, 0.012, 0.025, cream);
+  return { room, spots };
 }

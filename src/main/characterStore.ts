@@ -125,6 +125,16 @@ export class CharacterStore {
   readonly filePath: string;
   constructor(readonly sourcePath: string) { this.filePath = characterDatabasePath(sourcePath); }
   get(id: string): CharacterDocument | undefined { return this.documents.get(id); }
+  /** 只讀取休息區的外觀，不觸發喚醒或更新角色快取。 */
+  readRestingAppearance(id: string) {
+    const db = new Database(this.filePath, { readonly: true });
+    try {
+      const row = db.prepare('SELECT document FROM characters WHERE id = ?').get(id) as { document: string } | undefined;
+      if (!row) return null;
+      const doc = parseStoredCharacter(JSON.parse(row.document));
+      return { path: doc.vrmPath, wardrobe: doc.parameters.wardrobe ?? {} };
+    } finally { db.close(); }
+  }
   all(): CharacterDocument[] { return [...this.documents.values()]; }
   get hasChanges(): boolean { return this.dirty; }
   private open(): Database.Database {

@@ -6,8 +6,6 @@ import type { AppRegistry, PetProfile } from './runtimeTypes';
 
 export interface TrayDeps {
   readonly registry: AppRegistry;
-  readonly housePet: () => string | null;
-  readonly toggleHouse: (id: string) => void;
   readonly getPet: (id?: string | undefined) => PetProfile | null;
   readonly pets: Map<string, PetProfile>;
   readonly selectPet: (id: string) => PetProfile | null;
@@ -59,11 +57,6 @@ export function createTray(deps: TrayDeps) {
         }))
       },
       { type: 'separator' },
-      ...(process.platform === 'darwin' ? [{
-        label: deps.housePet() ? t('tray.houseRecall') : t('tray.houseRead'),
-        enabled: profile.enabled || !!deps.housePet(),
-        click: () => deps.toggleHouse(petId),
-      }] : []),
       { label: t('tray.chooseVrm'), click: () => void deps.chooseVrm(petId) },
       {
         label: t('tray.motions'),

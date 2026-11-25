@@ -54,6 +54,11 @@ export function createLifecycle(deps: LifecycleDeps) {
   function start() {
     if (!scope.start()) return;
 
+    if (process.env['ELECTRON_RENDERER_URL'] && !app.isPackaged && process.platform !== 'win32') {
+      // 開發啟動器要求重啟時先保存資料；Vite 結束後無法再載入離開確認視窗。
+      scope.listen(process, 'SIGTERM', () => { shutdownSync(); app.exit(0); });
+    }
+
     scope.listen(app, 'window-all-closed', () => { /* 常駐 */ });
 
     scope.listen(app, 'before-quit', (event: Electron.Event) => {

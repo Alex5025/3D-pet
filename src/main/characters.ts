@@ -30,6 +30,7 @@ export interface CharactersDeps {
   readonly win: BrowserWindow | null;
   readonly controlWin: BrowserWindow | null;
   readonly scheduleControlStatus: (() => void);
+  readonly syncHouse?: () => void;
   readonly refreshTray: () => void;
   readonly clearTranscript: ((petId: string) => void);
   readonly cancelIdleMotion: (id: string) => void;
@@ -303,6 +304,7 @@ export function createCharacters(deps: CharactersDeps) {
   }
 
   function sendPetProfiles(): void {
+    deps.syncHouse?.();
     const profiles = [...pets.values()];
     deps.win?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);
     deps.settingsWin?.webContents.send('pet-profiles-apply', profiles, registry.selectedPetId);

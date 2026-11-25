@@ -1,6 +1,6 @@
 {
   "name": "vrm-pet",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Desktop VRM pet — rendering follows pixiv/three-vrm official examples verbatim",
   "productName": "VRM Pet",
   "author": "3D-pet contributors",
@@ -24,7 +24,10 @@
     "test:codex": "node scripts/test-codex-approvals.mjs",
     "postinstall": "electron-builder install-app-deps",
     "test:storage": "node scripts/test-storage.mjs",
-    "test:storage-startup": "npm run build && node scripts/verify-storage-startup.mjs"
+    "test:storage-startup": "npm run build && node scripts/verify-storage-startup.mjs",
+    "postdist:mac": "node scripts/archive-builds.mjs mac",
+    "postdist:win": "node scripts/archive-builds.mjs win",
+    "postdist": "node scripts/archive-builds.mjs"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -40,7 +43,7 @@
     "asar": true,
     "icon": "build/icon.png",
     "directories": {
-      "output": "release"
+      "output": "release/${version}/${os}"
     },
     "files": [
       "out/**",

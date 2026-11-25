@@ -40,7 +40,7 @@ export default defineConfig(({ command }) => ({
     }
   },
   renderer: {
-    server: command === 'serve' ? { host: '127.0.0.1', port: configureInstance(), strictPort: true } : undefined,
+    server: command === 'serve' ? { host: '127.0.0.1', port: configureInstance(), strictPort: false } : undefined,
     root: resolve(__dirname, 'src/renderer'),
     publicDir: false,
     plugins: [defaultVrmPlugin()],

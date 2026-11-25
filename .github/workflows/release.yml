@@ -1,0 +1,26 @@
+name: 發行 macOS 安裝包
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 確認版本
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      - run: npm ci
+      - run: npm run dist:mac -- --arm64 --publish never
+      - name: 發布安裝包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "release/${GITHUB_REF_NAME#v}/mac"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "VRM Pet $GITHUB_REF_NAME" --generate-notes ./*.dmg ./*.zip

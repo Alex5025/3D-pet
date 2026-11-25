@@ -31,6 +31,7 @@ const paths: Paths = createPaths({
   get getPet() { return characters.getPet; },
 });
 const characters: Characters = createCharacters({
+  syncHouse: () => petHouse.sync(),
   get runtimeDataDir() { return paths.runtimeDataDir; },
   get history() { return paths.history; },
   get settingsWin() { return windows.settingsWin; },
@@ -54,14 +55,11 @@ const windows: Windows = createWindows({
   get registry() { return characters.registry; },
 });
 const petHouse = createPetHouse({
-  get overlay() { return windows.win; },
-  get getPet() { return characters.getPet; },
+  get pets() { return characters.pets; },
+  appearance: (id) => characters.characters.readRestingAppearance(id),
   get defaultVrmPath() { return paths.defaultVrmPath; },
-  refresh: () => tray.refreshTray(),
 });
 const tray: TrayService = createTray({
-  housePet: () => petHouse.petId,
-  toggleHouse: (id) => petHouse.toggle(id),
   get registry() { return characters.registry; },
   get getPet() { return characters.getPet; },
   get pets() { return characters.pets; },
